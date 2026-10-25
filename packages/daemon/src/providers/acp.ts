@@ -3,7 +3,15 @@ import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import type { ConfigOption, ProviderId } from "@upbot/protocol";
 import { resolveCommand, spawnEnv } from "../env/login-path";
-import { AUTH_RE, authMessage, commandFor, redactSecrets, STDERR_TAIL_LINES } from "./process";
+import {
+  AUTH_RE,
+  authMessage,
+  commandFor,
+  isVmCredentialRejection,
+  redactCredential,
+  STDERR_TAIL_LINES,
+  vmCredentialRejectedMessage,
+} from "./process";
 import {
   type McpServerSpec,
   type NormalizedUpdate,
@@ -18,6 +26,91 @@ function isAuthError(e: unknown): boolean {
   const err = e as { code?: number; message?: string };
   if (err?.code === -32000) return true;
   return AUTH_RE.test(err?.message ?? "");
+}
+
+async function boundedRequest<T>(
+  provider: ProviderId,
+  method: string,
+  request: Promise<T>,
+  timeoutMs = 15000,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      request,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${provider} ${method} timed out after ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function errorDetail(e: unknown): string {
+  const err = e as { message?: unknown; data?: { message?: unknown; detail?: unknown } } | null;
+  const details = [err?.message, err?.data?.message, err?.data?.detail]
+    .filter((part): part is string => typeof part === "string" && part.length > 0)
+    .map((part) => {
+      let detail = part;
+      for (let i = 0; i < 3; i += 1) {
+        try {
+          const parsed = JSON.parse(detail) as {
+            error?: { message?: unknown } | string;
+            message?: unknown;
+          };
+          const nested =
+            typeof parsed.error === "object" && parsed.error !== null
+              ? parsed.error.message
+              : typeof parsed.message === "string"
+                ? parsed.message
+                : parsed.error;
+          if (typeof nested !== "string" || nested === detail) break;
+          detail = nested;
+        } catch {
+          break;
+        }
+      }
+      return detail;
+    });
+  return details.join(": ");
+}
+
+export function mapAcpAuthError(
+  provider: ProviderId,
+  error: unknown,
+  credential: string | null,
+): ProviderError | null {
+  const detail = errorDetail(error);
+  if (credential && isVmCredentialRejection(detail)) {
+    return new ProviderError(
+      "auth_required",
+      vmCredentialRejectedMessage(provider, detail, credential),
+    );
+  }
+  if (
+    credential &&
+    provider === "cursor" &&
+    /failed to initialize session services/i.test(detail)
+  ) {
+    return new ProviderError(
+      "auth_required",
+      vmCredentialRejectedMessage(provider, detail, credential),
+    );
+  }
+  if (provider === "opencode" && /session\/(?:new|prompt) timed out/i.test(detail)) {
+    return new ProviderError("auth_required", authMessage(provider, ""));
+  }
+  if (isAuthError(error)) {
+    return new ProviderError(
+      "auth_required",
+      authMessage(provider, redactCredential(detail, credential)),
+    );
+  }
+  return null;
 }
 
 type RawConfigOption = {
@@ -163,6 +256,8 @@ class AcpSession implements ProviderSession {
     private conn: acp.ClientConnection,
     private child: ChildProcess,
     private hooks: ProviderHooks,
+    private provider: ProviderId,
+    private credential: string | null,
   ) {}
 
   async setConfigOption(configId: string, value: string): Promise<ConfigOption[]> {
@@ -177,13 +272,25 @@ class AcpSession implements ProviderSession {
   }
 
   async prompt(text: string): Promise<{ stopReason: string }> {
-    const res = (await this.conn.agent.request("session/prompt", {
-      sessionId: this.sessionId,
-      prompt: [{ type: "text", text }],
-    } as never)) as {
+    let res: {
       stopReason?: string;
       usage?: { inputTokens?: number; outputTokens?: number };
     };
+    try {
+      res = (await boundedRequest(
+        this.provider,
+        "session/prompt",
+        this.conn.agent.request("session/prompt", {
+          sessionId: this.sessionId,
+          prompt: [{ type: "text", text }],
+        } as never),
+        this.provider === "opencode" ? 20000 : 60000,
+      )) as typeof res;
+    } catch (e) {
+      const authError = mapAcpAuthError(this.provider, e, this.credential);
+      if (authError) throw authError;
+      throw e;
+    }
     if (res.usage) {
       this.hooks.onUpdate({
         type: "usage",
@@ -239,6 +346,7 @@ export class AcpDriver implements ProviderDriver {
     }
 
     const stderrLines: string[] = [];
+    const credential = Object.values(opts.remote?.credentials ?? {})[0] ?? null;
     const child = opts.remote
       ? opts.remote.spawn([bin, ...cmd.slice(1)], { NO_COLOR: "1", ...opts.remote.credentials })
       : spawn(bin, cmd.slice(1), {
@@ -258,7 +366,10 @@ export class AcpDriver implements ProviderDriver {
     child.on("exit", (code, signal) => {
       exited = true;
       if (!closedByUs) {
-        const tail = redactSecrets(stderrLines.slice(-STDERR_TAIL_LINES).join("\n")).trim();
+        const tail = redactCredential(
+          stderrLines.slice(-STDERR_TAIL_LINES).join("\n"),
+          credential,
+        ).trim();
         hooks.onExit(
           `process exited (code ${code ?? "null"}, signal ${signal ?? "null"})${tail ? `: ${tail}` : ""}`,
         );
@@ -306,22 +417,24 @@ export class AcpDriver implements ProviderDriver {
 
     const init = async () => {
       try {
-        return (await conn.agent.request("initialize", {
-          protocolVersion: acp.PROTOCOL_VERSION,
-          clientCapabilities: {
-            fs: { readTextFile: false, writeTextFile: false },
-            terminal: false,
-          },
-          clientInfo: { name: "upbot", version: "0.3.0" },
-        } as never)) as {
+        return (await boundedRequest(
+          this.provider,
+          "initialize",
+          conn.agent.request("initialize", {
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {
+              fs: { readTextFile: false, writeTextFile: false },
+              terminal: false,
+            },
+            clientInfo: { name: "upbot", version: "0.3.0" },
+          } as never),
+        )) as {
           agentCapabilities?: { loadSession?: boolean };
+          authMethods?: unknown[];
         };
       } catch (e) {
-        if (isAuthError(e))
-          throw new ProviderError(
-            "auth_required",
-            authMessage(this.provider, (e as { message?: string })?.message ?? ""),
-          );
+        const authError = mapAcpAuthError(this.provider, e, credential);
+        if (authError) throw authError;
         throw e;
       }
     };
@@ -331,10 +444,18 @@ export class AcpDriver implements ProviderDriver {
       initRes = await init();
     } catch (e) {
       closedByUs = true;
+      try {
+        conn.close();
+      } catch {}
       child.kill("SIGKILL");
       if (e instanceof ProviderError) throw e;
+      const authError = mapAcpAuthError(this.provider, e, credential);
+      if (authError) throw authError;
       if (exited) {
-        const tail = redactSecrets(stderrLines.slice(-STDERR_TAIL_LINES).join("\n")).trim();
+        const tail = redactCredential(
+          stderrLines.slice(-STDERR_TAIL_LINES).join("\n"),
+          credential,
+        ).trim();
         throw new ProviderError(
           "provider_unavailable",
           `${this.provider} failed to start${tail ? `: ${tail}` : ""}`,
@@ -349,37 +470,82 @@ export class AcpDriver implements ProviderDriver {
     let sessionId: string;
     let resumed = false;
     let rawConfig: ConfigOption[] = [];
-    if (resumeSessionId && initRes.agentCapabilities?.loadSession === true) {
-      try {
-        loading = true;
-        const lr = (await conn.agent.request("session/load", {
-          sessionId: resumeSessionId,
-          cwd,
-          mcpServers,
-        } as never)) as { configOptions?: unknown };
-        rawConfig = normalizeConfigOptions(lr ?? {});
-        sessionId = resumeSessionId;
-        resumed = true;
-      } catch {
-        const res = (await conn.agent.request("session/new", {
-          cwd,
-          mcpServers,
-        } as never)) as { sessionId: string; configOptions?: unknown };
+    try {
+      if (resumeSessionId && initRes.agentCapabilities?.loadSession === true) {
+        try {
+          loading = true;
+          const lr = (await boundedRequest(
+            this.provider,
+            "session/load",
+            conn.agent.request("session/load", {
+              sessionId: resumeSessionId,
+              cwd,
+              mcpServers,
+            } as never),
+          )) as { configOptions?: unknown };
+          rawConfig = normalizeConfigOptions(lr ?? {});
+          sessionId = resumeSessionId;
+          resumed = true;
+        } catch {
+          const res = (await boundedRequest(
+            this.provider,
+            "session/new",
+            conn.agent.request("session/new", {
+              cwd,
+              mcpServers,
+            } as never),
+          )) as { sessionId: string; configOptions?: unknown };
+          sessionId = res.sessionId;
+          rawConfig = normalizeConfigOptions(res);
+        } finally {
+          loading = false;
+        }
+      } else {
+        const res = (await boundedRequest(
+          this.provider,
+          "session/new",
+          conn.agent.request("session/new", {
+            cwd,
+            mcpServers,
+          } as never),
+        )) as { sessionId: string; configOptions?: unknown };
         sessionId = res.sessionId;
         rawConfig = normalizeConfigOptions(res);
-      } finally {
-        loading = false;
       }
-    } else {
-      const res = (await conn.agent.request("session/new", {
-        cwd,
-        mcpServers,
-      } as never)) as { sessionId: string; configOptions?: unknown };
-      sessionId = res.sessionId;
-      rawConfig = normalizeConfigOptions(res);
+    } catch (e) {
+      closedByUs = true;
+      try {
+        conn.close();
+      } catch {}
+      child.kill("SIGKILL");
+      const authError = mapAcpAuthError(this.provider, e, credential);
+      if (authError) throw authError;
+      if (exited) {
+        const tail = redactCredential(
+          stderrLines.slice(-STDERR_TAIL_LINES).join("\n"),
+          credential,
+        ).trim();
+        throw new ProviderError(
+          "provider_unavailable",
+          `${this.provider} failed to start${tail ? `: ${tail}` : ""}`,
+        );
+      }
+      const detail = errorDetail(e);
+      throw new ProviderError(
+        "provider_unavailable",
+        `${this.provider} session startup failed${detail ? `: ${redactCredential(detail, credential)}` : ""}`,
+      );
     }
 
-    const session = new AcpSession(sessionId, resumed, conn, child, hooks);
+    const session = new AcpSession(
+      sessionId,
+      resumed,
+      conn,
+      child,
+      hooks,
+      this.provider,
+      credential,
+    );
     session.configOptions = rawConfig;
     const origClose = session.close.bind(session);
     session.close = async () => {
