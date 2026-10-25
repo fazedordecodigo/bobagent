@@ -13,7 +13,7 @@
     },
     "apps/desktop": {
       "name": "@upbot/desktop",
-      "version": "0.2.1",
+      "version": "0.3.0",
       "dependencies": {
         "@tauri-apps/api": "2.12.4",
         "@tauri-apps/plugin-updater": "2.14.0",
@@ -33,7 +33,7 @@
     },
     "packages/daemon": {
       "name": "@upbot/daemon",
-      "version": "0.2.1",
+      "version": "0.3.0",
       "dependencies": {
         "@agentclientprotocol/sdk": "1.9.0",
         "@modelcontextprotocol/sdk": "1.30.0",
@@ -52,7 +52,7 @@
     },
     "packages/host": {
       "name": "@upbot/host",
-      "version": "0.2.1",
+      "version": "0.3.0",
       "devDependencies": {
         "@types/bun": "1.4.3",
       },
@@ -66,7 +66,7 @@
     },
     "packages/relay": {
       "name": "@upbot/relay",
-      "version": "0.2.1",
+      "version": "0.3.0",
       "devDependencies": {
         "@types/bun": "1.4.3",
       },

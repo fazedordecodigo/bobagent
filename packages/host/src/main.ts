@@ -733,7 +733,7 @@ async function bridge() {
           result: {
             protocolVersion: v ?? "2025-06-18",
             capabilities: { tools: {} },
-            serverInfo: { name: "upbot", version: "0.2.1" },
+            serverInfo: { name: "upbot", version: "0.3.0" },
           },
         });
       } else if (m.method === "ping") send({ jsonrpc: "2.0", id: m.id, result: {} });
@@ -765,6 +765,6 @@ if (import.meta.main) {
   else if (cmd === "run") await run();
   else if (cmd === "bridge") await bridge();
   else if (cmd === "guest-exec") await guestExec();
-  else if (cmd === "version") process.stdout.write("upbot-host 0.2.1\n");
+  else if (cmd === "version") process.stdout.write("upbot-host 0.3.0\n");
   else die("usage: upbot-host preflight|run|bridge|guest-exec|version", 2);
 }

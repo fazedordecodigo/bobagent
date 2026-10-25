@@ -312,7 +312,7 @@ export class AcpDriver implements ProviderDriver {
             fs: { readTextFile: false, writeTextFile: false },
             terminal: false,
           },
-          clientInfo: { name: "upbot", version: "0.2.1" },
+          clientInfo: { name: "upbot", version: "0.3.0" },
         } as never)) as {
           agentCapabilities?: { loadSession?: boolean };
         };
