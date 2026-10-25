@@ -25,6 +25,11 @@ Built with Bun (daemon, relay), SQLite, Tauri 2 (Rust) and React.
 Download the latest `.dmg` from [Releases](https://github.com/fazedordecodigo/bobagent/releases).
 The app updates itself from there.
 
+Builds are not yet notarized by Apple. On first launch macOS says it can't verify the app:
+open System Settings → Privacy & Security and click **Open Anyway** (or run
+`xattr -cr /Applications/BobAgent.app`). Versions before 0.2.1 were reported as "damaged";
+use the `xattr` command for those.
+
 ## Remote hosts and Firecracker microVMs
 
 Settings → Hosts adds a VPS (`user@host`, port, optional identity file). BobAgent uses your
