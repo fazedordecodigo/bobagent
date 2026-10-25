@@ -153,4 +153,13 @@ export const migrations: string[] = [
     updated_at INTEGER NOT NULL,
     deleted_at INTEGER
   )`,
+  // 12: paired mobile devices (token stored as sha256)
+  `CREATE TABLE mobile_devices (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    token_hash TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_seen_at INTEGER,
+    revoked_at INTEGER
+  )`,
 ];

@@ -15,6 +15,7 @@ import { GatewayService } from "./gateways";
 import { Marketplace } from "./marketplace";
 import { runMcpBridge } from "./mcp-bridge";
 import { MemoryStore } from "./memories";
+import { MobileServer } from "./mobile";
 import { RoutineService } from "./routines";
 import { Rpc } from "./rpc";
 import { RuntimeManager } from "./runtime/runtime-manager";
@@ -128,6 +129,7 @@ async function main() {
         ws.send(msg);
       } catch {}
     }
+    mobile.onEvent(event, data);
     if (event === "turn.ended") {
       const turn = data as import("@bobagent/protocol").Turn;
       queueMicrotask(() => {
@@ -169,6 +171,7 @@ async function main() {
   bridge.vault = vault;
   bridge.connectors = new Connectors(vault);
   bridge.computer = computer;
+  const mobile = new MobileServer(db);
   const gateways = new GatewayService(db, store, chat, () => runtimes, vault, broadcast);
   const rpc = new Rpc(
     store,
@@ -181,7 +184,7 @@ async function main() {
     skills,
     routines,
     browser,
-    { vault, computer, voice, gateways, marketplace: new Marketplace(db, skills, store) },
+    { vault, computer, voice, gateways, marketplace: new Marketplace(db, skills, store), mobile },
   );
 
   // warm the login-shell PATH cache so provider CLIs resolve like in a terminal
@@ -284,6 +287,8 @@ async function main() {
   routines.baseUrl = `http://127.0.0.1:${server.port}`;
   routines.start();
   gateways.startAll();
+  mobile.rpc = (raw) => rpc.handle(raw);
+  mobile.start();
   console.log(`BOBAGENT_READY {"port":${server.port}}`);
   log(`listening on 127.0.0.1:${server.port}, data dir ${dataDir}`);
 

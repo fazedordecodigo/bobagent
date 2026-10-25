@@ -361,6 +361,22 @@ export const SkillSaveParams = z
   })
   .strict();
 
+// ---- Mobile companion ----
+
+export const MobileDevice = z.object({
+  id: z.string(),
+  name: z.string(),
+  createdAt: z.number(),
+  lastSeenAt: z.number().nullable(),
+});
+export type MobileDevice = z.infer<typeof MobileDevice>;
+export const MobileStatus = z.object({
+  enabled: z.boolean(),
+  urls: z.array(z.string()),
+  devices: z.array(MobileDevice),
+});
+export type MobileStatus = z.infer<typeof MobileStatus>;
+
 // ---- Marketplace ----
 
 export const MarketplaceItem = z.object({
@@ -550,6 +566,16 @@ export const methodMap = {
   "permissions.list": { params: PermissionsListParams, result: PermissionsListResult },
   "permissions.respond": { params: PermissionsRespondParams, result: PermissionsRespondResult },
   "agents.usage": { params: AgentsUsageParams, result: AgentUsage },
+  "mobile.status": { params: z.object({}).strict(), result: MobileStatus },
+  "mobile.enable": { params: z.object({ enabled: z.boolean() }).strict(), result: MobileStatus },
+  "mobile.pair": {
+    params: z.object({}).strict(),
+    result: z.object({ code: z.string(), expiresAt: z.number() }),
+  },
+  "mobile.revoke": {
+    params: z.object({ id: z.string() }).strict(),
+    result: z.object({ ok: z.literal(true) }),
+  },
   "marketplace.list": {
     params: z.object({}).strict(),
     result: z.object({

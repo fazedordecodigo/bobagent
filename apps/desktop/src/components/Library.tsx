@@ -6,6 +6,7 @@ import type {
   GatewayKind,
   MarketplaceItem,
   Memory,
+  MobileStatus,
   ProviderId,
   Routine,
   Skill,
@@ -934,6 +935,97 @@ export function MarketplaceView({ client }: { client: DaemonClient }) {
           Save registries
         </button>
       </form>
+    </div>
+  );
+}
+
+export function MobileView({ client }: { client: DaemonClient }) {
+  const [st, setSt] = useState<MobileStatus | null>(null);
+  const [pair, setPair] = useState<{ code: string; expiresAt: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => {
+    client
+      .request("mobile.status", {})
+      .then(setSt)
+      .catch(() => {});
+  }, [client]);
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
+  }, [load]);
+  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  if (!st) return null;
+  return (
+    <div className="mx-auto max-w-lg space-y-4 p-6">
+      <h2 className="text-lg font-semibold">Mobile</h2>
+      <p className="text-xs text-zinc-500">
+        Chat with your agents and answer permission requests from your phone on the same Wi-Fi. Open
+        the address in Safari and use "Add to Home Screen". Traffic is plain HTTP on your local
+        network; only paired devices get in.
+      </p>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={st.enabled}
+          onChange={(e) => {
+            setPair(null);
+            client.request("mobile.enable", { enabled: e.target.checked }).then(setSt).catch(fail);
+          }}
+        />
+        Allow mobile access on this network
+      </label>
+      {st.enabled && (
+        <>
+          <ul className="space-y-1">
+            {st.urls.map((u) => (
+              <li key={u} className="font-mono text-sm text-sky-300 select-all">
+                {u}
+              </li>
+            ))}
+            {st.urls.length === 0 && (
+              <li className="text-xs text-amber-400">No network address found.</li>
+            )}
+          </ul>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              className={`${btnCls} bg-sky-600 hover:bg-sky-500`}
+              onClick={() => client.request("mobile.pair", {}).then(setPair).catch(fail)}
+            >
+              Pair a device
+            </button>
+            {pair && (
+              <span
+                className="font-mono text-2xl tracking-[0.3em]"
+                title={`expires ${new Date(pair.expiresAt).toLocaleTimeString()}`}
+              >
+                {pair.code}
+              </span>
+            )}
+          </div>
+        </>
+      )}
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      <h3 className="text-sm font-semibold text-zinc-300">Paired devices</h3>
+      <ul className="space-y-1">
+        {st.devices.map((d) => (
+          <li key={d.id} className="flex items-center rounded bg-zinc-900 px-2 py-1 text-sm">
+            <span>{d.name}</span>
+            <span className="ml-2 text-xs text-zinc-500">
+              {d.lastSeenAt ? `seen ${new Date(d.lastSeenAt).toLocaleString()}` : "never connected"}
+            </span>
+            <button
+              type="button"
+              className="ml-auto text-xs text-zinc-500 hover:text-red-400"
+              onClick={() => client.request("mobile.revoke", { id: d.id }).then(load).catch(fail)}
+            >
+              Revoke
+            </button>
+          </li>
+        ))}
+        {st.devices.length === 0 && <li className="text-xs text-zinc-600">None yet.</li>}
+      </ul>
     </div>
   );
 }

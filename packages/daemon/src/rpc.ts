@@ -9,6 +9,7 @@ import { draftAgent } from "./draft";
 import type { GatewayService } from "./gateways";
 import type { Marketplace } from "./marketplace";
 import type { MemoryStore } from "./memories";
+import type { MobileServer } from "./mobile";
 import { ProviderError } from "./providers/types";
 import type { RoutineService } from "./routines";
 import { RpcError } from "./runtime/agent-runtime";
@@ -37,6 +38,7 @@ export class Rpc {
       voice: Voice;
       gateways: GatewayService;
       marketplace: Marketplace;
+      mobile: MobileServer;
     },
   ) {}
 
@@ -176,6 +178,15 @@ export class Rpc {
         return this.runtimes.usage((params as { agentId: string }).agentId);
       case "agents.compact":
         await this.runtimes.compact((params as { agentId: string }).agentId);
+        return { ok: true };
+      case "mobile.status":
+        return this.extras.mobile.status();
+      case "mobile.enable":
+        return this.extras.mobile.setEnabled((params as { enabled: boolean }).enabled);
+      case "mobile.pair":
+        return this.extras.mobile.pair();
+      case "mobile.revoke":
+        this.extras.mobile.revoke((params as { id: string }).id);
         return { ok: true };
       case "marketplace.list":
         return {

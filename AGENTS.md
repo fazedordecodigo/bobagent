@@ -229,6 +229,17 @@ agent templates create an agent (chosen provider) and install their listed skill
 `marketplace.list/install/setSources`; UI `MarketplaceView`. Regenerate the index with
 `bun scripts/marketplace-index.ts`. Tests: `test/marketplace.e2e.test.ts`.
 
+## Mobile companion (Phase 12c)
+
+`src/mobile.ts` + `src/mobile-app.ts` (vanilla JS PWA as a string): opt-in LAN
+server (`mobile.enable`, `0.0.0.0`, port remembered in `settings.mobile`;
+`BOBAGENT_MOBILE_HOST`/`BOBAGENT_MOBILE_PORT` override). Pairing: `mobile.pair` shows a
+6-digit code (5 min, 5 attempts) -> `POST /api/pair` returns a device token (sha256 stored in
+`mobile_devices`, migration 12). Devices call `POST /api/rpc` with an allowlist (agents.list/
+statuses, chat.history/send/cancel, queue.get, permissions.list/respond; no attachments) and
+read chat events from `GET /api/events` (SSE, `?token=`). Foreign Origins get 403.
+RPC `mobile.status/enable/pair/revoke`; UI `MobileView`. Tests: `test/mobile.e2e.test.ts`.
+
 ## Permissions
 
 Provider agents ask for approval only when THEIR OWN config says so
