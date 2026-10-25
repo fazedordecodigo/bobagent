@@ -33,7 +33,7 @@ export class DiscordTransport implements Transport {
       headers: {
         authorization: `Bot ${this.token}`,
         "content-type": "application/json",
-        "user-agent": "DiscordBot (https://github.com/fazedordecodigo/bobagent, 0.1)",
+        "user-agent": "DiscordBot (https://github.com/fazedordecodigo/upbot, 0.1)",
       },
       body: body === undefined ? null : JSON.stringify(body),
     });

@@ -34,7 +34,7 @@ Built with Bun (daemon, relay), SQLite, Tauri 2 (Rust) and React.
 
 ## Install
 
-Download the latest `.dmg` from [Releases](https://github.com/fazedordecodigo/bobagent/releases).
+Download the latest `.dmg` from [Releases](https://github.com/fazedordecodigo/upbot/releases).
 The app updates itself from there.
 
 Builds are not yet notarized by Apple. On first launch macOS says it can't verify the app:

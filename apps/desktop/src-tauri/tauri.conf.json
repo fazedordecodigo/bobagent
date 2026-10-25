@@ -35,7 +35,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc0NDQzMTNGODBGMTEzRkMKUldUOEUvR0FQekZFZEp0YlZIaUFnalBaNHppSWZ2b0VLQ1dSdVlvV25hZVE1M1llYzZMRUF6cHYK",
       "endpoints": [
-        "https://github.com/fazedordecodigo/bobagent/releases/latest/download/latest.json"
+        "https://github.com/fazedordecodigo/upbot/releases/latest/download/latest.json"
       ]
     }
   }

@@ -1,7 +1,7 @@
 # UpBot marketplace
 
 `index.json` lists installable skills and agent templates. UpBot fetches it from
-`https://raw.githubusercontent.com/fazedordecodigo/bobagent/main/marketplace/index.json` by
+`https://raw.githubusercontent.com/fazedordecodigo/upbot/main/marketplace/index.json` by
 default; you can add other registries (http(s) or file URLs) in the app.
 
 Each item has `id`, `kind` (`skill` | `agent`), `name`, `description`, `author`, `version`,
