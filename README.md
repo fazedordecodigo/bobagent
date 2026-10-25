@@ -12,6 +12,12 @@ Local-first macOS desktop workspace for running many persistent AI coding agents
 
 Built with Bun (daemon, relay), SQLite, Tauri 2 (Rust) and React.
 
+| Marketplace | Gateways |
+|---|---|
+| ![Marketplace](docs/screenshots/marketplace.png) | ![Gateways](docs/screenshots/gateways.png) |
+| **Mobile companion** | **Team relay** |
+| ![Mobile](docs/screenshots/mobile.png) | ![Team](docs/screenshots/team.png) |
+
 ## Install
 
 Download the latest `.dmg` from [Releases](https://github.com/fazedordecodigo/bobagent/releases).
@@ -28,6 +34,10 @@ bun run build:app    # BobAgent.app
 ```
 
 Architecture and conventions: [AGENTS.md](AGENTS.md).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and the [changelog](CHANGELOG.md).
 
 ## License
 

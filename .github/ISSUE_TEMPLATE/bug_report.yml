@@ -1,0 +1,35 @@
+name: Bug report
+description: Something in BobAgent does not work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Steps to reproduce, what you expected, and what you saw.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: BobAgent version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "15.1"
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider involved
+      multiple: true
+      options: [Claude Code, Codex, Devin, Cursor, Grok, OpenCode, Gemini, Not provider-related]
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant output from Console.app (process bobagentd) or the dev terminal. Remove tokens and secrets.
+      render: text
