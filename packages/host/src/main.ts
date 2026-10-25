@@ -735,7 +735,7 @@ async function bridge() {
           result: {
             protocolVersion: v ?? "2025-06-18",
             capabilities: { tools: {} },
-            serverInfo: { name: "bobagent", version: "0.2.0" },
+            serverInfo: { name: "bobagent", version: "0.2.1" },
           },
         });
       } else if (m.method === "ping") send({ jsonrpc: "2.0", id: m.id, result: {} });
@@ -767,6 +767,6 @@ if (import.meta.main) {
   else if (cmd === "run") await run();
   else if (cmd === "bridge") await bridge();
   else if (cmd === "guest-exec") await guestExec();
-  else if (cmd === "version") process.stdout.write("bobagent-host 0.2.0\n");
+  else if (cmd === "version") process.stdout.write("bobagent-host 0.2.1\n");
   else die("usage: bobagent-host preflight|run|bridge|guest-exec|version", 2);
 }

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.2.1
+
+### Fixed
+- macOS: the app bundle is now ad-hoc signed, so a downloaded unsigned build is no longer
+  reported as "damaged"; Gatekeeper offers Open Anyway instead.
+
 ## 0.2.0
 
 ### New

@@ -312,7 +312,7 @@ export class AcpDriver implements ProviderDriver {
             fs: { readTextFile: false, writeTextFile: false },
             terminal: false,
           },
-          clientInfo: { name: "bobagent", version: "0.2.0" },
+          clientInfo: { name: "bobagent", version: "0.2.1" },
         } as never)) as {
           agentCapabilities?: { loadSession?: boolean };
         };
