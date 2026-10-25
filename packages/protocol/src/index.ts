@@ -23,6 +23,12 @@ export const ProviderId = z.enum([
 ]);
 export type ProviderId = z.infer<typeof ProviderId>;
 
+export const AgentAvatar = z.object({
+  emoji: z.string().min(1).max(16),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+});
+export type AgentAvatar = z.infer<typeof AgentAvatar>;
+
 export const Agent = z.object({
   id: z.string(),
   name: z.string().trim().min(1).max(80),
@@ -30,6 +36,7 @@ export const Agent = z.object({
   provider: ProviderId,
   config: z.record(z.string(), z.string()),
   workspacePath: z.string(),
+  avatar: AgentAvatar.nullable(),
   createdAt: z.number(),
   updatedAt: z.number(),
 });
@@ -78,6 +85,7 @@ export const AgentsCreateParams = z
     name: z.string().trim().min(1).max(80),
     instructions: z.string().optional(),
     provider: ProviderId,
+    avatar: AgentAvatar.nullable().optional(),
   })
   .strict();
 export type AgentsCreateParams = z.infer<typeof AgentsCreateParams>;
@@ -89,6 +97,7 @@ export const AgentsUpdateParams = z
     name: z.string().trim().min(1).max(80).optional(),
     instructions: z.string().optional(),
     provider: ProviderId.optional(),
+    avatar: AgentAvatar.nullable().optional(),
   })
   .strict();
 export type AgentsUpdateParams = z.infer<typeof AgentsUpdateParams>;
@@ -282,6 +291,33 @@ export const PermissionsRespondParams = z
 export type PermissionsRespondParams = z.infer<typeof PermissionsRespondParams>;
 export const PermissionsRespondResult = z.object({ ok: z.literal(true) });
 
+// ---- Memories + skills ----
+
+export const Memory = z.object({
+  id: z.string(),
+  agentId: z.string(),
+  text: z.string(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+export type Memory = z.infer<typeof Memory>;
+export const Skill = z.object({
+  name: z.string(),
+  description: z.string(),
+  author: z.string().nullable(),
+  body: z.string(),
+  updatedAt: z.number(),
+});
+export type Skill = z.infer<typeof Skill>;
+const MemoryText = z.string().trim().min(1).max(2_000);
+export const SkillSaveParams = z
+  .object({
+    name: z.string().trim().min(1).max(64),
+    description: z.string().max(500),
+    body: z.string().min(1).max(200_000),
+  })
+  .strict();
+
 // ---- Usage + compaction ----
 
 export const AgentUsage = z.object({
@@ -379,6 +415,30 @@ export const methodMap = {
   "permissions.list": { params: PermissionsListParams, result: PermissionsListResult },
   "permissions.respond": { params: PermissionsRespondParams, result: PermissionsRespondResult },
   "agents.usage": { params: AgentsUsageParams, result: AgentUsage },
+  "agents.draft": {
+    params: z.object({ prompt: z.string().trim().min(1).max(4_000) }).strict(),
+    result: z.object({ name: z.string(), instructions: z.string(), avatar: AgentAvatar }),
+  },
+  "memories.list": { params: z.object({ agentId: z.string() }).strict(), result: z.array(Memory) },
+  "memories.add": {
+    params: z.object({ agentId: z.string(), text: MemoryText }).strict(),
+    result: Memory,
+  },
+  "memories.update": {
+    params: z.object({ id: z.string(), text: MemoryText }).strict(),
+    result: Memory,
+  },
+  "memories.delete": {
+    params: z.object({ id: z.string() }).strict(),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  "skills.list": { params: z.object({}).strict(), result: z.array(Skill) },
+  "skills.get": { params: z.object({ name: z.string() }).strict(), result: Skill },
+  "skills.save": { params: SkillSaveParams, result: Skill },
+  "skills.delete": {
+    params: z.object({ name: z.string() }).strict(),
+    result: z.object({ ok: z.literal(true) }),
+  },
   "agents.compact": { params: AgentsCompactParams, result: z.object({ ok: z.literal(true) }) },
   "channels.list": { params: ChannelsListParams, result: z.array(Channel) },
   "channels.create": { params: ChannelsCreateParams, result: Channel },
@@ -411,6 +471,8 @@ export type DaemonEventMap = {
   "queue.updated": QueueState;
   "agent.config": { agentId: string; configOptions: ConfigOption[] };
   "agent.usage": AgentUsage;
+  "memories.changed": { agentId: string };
+  "skills.changed": Record<string, never>;
   "channel.created": Channel;
   "channel.updated": Channel;
   "channel.message": ChannelMessage;

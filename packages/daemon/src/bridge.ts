@@ -9,10 +9,15 @@ import {
 } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Agent } from "@bobagent/protocol";
+import { ProviderId } from "@bobagent/protocol";
 import type { AgentStore } from "./agents";
 import type { ChannelService } from "./channels";
+import { avatarFor } from "./draft";
+import type { MemoryStore } from "./memories";
 import type { McpServerSpec } from "./providers/types";
+import type { Broadcast } from "./rpc";
 import type { RuntimeManager } from "./runtime/runtime-manager";
+import type { SkillLibrary } from "./skills";
 
 // Local MCP bridge: each provider session gets a `bobagent` stdio MCP server
 // (`bobagentd mcp-bridge`) that forwards tool calls to POST /bridge with a
@@ -80,6 +85,91 @@ export const BRIDGE_TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "remember",
+    description:
+      "Save a durable memory for yourself; it is shown to you at the start of future sessions.",
+    inputSchema: {
+      type: "object",
+      properties: { text: { type: "string" } },
+      required: ["text"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "forget",
+    description: "Delete one of your memories by id.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string" } },
+      required: ["id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "list_memories",
+    description: "List your saved memories with their ids.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "list_skills",
+    description: "List the shared local skills library (name + description).",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "read_skill",
+    description: "Read the full instructions of a skill from the library.",
+    inputSchema: {
+      type: "object",
+      properties: { name: { type: "string" } },
+      required: ["name"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "create_skill",
+    description: "Save a new reusable skill (markdown instructions) to the shared library.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "kebab-case name" },
+        description: { type: "string", description: "When to use this skill (one line)" },
+        body: { type: "string", description: "Markdown instructions" },
+      },
+      required: ["name", "description", "body"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "revise_skill",
+    description:
+      "Replace the instructions of an existing skill; the previous version is kept in history.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        body: { type: "string" },
+        description: { type: "string" },
+      },
+      required: ["name", "body"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "create_agent",
+    description: "Create a new BobAgent agent with its own workspace.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        provider: { type: "string", description: "Provider id; defaults to your own provider" },
+        instructions: { type: "string" },
+        emoji: { type: "string", description: "Avatar emoji" },
+      },
+      required: ["name", "instructions"],
+      additionalProperties: false,
+    },
+  },
 ] as const;
 
 /** Command that runs this daemon build in `mcp-bridge` mode. */
@@ -95,6 +185,9 @@ export class Bridge {
   private byAgent = new Map<string, string>();
   port = 0;
   channels: ChannelService | null = null;
+  memories: MemoryStore | null = null;
+  skills: SkillLibrary | null = null;
+  broadcast: Broadcast | null = null;
 
   constructor(
     private agents: AgentStore,
@@ -199,6 +292,80 @@ export class Bridge {
       }
       case "share_file":
         return this.shareFile(me, args);
+      case "remember": {
+        const text = typeof args.text === "string" ? args.text.trim() : "";
+        if (!text || text.length > 2000) throw new Error("`text` must be 1-2000 characters");
+        const m = this.memories!.add(me.id, text);
+        this.broadcast?.("memories.changed", { agentId: me.id });
+        return { text: `remembered [${m.id}]` };
+      }
+      case "forget": {
+        const m = this.memories!.get(String(args.id ?? ""));
+        if (!m || m.agentId !== me.id)
+          throw new Error(`no memory with id "${String(args.id ?? "")}"`);
+        this.memories!.delete(m.id);
+        this.broadcast?.("memories.changed", { agentId: me.id });
+        return { text: `forgot [${m.id}]` };
+      }
+      case "list_memories":
+        return {
+          text: JSON.stringify(
+            this.memories!.list(me.id).map((m) => ({ id: m.id, text: m.text })),
+            null,
+            2,
+          ),
+        };
+      case "list_skills":
+        return {
+          text: JSON.stringify(
+            this.skills!.list().map((s) => ({ name: s.name, description: s.description })),
+            null,
+            2,
+          ),
+        };
+      case "read_skill": {
+        const s = this.skills!.get(String(args.name ?? ""));
+        if (!s) throw new Error(`no skill named "${String(args.name ?? "")}"`);
+        return { text: `# ${s.name}\n${s.description}\n\n${s.body}` };
+      }
+      case "create_skill":
+      case "revise_skill": {
+        const existing = name === "revise_skill" ? this.skills!.get(String(args.name ?? "")) : null;
+        const s = this.skills!.save(
+          {
+            name: String(args.name ?? ""),
+            description:
+              typeof args.description === "string"
+                ? args.description
+                : (existing?.description ?? ""),
+            body: typeof args.body === "string" ? args.body : "",
+            author: me.name,
+          },
+          name === "create_skill" ? "create" : "revise",
+        );
+        this.broadcast?.("skills.changed", {});
+        return { text: `${name === "create_skill" ? "created" : "revised"} skill ${s.name}` };
+      }
+      case "create_agent": {
+        const agentName = typeof args.name === "string" ? args.name.trim() : "";
+        if (!agentName || agentName.length > 80) throw new Error("`name` must be 1-80 characters");
+        const provider =
+          typeof args.provider === "string" && args.provider ? args.provider : me.provider;
+        if (!ProviderId.safeParse(provider).success)
+          throw new Error(`unknown provider "${provider}"`);
+        const instructions = typeof args.instructions === "string" ? args.instructions : "";
+        const avatar = avatarFor(`${agentName} ${instructions}`);
+        if (typeof args.emoji === "string" && args.emoji.trim())
+          avatar.emoji = args.emoji.trim().slice(0, 16);
+        const created = this.agents.create({
+          name: agentName,
+          provider: provider as Agent["provider"],
+          instructions,
+          avatar,
+        });
+        this.broadcast?.("agent.created", created);
+        return { text: `created agent ${created.name} (${created.id}, ${created.provider})` };
+      }
       case "list_channels": {
         const chans = (this.channels?.forAgent(me.id) ?? []).map((c) => ({
           id: c.id,

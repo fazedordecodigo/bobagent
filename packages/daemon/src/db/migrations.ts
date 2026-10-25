@@ -96,4 +96,15 @@ export const migrations: string[] = [
     compactions INTEGER NOT NULL DEFAULT 0,
     updated_at INTEGER NOT NULL
   )`,
+  // 8: avatars + per-agent memories
+  `ALTER TABLE agents ADD COLUMN avatar_json TEXT;
+  CREATE TABLE memories (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES agents(id),
+    text TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    deleted_at INTEGER
+  );
+  CREATE INDEX memories_agent ON memories(agent_id, created_at)`,
 ];

@@ -104,6 +104,7 @@ export class AgentRuntime {
     private queue: QueueStore,
     private broadcast: Broadcast,
     private mcpServers: (agentId: string) => McpServerSpec[] = () => [],
+    private sessionContext: (agentId: string) => string = () => "",
   ) {}
 
   /** Agent-to-agent hop count of the running turn (0 when idle or user-initiated). */
@@ -323,6 +324,7 @@ export class AgentRuntime {
         if (instructions) {
           promptText = `<agent_instructions>\n${instructions}\n</agent_instructions>\n\n${promptText}`;
         }
+        promptText = this.sessionContext(this.agent.id) + promptText;
         const all = this.store.history(this.agent.id, undefined, 500).items;
         let start = 0;
         let summary: string | null = null;

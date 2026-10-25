@@ -19,6 +19,7 @@ export class RuntimeManager {
     private queue: QueueStore,
     private broadcast: Broadcast,
     private mcpServers: (agentId: string) => McpServerSpec[] = () => [],
+    private sessionContext: (agentId: string) => string = () => "",
   ) {}
 
   private runtimeFor(agentId: string): AgentRuntime {
@@ -33,6 +34,7 @@ export class RuntimeManager {
         this.queue,
         this.broadcast,
         this.mcpServers,
+        this.sessionContext,
       );
       this.runtimes.set(agentId, rt);
     }

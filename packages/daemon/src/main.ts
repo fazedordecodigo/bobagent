@@ -9,8 +9,10 @@ import { ChatStore, QueueStore } from "./chat-store";
 import { openDatabase } from "./db";
 import { mergedPath } from "./env/login-path";
 import { runMcpBridge } from "./mcp-bridge";
+import { MemoryStore } from "./memories";
 import { Rpc } from "./rpc";
 import { RuntimeManager } from "./runtime/runtime-manager";
+import { SkillLibrary } from "./skills";
 
 const VERSION = "0.1.0";
 const ORIGIN_ALLOWLIST = new Set([
@@ -132,11 +134,23 @@ async function main() {
 
   const sharedRoot = process.env.BOBAGENT_SHARED_ROOT || join(dirname(agentsRoot), "Shared");
   const bridge = new Bridge(store, () => runtimes, sharedRoot);
-  const runtimes = new RuntimeManager(store, chat, queue, broadcast, (id) => bridge.serversFor(id));
+  const memories = new MemoryStore(db);
+  const skills = new SkillLibrary(sharedRoot);
+  const runtimes = new RuntimeManager(
+    store,
+    chat,
+    queue,
+    broadcast,
+    (id) => bridge.serversFor(id),
+    (id) => memories.promptBlock(id) + skills.promptBlock(),
+  );
   runtimesRef = runtimes;
   const channels = new ChannelService(db, store, chat, () => runtimes, broadcast);
   bridge.channels = channels;
-  const rpc = new Rpc(store, chat, queue, runtimes, broadcast, channels);
+  bridge.memories = memories;
+  bridge.skills = skills;
+  bridge.broadcast = broadcast;
+  const rpc = new Rpc(store, chat, queue, runtimes, broadcast, channels, memories, skills);
 
   // warm the login-shell PATH cache so provider CLIs resolve like in a terminal
   const path = mergedPath();

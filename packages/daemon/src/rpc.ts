@@ -2,9 +2,12 @@ import { type MethodName, methodMap } from "@bobagent/protocol";
 import type { AgentStore } from "./agents";
 import type { ChannelService } from "./channels";
 import type { ChatStore, QueueStore } from "./chat-store";
+import { draftAgent } from "./draft";
+import type { MemoryStore } from "./memories";
 import { ProviderError } from "./providers/types";
 import { RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
+import type { SkillLibrary } from "./skills";
 
 export type Broadcast = (event: string, data: unknown) => void;
 
@@ -16,6 +19,8 @@ export class Rpc {
     private runtimes: RuntimeManager,
     private broadcast: Broadcast,
     private channels: ChannelService,
+    private memories: MemoryStore,
+    private skills: SkillLibrary,
   ) {}
 
   /** Returns the response payload string for one raw incoming message. */
@@ -142,6 +147,57 @@ export class Rpc {
       case "agents.compact":
         await this.runtimes.compact((params as { agentId: string }).agentId);
         return { ok: true };
+      case "agents.draft":
+        return draftAgent((params as { prompt: string }).prompt);
+      case "memories.list": {
+        const p = params as { agentId: string };
+        if (!this.agents.get(p.agentId)) throw new RpcError("not_found", "agent not found");
+        return this.memories.list(p.agentId);
+      }
+      case "memories.add": {
+        const p = params as { agentId: string; text: string };
+        if (!this.agents.get(p.agentId)) throw new RpcError("not_found", "agent not found");
+        const m = this.memories.add(p.agentId, p.text);
+        this.broadcast("memories.changed", { agentId: p.agentId });
+        return m;
+      }
+      case "memories.update": {
+        const p = params as { id: string; text: string };
+        const m = this.memories.update(p.id, p.text);
+        if (!m) throw new RpcError("not_found", "memory not found");
+        this.broadcast("memories.changed", { agentId: m.agentId });
+        return m;
+      }
+      case "memories.delete": {
+        const m = this.memories.get((params as { id: string }).id);
+        if (!m || !this.memories.delete(m.id)) throw new RpcError("not_found", "memory not found");
+        this.broadcast("memories.changed", { agentId: m.agentId });
+        return { ok: true };
+      }
+      case "skills.list":
+        return this.skills.list();
+      case "skills.get": {
+        const s = this.skills.get((params as { name: string }).name);
+        if (!s) throw new RpcError("not_found", "skill not found");
+        return s;
+      }
+      case "skills.save": {
+        const p = params as { name: string; description: string; body: string };
+        try {
+          const s = this.skills.save({ ...p, author: "user" }, "upsert");
+          this.broadcast("skills.changed", {});
+          return s;
+        } catch (e) {
+          throw new RpcError("bad_request", (e as Error).message);
+        }
+      }
+      case "skills.delete": {
+        if (!this.skills.delete((params as { name: string }).name)) {
+          throw new RpcError("not_found", "skill not found");
+        }
+        this.broadcast("skills.changed", {});
+        return { ok: true };
+      }
       case "channels.list":
         return this.channels.list((params as { includeArchived?: boolean }).includeArchived);
       case "channels.create":

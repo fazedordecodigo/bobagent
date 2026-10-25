@@ -1,5 +1,6 @@
 import type {
   Agent,
+  AgentAvatar,
   AgentStatusInfo,
   Channel,
   PendingPermission,
@@ -9,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AgentSettings, btnCls, inputCls, PROVIDERS } from "./components/AgentSettings";
 import { ChannelCreateForm, ChannelView } from "./components/ChannelView";
 import { ChatView } from "./components/ChatView";
+import { AvatarBadge, AvatarEditor, MemoriesPanel, SkillsView } from "./components/Library";
 import { DaemonClient } from "./lib/daemon";
 
 export default function App() {
@@ -20,6 +22,7 @@ export default function App() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [channelId, setChannelId] = useState<string | null>(null);
   const [creatingChannel, setCreatingChannel] = useState(false);
+  const [skillsOpen, setSkillsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const clientRef = useRef<DaemonClient | null>(null);
@@ -94,6 +97,7 @@ export default function App() {
   const selected = agents.find((a) => a.id === selectedId) ?? null;
   const selectedChannel = channels.find((ch) => ch.id === channelId) ?? null;
   const openAgent = (id: string | null) => {
+    setSkillsOpen(false);
     setSelectedId(id);
     setChannelId(null);
     setCreating(false);
@@ -112,13 +116,19 @@ export default function App() {
   );
 
   const createAgent = useCallback(
-    async (form: { name: string; provider: ProviderId; instructions: string }) => {
+    async (form: {
+      name: string;
+      provider: ProviderId;
+      instructions: string;
+      avatar: AgentAvatar | null;
+    }) => {
       const client = clientRef.current;
       if (!client) return;
       const agent = await client.request("agents.create", {
         name: form.name,
         provider: form.provider,
         instructions: form.instructions,
+        avatar: form.avatar,
       });
       setCreating(false);
       setSelectedId(agent.id);
@@ -134,6 +144,7 @@ export default function App() {
         name?: string;
         instructions?: string;
         provider?: ProviderId;
+        avatar?: AgentAvatar | null;
       },
     ) => {
       const client = clientRef.current;
@@ -187,15 +198,16 @@ export default function App() {
                   }`}
                 >
                   <div className="flex items-center gap-2">
-                    <StatusDot status={st} />
+                    <AvatarBadge agent={a} />
                     <span className="truncate font-medium">{a.name}</span>
+                    <StatusDot status={st} />
                     {pending > 0 && (
                       <span className="ml-auto rounded-full bg-amber-600 px-1.5 text-[10px] font-bold text-white">
                         {pending}
                       </span>
                     )}
                   </div>
-                  <div className="pl-4 text-xs text-zinc-500">{a.provider}</div>
+                  <div className="pl-7 text-xs text-zinc-500">{a.provider}</div>
                 </button>
               </li>
             );
@@ -216,6 +228,19 @@ export default function App() {
               }}
             >
               + New
+            </button>
+          </li>
+          <li className="mt-2 border-t border-zinc-800 px-4 pt-3">
+            <button
+              type="button"
+              className={`text-xs font-semibold tracking-wide uppercase ${skillsOpen ? "text-sky-400" : "text-zinc-400"} hover:text-zinc-200`}
+              onClick={() => {
+                openAgent(null);
+                setCreatingChannel(false);
+                setSkillsOpen(true);
+              }}
+            >
+              Skills library
             </button>
           </li>
           {channels.map((ch) => (
@@ -240,7 +265,9 @@ export default function App() {
         </ul>
       </aside>
       <main className="flex-1 overflow-hidden">
-        {creatingChannel ? (
+        {skillsOpen && clientReady ? (
+          <SkillsView client={clientRef.current!} />
+        ) : creatingChannel ? (
           <ChannelCreateForm
             agents={agents}
             onSubmit={createChannel}
@@ -249,7 +276,11 @@ export default function App() {
         ) : selectedChannel && clientReady ? (
           <ChannelView client={clientRef.current!} channel={selectedChannel} agents={agents} />
         ) : creating ? (
-          <CreateForm onSubmit={createAgent} onCancel={() => setCreating(false)} />
+          <CreateForm
+            onSubmit={createAgent}
+            onCancel={() => setCreating(false)}
+            draft={(prompt) => clientRef.current!.request("agents.draft", { prompt })}
+          />
         ) : selected && settingsOpen ? (
           <div className="h-full overflow-y-auto">
             <AgentSettings
@@ -258,6 +289,12 @@ export default function App() {
               onUpdate={updateAgent}
               onDelete={deleteAgent}
             />
+            <AvatarEditor
+              key={selected.id}
+              agent={selected}
+              onSave={(avatar) => updateAgent(selected.id, { avatar })}
+            />
+            <MemoriesPanel client={clientRef.current!} agentId={selected.id} />
           </div>
         ) : selected && clientReady ? (
           <ChatView
@@ -288,10 +325,19 @@ function StatusDot({ status }: { status: AgentStatusInfo["status"] }) {
 function CreateForm({
   onSubmit,
   onCancel,
+  draft,
 }: {
-  onSubmit: (f: { name: string; provider: ProviderId; instructions: string }) => Promise<void>;
+  onSubmit: (f: {
+    name: string;
+    provider: ProviderId;
+    instructions: string;
+    avatar: AgentAvatar | null;
+  }) => Promise<void>;
   onCancel: () => void;
+  draft: (prompt: string) => Promise<{ name: string; instructions: string; avatar: AgentAvatar }>;
 }) {
+  const [describe, setDescribe] = useState("");
+  const [avatar, setAvatar] = useState<AgentAvatar | null>(null);
   const [name, setName] = useState("");
   const [provider, setProvider] = useState<ProviderId>("devin");
   const [instructions, setInstructions] = useState("");
@@ -304,13 +350,39 @@ function CreateForm({
         e.preventDefault();
         setBusy(true);
         try {
-          await onSubmit({ name, provider, instructions });
+          await onSubmit({ name, provider, instructions, avatar });
         } finally {
           setBusy(false);
         }
       }}
     >
       <h2 className="text-lg font-semibold">New agent</h2>
+      <div className="flex gap-2">
+        <input
+          className={inputCls}
+          placeholder="Describe the agent you want…"
+          value={describe}
+          onChange={(e) => setDescribe(e.target.value)}
+        />
+        <button
+          type="button"
+          className={`${btnCls} bg-zinc-700 hover:bg-zinc-600`}
+          disabled={!describe.trim()}
+          onClick={async () => {
+            const d = await draft(describe);
+            setName(d.name);
+            setInstructions(d.instructions);
+            setAvatar(d.avatar);
+          }}
+        >
+          Draft
+        </button>
+      </div>
+      {avatar && (
+        <div className="flex items-center gap-2 text-sm text-zinc-400">
+          <AvatarBadge agent={{ name, avatar }} size={28} /> avatar
+        </div>
+      )}
       <input
         className={inputCls}
         placeholder="Name"

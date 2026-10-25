@@ -10,6 +10,7 @@ type Row = {
   provider: string;
   model: string | null;
   config_json: string | null;
+  avatar_json: string | null;
   workspace_path: string;
   created_at: number;
   updated_at: number;
@@ -24,6 +25,7 @@ function rowToAgent(r: Row): Agent {
     provider: r.provider as Agent["provider"],
     config: r.config_json ? (JSON.parse(r.config_json) as Record<string, string>) : {},
     workspacePath: r.workspace_path,
+    avatar: r.avatar_json ? (JSON.parse(r.avatar_json) as Agent["avatar"]) : null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -56,8 +58,8 @@ export class AgentStore {
     mkdirSync(workspacePath, { recursive: true });
     this.db
       .query(
-        `INSERT INTO agents (id, name, instructions, provider, model, workspace_path, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO agents (id, name, instructions, provider, model, workspace_path, avatar_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -66,6 +68,7 @@ export class AgentStore {
         params.provider,
         "{}",
         workspacePath,
+        params.avatar ? JSON.stringify(params.avatar) : null,
         now,
         now,
       );
@@ -78,11 +81,19 @@ export class AgentStore {
     const name = params.name ?? existing.name;
     const instructions = params.instructions ?? existing.instructions;
     const provider = params.provider ?? existing.provider;
+    const avatar = params.avatar === undefined ? existing.avatar : params.avatar;
     this.db
       .query(
-        "UPDATE agents SET name = ?, instructions = ?, provider = ?, updated_at = ? WHERE id = ?",
+        "UPDATE agents SET name = ?, instructions = ?, provider = ?, avatar_json = ?, updated_at = ? WHERE id = ?",
       )
-      .run(name, instructions, provider, Date.now(), params.id);
+      .run(
+        name,
+        instructions,
+        provider,
+        avatar ? JSON.stringify(avatar) : null,
+        Date.now(),
+        params.id,
+      );
     return this.get(params.id);
   }
 

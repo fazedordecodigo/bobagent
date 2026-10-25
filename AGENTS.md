@@ -145,6 +145,19 @@ Claude `result.usage`/`total_cost_usd`/`modelUsage.contextWindow`, Codex
 `<conversation_summary>` plus only the history after it. The queue waits while compacting.
 Tests: `test/usage.e2e.test.ts`.
 
+## Avatars, memories, skills, agent creation (Phase 8)
+
+`Agent.avatar` (`{emoji,color}` or null, `agents.avatar_json`, migration 8). `agents.draft
+{prompt}` (`src/draft.ts`, deterministic) proposes name/instructions/avatar for the create
+form. Memories: `memories` table, `MemoryStore` (`src/memories.ts`), RPC
+`memories.list/add/update/delete`, event `memories.changed`. Skills library:
+`<shared>/Skills/<name>/SKILL.md` with name/description/author frontmatter, previous versions
+in `.history/` (`src/skills.ts`), RPC `skills.list/get/save/delete`, event `skills.changed`.
+Bridge tools: `remember`, `forget`, `list_memories`, `list_skills`, `read_skill`,
+`create_skill`, `revise_skill`, `create_agent`. The first prompt of every fresh session is
+prefixed with `<agent_memories>` and `<skills_library>` (index only). UI:
+`components/Library.tsx`. Tests: `test/phase8.e2e.test.ts`.
+
 ## Permissions
 
 Provider agents ask for approval only when THEIR OWN config says so
