@@ -162,12 +162,12 @@ export class HostStore {
     return n > 0;
   }
 
-  /** Uploads the helper to `$HOME/.bobagent/bin` and runs preflight. */
+  /** Uploads the helper to the host root and runs preflight. */
   async install(id: string): Promise<RemoteHost> {
     const h = this.mustGet(id);
     const r = await sshExec(
       h,
-      `umask 077 && mkdir -p "$HOME/.bobagent/bin" && cat > "$HOME/.bobagent/${HELPER}.tmp" && mv "$HOME/.bobagent/${HELPER}.tmp" "$HOME/.bobagent/${HELPER}"`,
+      `ROOT="\${BOBAGENT_HOST_ROOT:-$HOME/.bobagent}" && umask 077 && mkdir -p "$ROOT/bin" && cat > "$ROOT/${HELPER}.tmp" && mv "$ROOT/${HELPER}.tmp" "$ROOT/${HELPER}"`,
       helperSource as string,
     );
     if (r.code !== 0) throw new Error(`install failed: ${sshError(r)}`);
@@ -178,7 +178,7 @@ export class HostStore {
     const h = this.mustGet(id);
     const r = await sshExec(
       h,
-      `${BUN_PATH}; command -v bun >/dev/null 2>&1 || { echo "bun is not installed on the host (curl -fsSL https://bun.sh/install | bash)" >&2; exit 127; }; test -f "$HOME/.bobagent/${HELPER}" || { echo "helper not installed; use Install" >&2; exit 3; }; exec bun "$HOME/.bobagent/${HELPER}" preflight`,
+      `ROOT="\${BOBAGENT_HOST_ROOT:-$HOME/.bobagent}"; ${BUN_PATH}; command -v bun >/dev/null 2>&1 || { echo "bun is not installed on the host (curl -fsSL https://bun.sh/install | bash)" >&2; exit 127; }; test -f "$ROOT/${HELPER}" || { echo "helper not installed; use Install" >&2; exit 3; }; exec bun "$ROOT/${HELPER}" preflight`,
     );
     if (r.code !== 0) throw new Error(sshError(r));
     const line = r.stdout.trim().split("\n").pop() ?? "";
