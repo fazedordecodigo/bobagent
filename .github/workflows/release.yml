@@ -1,7 +1,7 @@
 name: Release
 
 # Push a tag like v0.2.0 (matching apps/desktop/src-tauri/tauri.conf.json "version") to build
-# BobAgent.app + .dmg, sign the updater artifacts and publish a GitHub release with latest.json.
+# UpBot.app + .dmg, sign the updater artifacts and publish a GitHub release with latest.json.
 # macOS code signing + notarization run when the APPLE_* secrets are set; otherwise the build
 # is unsigned (Gatekeeper will ask users to right-click > Open).
 
@@ -61,7 +61,7 @@ jobs:
           tauriScript: bunx tauri
           args: --bundles app,dmg --config {"bundle":{"createUpdaterArtifacts":true}}
           tagName: ${{ github.ref_name }}
-          releaseName: BobAgent ${{ github.ref_name }}
+          releaseName: UpBot ${{ github.ref_name }}
           releaseBody: See the commits since the previous release.
           releaseDraft: false
           includeUpdaterJson: true

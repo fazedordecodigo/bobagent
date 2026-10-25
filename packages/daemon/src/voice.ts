@@ -2,8 +2,8 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
 
-// Voice: text-to-speech with macOS `say` (or BOBAGENT_TTS_COMMAND, text on stdin) and
-// speech-to-text with BOBAGENT_STT_COMMAND (JSON array, "{file}" = recorded audio path,
+// Voice: text-to-speech with macOS `say` (or UPBOT_TTS_COMMAND, text on stdin) and
+// speech-to-text with UPBOT_STT_COMMAND (JSON array, "{file}" = recorded audio path,
 // transcript on stdout) or the `whisper` CLI when it is on PATH.
 
 function jsonCommand(name: string): string[] | null {
@@ -34,7 +34,7 @@ export class Voice {
   ) {}
 
   private tts(): string[] | null {
-    return jsonCommand("BOBAGENT_TTS_COMMAND") ?? (process.platform === "darwin" ? ["say"] : null);
+    return jsonCommand("UPBOT_TTS_COMMAND") ?? (process.platform === "darwin" ? ["say"] : null);
   }
 
   private whisper(): string | null {
@@ -44,7 +44,7 @@ export class Voice {
   status() {
     return {
       tts: this.tts() !== null,
-      stt: jsonCommand("BOBAGENT_STT_COMMAND") !== null || this.whisper() !== null,
+      stt: jsonCommand("UPBOT_STT_COMMAND") !== null || this.whisper() !== null,
     };
   }
 
@@ -72,11 +72,11 @@ export class Voice {
     const file = join(work, `audio.${EXT[mime.split(";")[0]!.trim()] ?? "webm"}`);
     writeFileSync(file, Buffer.from(audioBase64, "base64"));
     try {
-      const custom = jsonCommand("BOBAGENT_STT_COMMAND");
+      const custom = jsonCommand("UPBOT_STT_COMMAND");
       const whisper = custom ? null : this.whisper();
       if (!custom && !whisper)
         throw new Error(
-          "speech-to-text is not available (install whisper or set BOBAGENT_STT_COMMAND)",
+          "speech-to-text is not available (install whisper or set UPBOT_STT_COMMAND)",
         );
       const cmd = custom
         ? custom.map((a) => a.replaceAll("{file}", file))

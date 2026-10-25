@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, ChatItem, Turn, VaultEntry } from "@bobagent/protocol";
+import type { Agent, ChatItem, Turn, VaultEntry } from "@upbot/protocol";
 import { DaemonClient, type DaemonHandle, FAKE_AGENT, readPids, startDaemon, tmp } from "./helpers";
 
 const TOKEN = `p11-test-${crypto.randomUUID()}`;
@@ -58,25 +58,25 @@ describe("vault, connectors, computer use, voice e2e", () => {
     stateDir = tmp("p11-fake-");
     work = tmp("p11-work-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      BOBAGENT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
-      BOBAGENT_VAULT_KEY: "ab".repeat(32),
-      BOBAGENT_GITHUB_API: `http://127.0.0.1:${gh.port}`,
-      BOBAGENT_OP_COMMAND: JSON.stringify([
+      UPBOT_VAULT_KEY: "ab".repeat(32),
+      UPBOT_GITHUB_API: `http://127.0.0.1:${gh.port}`,
+      UPBOT_OP_COMMAND: JSON.stringify([
         "sh",
         "-c",
         'printf "%s|%s|%s" "$1" "$2" "$OP_SERVICE_ACCOUNT_TOKEN"',
         "op",
       ]),
-      BOBAGENT_BW_COMMAND: JSON.stringify([
+      UPBOT_BW_COMMAND: JSON.stringify([
         "sh",
         "-c",
         'printf "%s|%s|%s|%s" "$1" "$2" "$3" "$BW_SESSION"',
         "bw",
       ]),
-      BOBAGENT_COMPUTER_DRYRUN: join(work, "computer.log"),
-      BOBAGENT_TTS_COMMAND: JSON.stringify(["sh", "-c", `cat > ${join(work, "tts.txt")}`]),
-      BOBAGENT_STT_COMMAND: JSON.stringify([
+      UPBOT_COMPUTER_DRYRUN: join(work, "computer.log"),
+      UPBOT_TTS_COMMAND: JSON.stringify(["sh", "-c", `cat > ${join(work, "tts.txt")}`]),
+      UPBOT_STT_COMMAND: JSON.stringify([
         "sh",
         "-c",
         'printf "heard %s bytes" "$(wc -c < "$0" | tr -d " ")"',
@@ -120,7 +120,7 @@ describe("vault, connectors, computer use, voice e2e", () => {
     const list = (await c.request("vault.list", {})) as VaultEntry[];
     expect(list).toMatchObject([{ name: "stripe.key", agentIds: [a.id] }]);
     expect(JSON.stringify(list)).not.toContain("SECRET123");
-    const db = new Database(join(dataDir, "bobagent.db"), { readonly: true });
+    const db = new Database(join(dataDir, "upbot.db"), { readonly: true });
     expect(JSON.stringify(db.query("SELECT * FROM vault").all())).not.toContain("SECRET123");
     db.close();
     expect(await tool(a, "vault_list")).toBe('tool-ok:["stripe.key"]');
@@ -216,9 +216,9 @@ describe("vault, connectors, computer use, voice e2e", () => {
 
   test("voice: speak and transcribe", async () => {
     expect(await c.request("voice.status", {})).toEqual({ tts: true, stt: true });
-    await c.request("voice.speak", { text: "Hello from BobAgent" });
+    await c.request("voice.speak", { text: "Hello from UpBot" });
     await Bun.sleep(300);
-    expect(readFileSync(join(work, "tts.txt"), "utf8")).toBe("Hello from BobAgent");
+    expect(readFileSync(join(work, "tts.txt"), "utf8")).toBe("Hello from UpBot");
     const r = (await c.request("voice.transcribe", {
       audioBase64: Buffer.from("0123456789").toString("base64"),
       mime: "audio/webm;codecs=opus",

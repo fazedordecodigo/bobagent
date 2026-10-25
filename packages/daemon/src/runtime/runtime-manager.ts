@@ -4,7 +4,7 @@ import type {
   ConfigOption,
   PendingPermission,
   QueueState,
-} from "@bobagent/protocol";
+} from "@upbot/protocol";
 import type { AgentStore } from "../agents";
 import type { ChatStore, QueueSource, QueueStore } from "../chat-store";
 import type { McpServerSpec, RemoteLaunch } from "../providers/types";
@@ -115,7 +115,7 @@ export class RuntimeManager {
       try {
         this.runtimeFor(agentId).drain();
       } catch (e) {
-        console.error(`[bobagentd] drain failed for ${agentId}:`, (e as Error).message);
+        console.error(`[upbotd] drain failed for ${agentId}:`, (e as Error).message);
       }
     }
   }

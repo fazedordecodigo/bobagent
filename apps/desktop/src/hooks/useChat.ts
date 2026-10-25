@@ -1,4 +1,4 @@
-import type { AgentStatusInfo, ChatItem, QueueState, Turn } from "@bobagent/protocol";
+import type { AgentStatusInfo, ChatItem, QueueState, Turn } from "@upbot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
 

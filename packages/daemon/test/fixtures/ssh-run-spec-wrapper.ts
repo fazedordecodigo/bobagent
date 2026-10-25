@@ -47,9 +47,7 @@ process.stdin.on("data", (chunk: Buffer) => {
                 ([key, value]) =>
                   credentialKeys.includes(key) && /^sk-(?:ant-|proj-).*fake-/.test(value),
               ),
-              bobagentKeys: entries
-                .map(([key]) => key)
-                .filter((key) => key.startsWith("BOBAGENT_")),
+              upbotKeys: entries.map(([key]) => key).filter((key) => key.startsWith("UPBOT_")),
               apiKeyKeys: entries
                 .map(([key]) => key)
                 .filter((key) => key === "ANTHROPIC_API_KEY" || key === "OPENAI_API_KEY"),

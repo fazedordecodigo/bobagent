@@ -1,4 +1,4 @@
-import type { ChatItem, PermissionOption } from "@bobagent/protocol";
+import type { ChatItem, PermissionOption } from "@upbot/protocol";
 import { useEffect, useRef, useState } from "react";
 
 const statusBadge: Record<string, string> = {

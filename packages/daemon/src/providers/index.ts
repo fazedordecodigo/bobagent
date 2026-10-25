@@ -1,4 +1,4 @@
-import type { ProviderId } from "@bobagent/protocol";
+import type { ProviderId } from "@upbot/protocol";
 import { AcpDriver } from "./acp";
 import { ClaudeDriver } from "./claude";
 import { CodexDriver } from "./codex";

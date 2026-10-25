@@ -43,8 +43,8 @@ async function main() {
   const daemon = Bun.spawn(["bun", DAEMON, "--data-dir", dataDir, "--agents-root", agentsRoot], {
     env: {
       ...process.env,
-      BOBAGENT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
-      BOBAGENT_CANCEL_GRACE_MS: "2000",
+      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      UPBOT_CANCEL_GRACE_MS: "2000",
       FAKE_ACP_STATE_DIR: stateDir,
     },
     stdin: "pipe",
@@ -66,8 +66,8 @@ async function main() {
     const i = buf.indexOf("\n");
     if (i < 0) continue;
     const line = buf.slice(0, i);
-    if (line.startsWith("BOBAGENT_READY ")) {
-      port = JSON.parse(line.slice("BOBAGENT_READY ".length)).port;
+    if (line.startsWith("UPBOT_READY ")) {
+      port = JSON.parse(line.slice("UPBOT_READY ".length)).port;
       break;
     }
   }

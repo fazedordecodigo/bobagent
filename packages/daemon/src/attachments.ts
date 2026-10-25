@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
-import type { ChatAttachment } from "@bobagent/protocol";
+import type { ChatAttachment } from "@upbot/protocol";
 import { RpcError } from "./runtime/agent-runtime";
 
 // Attachments sent with a chat message are written into the agent workspace

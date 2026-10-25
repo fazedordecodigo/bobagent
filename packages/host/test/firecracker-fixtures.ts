@@ -16,11 +16,9 @@ import { join, resolve } from "node:path";
 
 export const REPO_ROOT = resolve(import.meta.dir, "../../..");
 export const HOST_MAIN = join(REPO_ROOT, "packages/host/src/main.ts");
-export const HOST_INIT = join(REPO_ROOT, "packages/host/rootfs/bobagent-init");
+export const HOST_INIT = join(REPO_ROOT, "packages/host/rootfs/upbot-init");
 
-const ARTIFACTS = resolve(
-  process.env.BOBAGENT_FC_ARTIFACTS ?? join(homedir(), ".bobagent/firecracker"),
-);
+const ARTIFACTS = resolve(process.env.UPBOT_FC_ARTIFACTS ?? join(homedir(), ".upbot/firecracker"));
 
 function debugfs(rootfs: string, command: string) {
   const result = spawnSync("debugfs", ["-w", "-R", command, rootfs], { encoding: "utf8" });
@@ -46,7 +44,7 @@ export function makeFirecrackerHostRoot(
     mode?: string;
   }[] = [],
 ): string {
-  const root = mkdtempSync(join(tmpdir(), "bobagent-fc-test-"));
+  const root = mkdtempSync(join(tmpdir(), "upbot-fc-test-"));
   try {
     const firecracker = join(root, "firecracker");
     mkdirSync(firecracker, { recursive: true });
@@ -61,8 +59,8 @@ export function makeFirecrackerHostRoot(
     const rootfs = join(firecracker, "rootfs.ext4");
     const cp = spawnSync("cp", ["--reflink=auto", "--sparse=always", baseRootfs, rootfs]);
     if (cp.status !== 0) copyFileSync(baseRootfs, rootfs);
-    injectGuestFile(rootfs, HOST_MAIN, "/opt/bobagent/bobagent-host.ts");
-    injectGuestFile(rootfs, HOST_INIT, "/usr/sbin/bobagent-init", "0100755");
+    injectGuestFile(rootfs, HOST_MAIN, "/opt/upbot/upbot-host.ts");
+    injectGuestFile(rootfs, HOST_INIT, "/usr/sbin/upbot-init", "0100755");
     const helperHash = createHash("sha256").update(readFileSync(HOST_MAIN)).digest("hex");
     writeFileSync(join(firecracker, "guest-helper.sha256"), `${helperHash}\n`);
     for (const file of extraFiles)
@@ -136,7 +134,7 @@ export function recordedFirecrackerAlive(runDir: string): boolean {
 }
 
 export function assertGuestInitExecutable(rootfs: string): void {
-  const r = spawnSync("debugfs", ["-R", "stat /usr/sbin/bobagent-init", rootfs], {
+  const r = spawnSync("debugfs", ["-R", "stat /usr/sbin/upbot-init", rootfs], {
     encoding: "utf8",
   });
   if (r.status !== 0 || !/Mode:\s+0755/.test(r.stdout))

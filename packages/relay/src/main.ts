@@ -1,4 +1,4 @@
-// BobAgent team relay: a small self-hostable Bun server that lets the daemons of a team share
+// UpBot team relay: a small self-hostable Bun server that lets the daemons of a team share
 // agents. Members connect outbound over WebSocket with their member token; the relay keeps
 // the roster (who is online, which agents they share) and forwards messages and replies.
 // It stores no chat content.
@@ -218,6 +218,6 @@ if (import.meta.main) {
     ...(process.env.RELAY_ADMIN_TOKEN ? { adminToken: process.env.RELAY_ADMIN_TOKEN } : {}),
   });
   console.log(
-    `BobAgent relay listening on ${server.hostname}:${server.port} (admin token in ${join(dataDir, "admin-token")} or RELAY_ADMIN_TOKEN)`,
+    `UpBot relay listening on ${server.hostname}:${server.port} (admin token in ${join(dataDir, "admin-token")} or RELAY_ADMIN_TOKEN)`,
   );
 }

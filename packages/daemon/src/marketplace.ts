@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { type Agent, AgentAvatar, type MarketplaceItem, ProviderId } from "@bobagent/protocol";
+import { type Agent, AgentAvatar, type MarketplaceItem, ProviderId } from "@upbot/protocol";
 import type { AgentStore } from "./agents";
 import { RpcError } from "./runtime/agent-runtime";
 import type { SkillLibrary } from "./skills";
@@ -48,7 +48,7 @@ export class Marketplace {
       value: string;
     } | null;
     if (r) return JSON.parse(r.value) as string[];
-    return [process.env.BOBAGENT_MARKETPLACE_URL ?? DEFAULT_REGISTRY];
+    return [process.env.UPBOT_MARKETPLACE_URL ?? DEFAULT_REGISTRY];
   }
 
   setSources(urls: string[]): void {

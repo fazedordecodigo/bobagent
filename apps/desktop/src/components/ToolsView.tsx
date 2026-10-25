@@ -1,4 +1,4 @@
-import type { Agent } from "@bobagent/protocol";
+import type { Agent } from "@upbot/protocol";
 import type { DaemonClient } from "../lib/daemon";
 import { HostsView } from "./HostsView";
 import {

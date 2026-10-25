@@ -1,5 +1,5 @@
 {
-  "name": "@bobagent/desktop",
+  "name": "@upbot/desktop",
   "private": true,
   "version": "0.2.1",
   "license": "MIT",
@@ -10,7 +10,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@bobagent/protocol": "workspace:*",
+    "@upbot/protocol": "workspace:*",
     "@tauri-apps/api": "2.12.4",
     "@tauri-apps/plugin-updater": "2.14.0",
     "react": "19.1.10",

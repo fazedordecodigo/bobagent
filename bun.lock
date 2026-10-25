@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "bobagent",
+      "name": "upbot",
       "devDependencies": {
         "@agentclientprotocol/sdk": "1.9.0",
         "@biomejs/biome": "2.5.15",
@@ -12,12 +12,12 @@
       },
     },
     "apps/desktop": {
-      "name": "@bobagent/desktop",
-      "version": "0.1.0",
+      "name": "@upbot/desktop",
+      "version": "0.2.1",
       "dependencies": {
-        "@bobagent/protocol": "workspace:*",
         "@tauri-apps/api": "2.12.4",
         "@tauri-apps/plugin-updater": "2.14.0",
+        "@upbot/protocol": "workspace:*",
         "react": "19.1.10",
         "react-dom": "19.1.10",
       },
@@ -32,33 +32,33 @@
       },
     },
     "packages/daemon": {
-      "name": "@bobagent/daemon",
-      "version": "0.1.0",
+      "name": "@upbot/daemon",
+      "version": "0.2.1",
       "dependencies": {
         "@agentclientprotocol/sdk": "1.9.0",
-        "@bobagent/protocol": "workspace:*",
+        "@upbot/protocol": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "1.4.3",
       },
     },
     "packages/host": {
-      "name": "@bobagent/host",
-      "version": "0.1.0",
+      "name": "@upbot/host",
+      "version": "0.2.1",
       "devDependencies": {
         "@types/bun": "1.4.3",
       },
     },
     "packages/protocol": {
-      "name": "@bobagent/protocol",
+      "name": "@upbot/protocol",
       "version": "0.0.0",
       "dependencies": {
         "zod": "4.6.7",
       },
     },
     "packages/relay": {
-      "name": "@bobagent/relay",
-      "version": "0.1.0",
+      "name": "@upbot/relay",
+      "version": "0.2.1",
       "devDependencies": {
         "@types/bun": "1.4.3",
       },
@@ -84,16 +84,6 @@
     "@biomejs/cli-win32-arm64": ["@biomejs/cli-win32-arm64@2.5.15", "", { "os": "win32", "cpu": "arm64" }, "sha512-2kPKzhNlm8C+Ru3GcO0Me2ODkCBLrVOUNuyi84RJyWDVKAA4+Kjj3jMjL938lF6BRfvltC4vB2nPY9SvN51Ovg=="],
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.5.15", "", { "os": "win32", "cpu": "x64" }, "sha512-yAzh4UqEImV6Hcy0zjUqNfJAsUhoD64FBQCdTG8Md/Z2wQeVP/ZmJ3XRYAs1g8J9fjTFyl2fCtc5FB5til47+g=="],
-
-    "@bobagent/daemon": ["@bobagent/daemon@workspace:packages/daemon"],
-
-    "@bobagent/desktop": ["@bobagent/desktop@workspace:apps/desktop"],
-
-    "@bobagent/host": ["@bobagent/host@workspace:packages/host"],
-
-    "@bobagent/protocol": ["@bobagent/protocol@workspace:packages/protocol"],
-
-    "@bobagent/relay": ["@bobagent/relay@workspace:packages/relay"],
 
     "@jridgewell/gen-mapping": ["@jridgewell/gen-mapping@0.3.13", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.0", "@jridgewell/trace-mapping": "^0.3.24" } }, "sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA=="],
 
@@ -244,6 +234,16 @@
     "@typescript/typescript-win32-arm64": ["@typescript/typescript-win32-arm64@7.0.2", "", { "os": "win32", "cpu": "arm64" }, "sha512-Gyl1Vy6OsWesLzmq+EP0Fb7b4Nid5232AvcA2SFcdYreldpNtYFFofPjnt62y9hQy7VTaZp65ICJjuAQRaVcIQ=="],
 
     "@typescript/typescript-win32-x64": ["@typescript/typescript-win32-x64@7.0.2", "", { "os": "win32", "cpu": "x64" }, "sha512-0BQ3HkAHHlKLSp1qRvf3SUhGpGsDuhB/jgFw75guyqbxJqEaS0Cw/VFO8i2nHglJUzQCRtMMR/IBAKE3ETMC4g=="],
+
+    "@upbot/daemon": ["@upbot/daemon@workspace:packages/daemon"],
+
+    "@upbot/desktop": ["@upbot/desktop@workspace:apps/desktop"],
+
+    "@upbot/host": ["@upbot/host@workspace:packages/host"],
+
+    "@upbot/protocol": ["@upbot/protocol@workspace:packages/protocol"],
+
+    "@upbot/relay": ["@upbot/relay@workspace:packages/relay"],
 
     "@vitejs/plugin-react": ["@vitejs/plugin-react@6.1.2", "", { "dependencies": { "@rolldown/pluginutils": "^1.0.1" }, "peerDependencies": { "@rolldown/plugin-babel": "^0.1.7 || ^0.2.0", "babel-plugin-react-compiler": "^1.0.0", "oxc-transform-react": "^0.152.0", "vite": "^8.0.0" }, "optionalPeers": ["@rolldown/plugin-babel", "babel-plugin-react-compiler", "oxc-transform-react"] }, "sha512-fhJNGUdscQa4HkI0xFxwonWyhnVReCPDbXI7FH7jmzpnVCrFQI7PRrhWecO263610vOrs9tr2Y4xcf8uAdFxbw=="],
 

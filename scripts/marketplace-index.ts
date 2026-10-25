@@ -36,12 +36,12 @@ for (const [kind, folder] of [
     const sha256 = createHash("sha256").update(raw).digest("hex");
     const old = prev.items.find((x) => x.id === id && x.kind === kind);
     const version = old && old.sha256 !== sha256 ? bump(old.version) : (old?.version ?? "1.0.0");
-    items.push({ id, kind, name, description, author: "BobAgent", version, url, sha256 });
+    items.push({ id, kind, name, description, author: "UpBot", version, url, sha256 });
   }
 }
 writeFileSync(
   join(root, "index.json"),
-  `${JSON.stringify({ version: 1, name: "BobAgent", items }, null, 2)}\n`,
+  `${JSON.stringify({ version: 1, name: "UpBot", items }, null, 2)}\n`,
 );
 console.log(`wrote ${items.length} items`);
 

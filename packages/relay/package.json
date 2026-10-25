@@ -1,5 +1,5 @@
 {
-  "name": "@bobagent/relay",
+  "name": "@upbot/relay",
   "version": "0.2.1",
   "license": "MIT",
   "private": true,

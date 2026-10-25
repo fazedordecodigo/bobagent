@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import type { ProviderId } from "@bobagent/protocol";
+import type { ProviderId } from "@upbot/protocol";
 import { resolveCommand, spawnEnv } from "../env/login-path";
 import { ProviderError, type RemoteLaunch } from "./types";
 
@@ -76,13 +76,13 @@ function envOverride(name: string): string[] | null {
   return null;
 }
 
-/** Spawn command for a provider; `BOBAGENT_PROVIDER_COMMAND_<P>` (or the older
- * `BOBAGENT_ACP_COMMAND_<P>`) holds a JSON array that replaces the default. */
+/** Spawn command for a provider; `UPBOT_PROVIDER_COMMAND_<P>` (or the older
+ * `UPBOT_ACP_COMMAND_<P>`) holds a JSON array that replaces the default. */
 export function commandFor(provider: ProviderId): string[] | null {
   const key = provider.toUpperCase().replace(/-/g, "_");
   return (
-    envOverride(`BOBAGENT_PROVIDER_COMMAND_${key}`) ??
-    envOverride(`BOBAGENT_ACP_COMMAND_${key}`) ??
+    envOverride(`UPBOT_PROVIDER_COMMAND_${key}`) ??
+    envOverride(`UPBOT_ACP_COMMAND_${key}`) ??
     DEFAULT_COMMANDS[provider]
   );
 }

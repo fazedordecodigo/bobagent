@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, TeamMessage, TeamStatus, VaultEntry } from "@bobagent/protocol";
+import type { Agent, TeamMessage, TeamStatus, VaultEntry } from "@upbot/protocol";
 import { DaemonClient, type DaemonHandle, FAKE_AGENT, readPids, startDaemon, tmp } from "./helpers";
 
 setDefaultTimeout(30000);
@@ -41,9 +41,9 @@ describe("teams via relay e2e", () => {
     dirs.push(d, a, s);
     const token = `tm-${crypto.randomUUID()}`;
     const h = await startDaemon(d, a, token, {
-      BOBAGENT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: s,
-      BOBAGENT_VAULT_KEY: "ef".repeat(32),
+      UPBOT_VAULT_KEY: "ef".repeat(32),
     });
     daemons.push(h);
     const c = await DaemonClient.connect(h.port, token);

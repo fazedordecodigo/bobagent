@@ -1,4 +1,4 @@
-import type { VmCredential, VmCredentialKind, VmCredentialProvider } from "@bobagent/protocol";
+import type { VmCredential, VmCredentialKind, VmCredentialProvider } from "@upbot/protocol";
 import type { Vault } from "../vault";
 
 // Provider logins for Firecracker microVM sessions. Stored encrypted in the vault under

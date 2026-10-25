@@ -2,11 +2,11 @@ import type { Database } from "bun:sqlite";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { VaultEntry } from "@bobagent/protocol";
+import type { VaultEntry } from "@upbot/protocol";
 
 // Encrypted secret store (AES-256-GCM). The key lives in the macOS Keychain (service
-// "BobAgent", account "vault-key"), or <data-dir>/vault.key (0600) elsewhere;
-// BOBAGENT_VAULT_KEY (64 hex chars) overrides it for tests. Each secret has an agent
+// "UpBot", account "vault-key"), or <data-dir>/vault.key (0600) elsewhere;
+// UPBOT_VAULT_KEY (64 hex chars) overrides it for tests. Each secret has an agent
 // allowlist; agents read allowed secrets with the vault_get bridge tool.
 
 export const VAULT_NAME = /^[A-Za-z0-9_.-]{1,64}$/;
@@ -15,17 +15,20 @@ type Row = { name: string; iv: string; data: string; agent_ids: string; updated_
 
 function keychainKey(): Buffer | null {
   if (process.platform !== "darwin") return null;
-  const find = Bun.spawnSync(
-    ["security", "find-generic-password", "-s", "BobAgent", "-a", "vault-key", "-w"],
-    {
-      stderr: "ignore",
-    },
-  );
-  const existing = find.stdout.toString().trim();
-  if (find.exitCode === 0 && /^[0-9a-f]{64}$/.test(existing)) return Buffer.from(existing, "hex");
-  const hex = randomBytes(32).toString("hex");
+  const find = (service: string) => {
+    const r = Bun.spawnSync(
+      ["security", "find-generic-password", "-s", service, "-a", "vault-key", "-w"],
+      { stderr: "ignore" },
+    );
+    const v = r.stdout.toString().trim();
+    return r.exitCode === 0 && /^[0-9a-f]{64}$/.test(v) ? v : null;
+  };
+  const existing = find("UpBot");
+  if (existing) return Buffer.from(existing, "hex");
+  // vaults created before the rename keep their key under the old service name
+  const hex = find("BobAgent") ?? randomBytes(32).toString("hex");
   const add = Bun.spawnSync(
-    ["security", "add-generic-password", "-s", "BobAgent", "-a", "vault-key", "-U", "-w", hex],
+    ["security", "add-generic-password", "-s", "UpBot", "-a", "vault-key", "-U", "-w", hex],
     { stdout: "ignore", stderr: "ignore" },
   );
   return add.exitCode === 0 ? Buffer.from(hex, "hex") : null;
@@ -41,7 +44,7 @@ export class Vault {
 
   private key(): Buffer {
     if (this.cachedKey) return this.cachedKey;
-    const env = process.env.BOBAGENT_VAULT_KEY;
+    const env = process.env.UPBOT_VAULT_KEY;
     if (env && /^[0-9a-fA-F]{64}$/.test(env)) {
       this.cachedKey = Buffer.from(env, "hex");
       return this.cachedKey;

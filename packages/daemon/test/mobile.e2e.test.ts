@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { rmSync } from "node:fs";
-import type { Agent, MobileStatus } from "@bobagent/protocol";
+import type { Agent, MobileStatus } from "@upbot/protocol";
 import { DaemonClient, type DaemonHandle, FAKE_AGENT, readPids, startDaemon, tmp } from "./helpers";
 
 setDefaultTimeout(30000);
@@ -38,9 +38,9 @@ describe("mobile companion e2e", () => {
     agentsRoot = tmp("mob-agents-");
     stateDir = tmp("mob-fake-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      BOBAGENT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
-      BOBAGENT_MOBILE_HOST: "127.0.0.1",
+      UPBOT_MOBILE_HOST: "127.0.0.1",
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
     a = (await c.request("agents.create", {
@@ -72,7 +72,7 @@ describe("mobile companion e2e", () => {
     base = s.urls[0]!.replace(/\/$/, "");
     const page = await fetch(`${base}/`);
     expect(page.headers.get("content-security-policy")).toContain("connect-src 'self'");
-    expect(await page.text()).toContain("Pair with BobAgent");
+    expect(await page.text()).toContain("Pair with UpBot");
   });
 
   test("pairing: wrong codes count toward a limit, the right code yields a device token once", async () => {

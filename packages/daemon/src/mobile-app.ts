@@ -7,7 +7,7 @@ export const MOBILE_HTML = `<!doctype html>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#09090b">
 <link rel="manifest" href="/manifest.webmanifest">
-<title>BobAgent</title>
+<title>UpBot</title>
 <style>
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
@@ -32,28 +32,28 @@ export const MOBILE_HTML = `<!doctype html>
 </style>
 </head>
 <body>
-<header><button id="back" hidden>‹ Agents</button><strong id="title">BobAgent</strong></header>
+<header><button id="back" hidden>‹ Agents</button><strong id="title">UpBot</strong></header>
 <main id="main"></main>
 <form id="composer" hidden><textarea id="text" placeholder="Message"></textarea><button>Send</button></form>
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
-let token = localStorage.getItem("bobagent.token");
+let token = localStorage.getItem("upbot.token");
 let agents = [], statuses = {}, current = null, items = [], perms = [], events = null;
 
 async function rpc(method, params) {
   const r = await fetch("/api/rpc", { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify({ method, params }) });
-  if (r.status === 401) { localStorage.removeItem("bobagent.token"); token = null; showPair(); throw new Error("unauthorized"); }
+  if (r.status === 401) { localStorage.removeItem("upbot.token"); token = null; showPair(); throw new Error("unauthorized"); }
   const j = await r.json();
   if (j.error) throw new Error(j.error);
   return j.result;
 }
 
 function showPair(msg) {
-  $("back").hidden = true; $("composer").hidden = true; $("title").textContent = "Pair with BobAgent";
+  $("back").hidden = true; $("composer").hidden = true; $("title").textContent = "Pair with UpBot";
   const box = el("div", "center");
-  box.append(el("p", "meta", "On your Mac open BobAgent → Mobile → Pair a device, then enter the code."));
+  box.append(el("p", "meta", "On your Mac open UpBot → Mobile → Pair a device, then enter the code."));
   const input = el("input"); input.inputMode = "numeric"; input.maxLength = 6; input.autocomplete = "one-time-code";
   const btn = el("button", null, "Pair"); btn.style.cssText = "background:#0284c7;color:#fff;border:0;border-radius:8px;padding:10px 20px";
   const err = el("p", "error", msg || "");
@@ -61,7 +61,7 @@ function showPair(msg) {
     const r = await fetch("/api/pair", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: input.value.trim(), name: navigator.platform || "Phone" }) });
     const j = await r.json();
     if (!r.ok) { err.textContent = j.error; return; }
-    token = j.token; localStorage.setItem("bobagent.token", token); start();
+    token = j.token; localStorage.setItem("upbot.token", token); start();
   };
   box.append(input, btn, err);
   $("main").replaceChildren(box);

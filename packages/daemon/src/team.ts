@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { TeamMember, TeamMessage, TeamStatus, Turn } from "@bobagent/protocol";
+import type { TeamMember, TeamMessage, TeamStatus, Turn } from "@upbot/protocol";
 import type { AgentStore } from "./agents";
 import type { ChatStore } from "./chat-store";
 import type { Broadcast } from "./rpc";
@@ -7,7 +7,7 @@ import { RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
 import type { Vault } from "./vault";
 
-// Team client: connects this daemon to a BobAgent relay (packages/relay) so teammates can
+// Team client: connects this daemon to a UpBot relay (packages/relay) so teammates can
 // message the agents you share, and you can message theirs. Replies are each agent's final
 // answer for that turn. The member token lives in the vault as team.token.
 
@@ -316,7 +316,7 @@ export class TeamClient {
       agentName: agent.name,
       text: m.text,
     });
-    const prompt = `<team_message from="${m.from.name.replace(/[<>"&]/g, "")}">\n${m.text}\n</team_message>\nA teammate sent this through the BobAgent team relay; your final reply is sent back to them.`;
+    const prompt = `<team_message from="${m.from.name.replace(/[<>"&]/g, "")}">\n${m.text}\n</team_message>\nA teammate sent this through the UpBot team relay; your final reply is sent back to them.`;
     try {
       this.runtimes().sendFrom(agent.id, m.text, {
         agentId: null,

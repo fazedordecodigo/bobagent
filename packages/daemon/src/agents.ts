@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, AgentsCreateParams, AgentsUpdateParams } from "@bobagent/protocol";
+import type { Agent, AgentsCreateParams, AgentsUpdateParams } from "@upbot/protocol";
 
 type Row = {
   id: string;

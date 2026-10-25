@@ -1,15 +1,15 @@
-// bobagent-host: helper installed on a remote Linux host (VPS). The desktop daemon reaches it
+// upbot-host: helper installed on a remote Linux host (VPS). The desktop daemon reaches it
 // over SSH. It is a single self-contained file (node builtins + Bun only) so the daemon can
 // upload its source verbatim.
 //
-//   bobagent-host preflight      JSON report: OS, KVM, Firecracker, kernel/rootfs, CLIs
-//   bobagent-host run            first stdin line = RunSpec JSON; then stdio is the provider's
-//   bobagent-host bridge         stdio MCP server forwarding to the daemon over a unix socket
-//   bobagent-host guest-exec     (inside a microVM) first stdin line = exec spec JSON
+//   upbot-host preflight      JSON report: OS, KVM, Firecracker, kernel/rootfs, CLIs
+//   upbot-host run            first stdin line = RunSpec JSON; then stdio is the provider's
+//   upbot-host bridge         stdio MCP server forwarding to the daemon over a unix socket
+//   upbot-host guest-exec     (inside a microVM) first stdin line = exec spec JSON
 //
 // Isolation "firecracker" boots one microVM per agent session (`firecracker --no-api
 // --config-file`), talks to the guest over vsock (CONNECT 1024 = provider stdio), and serves
-// guest-initiated vsock ports: 5000 = bobagent bridge, 3128 = HTTPS CONNECT proxy (the guest
+// guest-initiated vsock ports: 5000 = upbot bridge, 3128 = HTTPS CONNECT proxy (the guest
 // has no network device; outbound traffic goes through this proxy).
 
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
@@ -46,14 +46,14 @@ export type RunSpec = {
   memMib?: number;
 };
 
-const ROOT = resolve(process.env.BOBAGENT_HOST_ROOT || join(homedir(), ".bobagent"));
+const ROOT = resolve(process.env.UPBOT_HOST_ROOT || join(homedir(), ".upbot"));
 const VSOCK_EXEC_PORT = 1024;
 const VSOCK_BRIDGE_PORT = 5000;
 const VSOCK_PROXY_PORT = 3128;
 const PROVIDER_CLIS = ["claude", "codex", "devin", "agent", "grok", "opencode", "gemini"];
 
 const die = (msg: string, code = 1): never => {
-  process.stderr.write(`bobagent-host: ${msg}\n`);
+  process.stderr.write(`upbot-host: ${msg}\n`);
   process.exit(code);
 };
 
@@ -101,7 +101,7 @@ function which(cmd: string): string | null {
 
 export function firecrackerBin(): string | null {
   const local = join(ROOT, "firecracker", "firecracker");
-  return process.env.BOBAGENT_FIRECRACKER_BIN || (existsSync(local) ? local : which("firecracker"));
+  return process.env.UPBOT_FIRECRACKER_BIN || (existsSync(local) ? local : which("firecracker"));
 }
 
 export function buildGuestProviderEnv(
@@ -111,7 +111,7 @@ export function buildGuestProviderEnv(
 ): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(inherited)) {
-    if (!key.startsWith("BOBAGENT_")) env[key] = value;
+    if (!key.startsWith("UPBOT_")) env[key] = value;
   }
   Object.assign(env, specEnv);
   env.NO_COLOR = "1";
@@ -452,7 +452,7 @@ export function vmConfig(spec: RunSpec, rootDisk: string, uds: string, workspace
   return {
     "boot-source": {
       kernel_image_path: join(ROOT, "firecracker", "vmlinux"),
-      boot_args: "console=ttyS0 reboot=k panic=1 pci=off init=/sbin/bobagent-init",
+      boot_args: "console=ttyS0 reboot=k panic=1 pci=off init=/sbin/upbot-init",
     },
     drives: [
       { drive_id: "rootfs", path_on_host: rootDisk, is_root_device: true, is_read_only: false },
@@ -501,9 +501,8 @@ async function removeStaleRuns(agentDir: string): Promise<void> {
 
 function ensureWorkspaceDisk(path: string): void {
   if (existsSync(path)) return;
-  const size = Number(process.env.BOBAGENT_VM_WORKSPACE_MIB ?? 8192);
-  if (!Number.isInteger(size) || size < 1)
-    die("BOBAGENT_VM_WORKSPACE_MIB must be a positive integer");
+  const size = Number(process.env.UPBOT_VM_WORKSPACE_MIB ?? 8192);
+  if (!Number.isInteger(size) || size < 1) die("UPBOT_VM_WORKSPACE_MIB must be a positive integer");
   const mkfs = which("mkfs.ext4") ?? die("mkfs.ext4 not found; install e2fsprogs on the host");
   const truncate = spawnSync("truncate", ["-s", `${size}M`, path]);
   if (truncate.status !== 0)
@@ -517,8 +516,7 @@ function ensureWorkspaceDisk(path: string): void {
 
 async function runFirecracker(spec: RunSpec, rest: Buffer) {
   const id = safeId(spec.agentId);
-  const fc =
-    firecrackerBin() ?? die("firecracker binary not found (run `bobagent-host preflight`)");
+  const fc = firecrackerBin() ?? die("firecracker binary not found (run `upbot-host preflight`)");
   const base = join(ROOT, "firecracker", "rootfs.ext4");
   if (!existsSync(base)) die(`missing ${base}`);
   if (!existsSync(join(ROOT, "firecracker", "vmlinux"))) die("missing firecracker/vmlinux");
@@ -537,7 +535,7 @@ async function runFirecracker(spec: RunSpec, rest: Buffer) {
   if (Buffer.byteLength(`${uds}_${VSOCK_PROXY_PORT}`) > 107) {
     rmSync(vmDir, { recursive: true, force: true });
     return die(
-      `Firecracker socket path exceeds Linux's 107-byte limit: ${uds}; use a shorter BOBAGENT_HOST_ROOT`,
+      `Firecracker socket path exceeds Linux's 107-byte limit: ${uds}; use a shorter UPBOT_HOST_ROOT`,
     );
   }
   const servers: Server[] = [];
@@ -630,7 +628,7 @@ async function runFirecracker(spec: RunSpec, rest: Buffer) {
   try {
     guest = await connectGuest(
       uds,
-      Number(process.env.BOBAGENT_VM_BOOT_TIMEOUT_MS || 60000),
+      Number(process.env.UPBOT_VM_BOOT_TIMEOUT_MS || 60000),
       () => vmAlive,
     );
   } catch (e) {
@@ -674,9 +672,9 @@ async function guestExec() {
   const { line, rest } = await readFirstLine(process.stdin);
   const spec = JSON.parse(line) as { cmd: string[]; env: Record<string, string>; cwd: string };
   mkdirSync(spec.cwd, { recursive: true });
-  const proxy = process.env.BOBAGENT_GUEST_PROXY;
+  const proxy = process.env.UPBOT_GUEST_PROXY;
   const env = buildGuestProviderEnv(process.env, spec.env ?? {}, proxy);
-  if (env.CODEX_HOME === "/run/bobagent/codex-home") mkdirSync(env.CODEX_HOME, { recursive: true });
+  if (env.CODEX_HOME === "/run/upbot/codex-home") mkdirSync(env.CODEX_HOME, { recursive: true });
   const [bin, ...args] = spec.cmd;
   const child = spawn(bin as string, args, {
     cwd: spec.cwd,
@@ -700,11 +698,11 @@ async function guestExec() {
 
 async function bridge() {
   const sock =
-    process.env.BOBAGENT_BRIDGE_SOCKET ||
-    process.env.BOBAGENT_GUEST_BRIDGE_SOCKET ||
-    "/run/bobagent/bridge.sock";
-  const token = process.env.BOBAGENT_BRIDGE_TOKEN;
-  if (!token) die("BOBAGENT_BRIDGE_TOKEN missing", 2);
+    process.env.UPBOT_BRIDGE_SOCKET ||
+    process.env.UPBOT_GUEST_BRIDGE_SOCKET ||
+    "/run/upbot/bridge.sock";
+  const token = process.env.UPBOT_BRIDGE_TOKEN;
+  if (!token) die("UPBOT_BRIDGE_TOKEN missing", 2);
   const send = (m: unknown) => process.stdout.write(`${JSON.stringify(m)}\n`);
   type Msg = { id?: number | string; method?: string; params?: unknown };
   const forward = async (method: string, params: unknown) => {
@@ -735,7 +733,7 @@ async function bridge() {
           result: {
             protocolVersion: v ?? "2025-06-18",
             capabilities: { tools: {} },
-            serverInfo: { name: "bobagent", version: "0.2.1" },
+            serverInfo: { name: "upbot", version: "0.2.1" },
           },
         });
       } else if (m.method === "ping") send({ jsonrpc: "2.0", id: m.id, result: {} });
@@ -767,6 +765,6 @@ if (import.meta.main) {
   else if (cmd === "run") await run();
   else if (cmd === "bridge") await bridge();
   else if (cmd === "guest-exec") await guestExec();
-  else if (cmd === "version") process.stdout.write("bobagent-host 0.2.1\n");
-  else die("usage: bobagent-host preflight|run|bridge|guest-exec|version", 2);
+  else if (cmd === "version") process.stdout.write("upbot-host 0.2.1\n");
+  else die("usage: upbot-host preflight|run|bridge|guest-exec|version", 2);
 }

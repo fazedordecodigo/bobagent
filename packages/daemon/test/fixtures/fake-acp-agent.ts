@@ -179,9 +179,9 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
 
   if (text.startsWith("mcp:")) {
     const m = /^mcp:(\w+)\s*([\s\S]*)$/.exec(text);
-    const spec = sessionMcp.get(sessionId)?.find((x) => x.name === "bobagent");
+    const spec = sessionMcp.get(sessionId)?.find((x) => x.name === "upbot");
     if (!m || !spec) {
-      await say("agent_message_chunk", "no-bobagent-mcp");
+      await say("agent_message_chunk", "no-upbot-mcp");
       return { stopReason: "end_turn" };
     }
     await say("agent_message_chunk", await callMcp(spec, m[1]!, JSON.parse(m[2] || "{}")));

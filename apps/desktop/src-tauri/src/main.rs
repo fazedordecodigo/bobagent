@@ -9,7 +9,7 @@ use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 use tokio::sync::Notify;
 
-const READY_PREFIX: &str = "BOBAGENT_READY ";
+const READY_PREFIX: &str = "UPBOT_READY ";
 
 #[derive(Serialize, Clone)]
 struct DaemonConnection {
@@ -43,21 +43,30 @@ fn spawn_daemon(app: &tauri::App) -> Result<(), String> {
         .path()
         .app_data_dir()
         .map_err(|e| format!("app_data_dir: {e}"))?;
+    if !data_dir.exists() {
+        if let Some(legacy) = data_dir.parent().map(|p| p.join("com.bobagent.desktop")) {
+            if legacy.is_dir() {
+                if let Err(e) = std::fs::rename(&legacy, &data_dir) {
+                    log::warn!("could not migrate legacy BobAgent data dir: {e}");
+                }
+            }
+        }
+    }
     std::fs::create_dir_all(&data_dir).map_err(|e| format!("create data dir: {e}"))?;
     let token = hex_token();
 
     let sidecar = app
         .shell()
-        .sidecar("bobagentd")
+        .sidecar("upbotd")
         .map_err(|e| format!("sidecar: {e}"))?;
     let (mut rx, mut child) = sidecar
         .args([OsStr::new("--data-dir"), data_dir.as_os_str()])
         .spawn()
-        .map_err(|e| format!("spawn bobagentd: {e}"))?;
+        .map_err(|e| format!("spawn upbotd: {e}"))?;
     // deliver the auth token on the daemon's first stdin line
     child
         .write(format!("{token}\n").as_bytes())
-        .map_err(|e| format!("write token to bobagentd stdin: {e}"))?;
+        .map_err(|e| format!("write token to upbotd stdin: {e}"))?;
 
     {
         let mut inner = state.inner.lock().unwrap();
@@ -88,23 +97,23 @@ fn spawn_daemon(app: &tauri::App) -> Result<(), String> {
                                     }
                                     state.ready.notify_waiters();
                                 }
-                                Err(e) => log::error!("bad READY line from bobagentd: {e}"),
+                                Err(e) => log::error!("bad READY line from upbotd: {e}"),
                             }
                         }
                     }
                 }
                 CommandEvent::Stderr(bytes) => {
                     for line in String::from_utf8_lossy(&bytes).lines() {
-                        log::info!("bobagentd: {line}");
+                        log::info!("upbotd: {line}");
                     }
                 }
-                CommandEvent::Error(e) => log::error!("bobagentd error: {e}"),
+                CommandEvent::Error(e) => log::error!("upbotd error: {e}"),
                 CommandEvent::Terminated(status) => {
-                    log::warn!("bobagentd terminated: {status:?}");
+                    log::warn!("upbotd terminated: {status:?}");
                     {
                         let mut inner = state.inner.lock().unwrap();
                         if inner.conn.is_none() && inner.error.is_none() {
-                            inner.error = Some(format!("bobagentd exited: {status:?}"));
+                            inner.error = Some(format!("upbotd exited: {status:?}"));
                         }
                     }
                     state.ready.notify_waiters();
@@ -155,7 +164,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![daemon_connection])
         .build(tauri::generate_context!())
-        .expect("error while building BobAgent")
+        .expect("error while building UpBot")
         .run(|app_handle, event| {
             if let RunEvent::Exit = event {
                 let state = app_handle.state::<SharedState>();

@@ -1,4 +1,4 @@
-import type { ConfigOption, PermissionOption, ToolCallStatus } from "@bobagent/protocol";
+import type { ConfigOption, PermissionOption, ToolCallStatus } from "@upbot/protocol";
 import {
   AUTH_RE,
   authMessage,
@@ -23,7 +23,7 @@ import {
 } from "./types";
 
 // Codex App Server (`codex app-server --listen stdio://`): JSON-RPC without the
-// "jsonrpc" field, one message per line. Threads map to BobAgent sessions.
+// "jsonrpc" field, one message per line. Threads map to UpBot sessions.
 
 const REQUEST_TIMEOUT_MS = 30_000;
 
@@ -381,7 +381,7 @@ class CodexSession implements ProviderSession {
       default:
         writeJsonLine(this.proc.child, {
           id,
-          error: { code: -32601, message: `BobAgent does not support ${method}` },
+          error: { code: -32601, message: `UpBot does not support ${method}` },
         });
     }
   }
@@ -507,13 +507,13 @@ export class CodexDriver implements ProviderDriver {
       bin,
       args,
       cwd,
-      vmKey ? { CODEX_HOME: "/run/bobagent/codex-home" } : undefined,
+      vmKey ? { CODEX_HOME: "/run/upbot/codex-home" } : undefined,
       opts.remote,
     );
     const session = new CodexSession(proc, hooks, cwd, vmKey);
     try {
       await session.request("initialize", {
-        clientInfo: { name: "bobagent", title: "BobAgent", version: "0.2.1" },
+        clientInfo: { name: "upbot", title: "UpBot", version: "0.2.1" },
         capabilities: null,
       });
       session.notify("initialized");

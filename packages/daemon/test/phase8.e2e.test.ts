@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, ChatItem, Memory, Skill, Turn } from "@bobagent/protocol";
+import type { Agent, ChatItem, Memory, Skill, Turn } from "@upbot/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -45,9 +45,9 @@ describe("avatars, memories, skills, agent creation e2e", () => {
     stateDir = tmp("p8-fake-");
     sharedRoot = tmp("p8-shared-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      BOBAGENT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
-      BOBAGENT_SHARED_ROOT: sharedRoot,
+      UPBOT_SHARED_ROOT: sharedRoot,
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
     a = await newAgent("Mem");

@@ -1,12 +1,12 @@
 import type { Database } from "bun:sqlite";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent } from "@bobagent/protocol";
+import type { Agent } from "@upbot/protocol";
 
 // Computer Use (macOS): screenshots via `screencapture`, mouse via CoreGraphics (JXA),
 // keyboard via System Events. Off for every agent until the user allows it; macOS also asks
 // for Screen Recording / Accessibility permission the first time.
-// BOBAGENT_COMPUTER_DRYRUN=<file> logs the commands instead of running them (tests).
+// UPBOT_COMPUTER_DRYRUN=<file> logs the commands instead of running them (tests).
 
 const CLICK_JXA = `ObjC.import("CoreGraphics");
 function run(argv) {
@@ -61,7 +61,7 @@ export class ComputerUse {
   }
 
   available(): boolean {
-    return process.platform === "darwin" || !!process.env.BOBAGENT_COMPUTER_DRYRUN;
+    return process.platform === "darwin" || !!process.env.UPBOT_COMPUTER_DRYRUN;
   }
 
   private check(agent: Agent) {
@@ -74,7 +74,7 @@ export class ComputerUse {
   }
 
   private async exec(cmd: string[]): Promise<void> {
-    const dry = process.env.BOBAGENT_COMPUTER_DRYRUN;
+    const dry = process.env.UPBOT_COMPUTER_DRYRUN;
     if (dry) {
       appendFileSync(dry, `${JSON.stringify(cmd)}\n`);
       return;

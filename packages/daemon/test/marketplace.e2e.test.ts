@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { cpSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { Agent, MarketplaceItem, Skill } from "@bobagent/protocol";
+import type { Agent, MarketplaceItem, Skill } from "@upbot/protocol";
 import { DaemonClient, type DaemonHandle, startDaemon, tmp } from "./helpers";
 
 const TOKEN = `mk-test-${crypto.randomUUID()}`;
@@ -45,8 +45,8 @@ describe("marketplace e2e", () => {
     agentsRoot = tmp("mk-agents-");
     sharedRoot = tmp("mk-shared-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      BOBAGENT_SHARED_ROOT: sharedRoot,
-      BOBAGENT_MARKETPLACE_URL: fileIndex,
+      UPBOT_SHARED_ROOT: sharedRoot,
+      UPBOT_MARKETPLACE_URL: fileIndex,
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
   });
@@ -92,7 +92,7 @@ describe("marketplace e2e", () => {
     };
     expect(s.skills).toEqual(["write-tests"]);
     const skill = (await c.request("skills.get", { name: "write-tests" })) as Skill;
-    expect(skill.author).toBe("marketplace:BobAgent");
+    expect(skill.author).toBe("marketplace:UpBot");
     expect(skill.body).toContain("Detect the test runner");
     const created = c.waitForEventWhere(
       "agent.created",

@@ -13,7 +13,7 @@ import type {
   TeamMessage,
   TeamStatus,
   VaultEntry,
-} from "@bobagent/protocol";
+} from "@upbot/protocol";
 import { useCallback, useEffect, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
 import { btnCls, inputCls, PROVIDERS } from "./AgentSettings";
@@ -410,7 +410,7 @@ export function BrowserView({ client, agents }: { client: DaemonClient; agents: 
       <p className="text-xs text-zinc-500">
         {state.available
           ? "Agents drive a separate Chromium window (own profile) with the browser_* tools; each agent gets its own tab. You can watch and use that window directly."
-          : "No Chromium-based browser found. Install Google Chrome or set BOBAGENT_BROWSER_PATH."}
+          : "No Chromium-based browser found. Install Google Chrome or set UPBOT_BROWSER_PATH."}
       </p>
       <ul className="space-y-2">
         {state.tabs.map((t) => (
@@ -1074,9 +1074,8 @@ export function TeamView({ client, agents }: { client: DaemonClient; agents: Age
       >
         <h2 className="text-lg font-semibold">Team</h2>
         <p className="text-xs text-zinc-500">
-          Join a BobAgent team relay to share agents with teammates and message theirs. Host one
-          with <code>bun run relay -- --data ./relay-data</code> and invite members with its admin
-          token.
+          Join a UpBot team relay to share agents with teammates and message theirs. Host one with{" "}
+          <code>bun run relay -- --data ./relay-data</code> and invite members with its admin token.
         </p>
         <input
           className={inputCls}

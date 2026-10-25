@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { networkInterfaces } from "node:os";
-import type { MobileDevice, MobileStatus } from "@bobagent/protocol";
+import type { MobileDevice, MobileStatus } from "@upbot/protocol";
 import { MOBILE_HTML } from "./mobile-app";
 import { RpcError } from "./runtime/agent-runtime";
 
@@ -72,7 +72,7 @@ export class MobileServer {
 
   status(): MobileStatus {
     const port = this.server?.port ?? null;
-    const host = process.env.BOBAGENT_MOBILE_HOST ?? "0.0.0.0";
+    const host = process.env.UPBOT_MOBILE_HOST ?? "0.0.0.0";
     const ips =
       host === "0.0.0.0"
         ? Object.values(networkInterfaces())
@@ -177,9 +177,9 @@ export class MobileServer {
 
   private listen() {
     if (this.server) return;
-    const port = Number(process.env.BOBAGENT_MOBILE_PORT ?? this.setting().port ?? 0) || 0;
+    const port = Number(process.env.UPBOT_MOBILE_PORT ?? this.setting().port ?? 0) || 0;
     const opts = {
-      hostname: process.env.BOBAGENT_MOBILE_HOST ?? "0.0.0.0",
+      hostname: process.env.UPBOT_MOBILE_HOST ?? "0.0.0.0",
       idleTimeout: 0,
       fetch: (req: Request) => this.handle(req),
     };
@@ -209,8 +209,8 @@ export class MobileServer {
     if (req.method === "GET" && url.pathname === "/manifest.webmanifest") {
       return Response.json(
         {
-          name: "BobAgent",
-          short_name: "BobAgent",
+          name: "UpBot",
+          short_name: "UpBot",
           start_url: "/",
           display: "standalone",
           background_color: "#09090b",

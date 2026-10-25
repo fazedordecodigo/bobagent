@@ -1,4 +1,4 @@
-import type { Agent, Channel, ChannelMessage } from "@bobagent/protocol";
+import type { Agent, Channel, ChannelMessage } from "@upbot/protocol";
 import { useEffect, useRef, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
 import { btnCls, inputCls } from "./AgentSettings";

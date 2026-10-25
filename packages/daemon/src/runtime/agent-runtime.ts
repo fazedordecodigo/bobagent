@@ -8,7 +8,7 @@ import type {
   PendingPermission,
   PermissionOption,
   QueueState,
-} from "@bobagent/protocol";
+} from "@upbot/protocol";
 import type { AgentStore } from "../agents";
 import type { ChatStore, QueueSource, QueueStore } from "../chat-store";
 import { checkProviderAvailable, DEFAULT_MODE, getDriver } from "../providers";
@@ -30,14 +30,14 @@ do not use any tools.
 </compaction_request>`;
 
 function compactThreshold(): number | null {
-  const raw = process.env.BOBAGENT_COMPACT_THRESHOLD;
+  const raw = process.env.UPBOT_COMPACT_THRESHOLD;
   if (raw === "off" || raw === "0") return null;
   const n = raw ? Number(raw) : 0.85;
   return Number.isFinite(n) && n > 0 && n <= 1 ? n : 0.85;
 }
 
 function compactTimeoutMs(): number {
-  const n = Number(process.env.BOBAGENT_COMPACT_TIMEOUT_MS);
+  const n = Number(process.env.UPBOT_COMPACT_TIMEOUT_MS);
   return Number.isFinite(n) && n > 0 ? n : 180_000;
 }
 
@@ -45,11 +45,11 @@ function xmlAttr(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
 
-/** Prompt framing for a message that another agent sent via the bobagent MCP bridge. */
+/** Prompt framing for a message that another agent sent via the upbot MCP bridge. */
 export function wrapAgentMessage(from: { agentId: string; name: string }, text: string): string {
   return `<agent_message_context from="${xmlAttr(from.name)}" agent_id="${from.agentId}">
-This message comes from another BobAgent agent, not from the user. To answer it, call the
-bobagent send_message tool with to="${xmlAttr(from.name)}". Do not reply to pure acknowledgements.
+This message comes from another UpBot agent, not from the user. To answer it, call the
+upbot send_message tool with to="${xmlAttr(from.name)}". Do not reply to pure acknowledgements.
 </agent_message_context>
 ${text}`;
 }
@@ -76,7 +76,7 @@ type PendingEntry = {
 };
 
 const cancelGraceMs = () =>
-  Math.max(0, Number.parseInt(process.env.BOBAGENT_CANCEL_GRACE_MS ?? "", 10) || 10_000);
+  Math.max(0, Number.parseInt(process.env.UPBOT_CANCEL_GRACE_MS ?? "", 10) || 10_000);
 
 export class AgentRuntime {
   status: AgentStatus = "idle";
@@ -282,7 +282,7 @@ export class AgentRuntime {
       if (desired === undefined) continue;
       if (!o.options.some((v) => v.value === desired)) {
         console.error(
-          `[bobagentd] skipping invalid config ${o.id}=${desired} for ${this.agent.provider}`,
+          `[upbotd] skipping invalid config ${o.id}=${desired} for ${this.agent.provider}`,
         );
         continue;
       }
@@ -292,7 +292,7 @@ export class AgentRuntime {
         o.currentValue = desired;
         changed = true;
       } catch (e) {
-        console.error(`[bobagentd] set_config_option ${o.id} failed:`, (e as Error).message);
+        console.error(`[upbotd] set_config_option ${o.id} failed:`, (e as Error).message);
       }
     }
     // default mode when the user hasn't chosen one
@@ -305,7 +305,7 @@ export class AgentRuntime {
           modeOpt.currentValue = def;
           changed = true;
         } catch (e) {
-          console.error(`[bobagentd] default mode ${def} failed:`, (e as Error).message);
+          console.error(`[upbotd] default mode ${def} failed:`, (e as Error).message);
         }
       }
     }
@@ -353,7 +353,7 @@ export class AgentRuntime {
         if (handoff) promptText = handoff + promptText;
       }
       this.sessionPromptCount += 1;
-      const dbgDir = process.env.BOBAGENT_DEBUG_PROMPTS_DIR;
+      const dbgDir = process.env.UPBOT_DEBUG_PROMPTS_DIR;
       if (dbgDir) {
         try {
           const { writeFileSync, mkdirSync } = await import("node:fs");

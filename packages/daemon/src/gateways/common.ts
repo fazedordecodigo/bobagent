@@ -1,4 +1,4 @@
-import type { GatewayStatus } from "@bobagent/protocol";
+import type { GatewayStatus } from "@upbot/protocol";
 
 export type Inbound = {
   chatId: string;

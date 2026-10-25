@@ -21,7 +21,7 @@ export class TelegramTransport implements Transport {
   ) {}
 
   private url(method: string) {
-    return `${process.env.BOBAGENT_TELEGRAM_API ?? "https://api.telegram.org"}/bot${this.token}/${method}`;
+    return `${process.env.UPBOT_TELEGRAM_API ?? "https://api.telegram.org"}/bot${this.token}/${method}`;
   }
 
   private async call<T>(method: string, body: unknown, signal?: AbortSignal): Promise<T> {
@@ -57,7 +57,7 @@ export class TelegramTransport implements Transport {
           first = false;
         }
         this.abort = new AbortController();
-        const timeout = Number(process.env.BOBAGENT_TELEGRAM_POLL_SECONDS ?? 25);
+        const timeout = Number(process.env.UPBOT_TELEGRAM_POLL_SECONDS ?? 25);
         const updates = await this.call<Update[]>(
           "getUpdates",
           { offset: this.offset, timeout, allowed_updates: ["message"] },

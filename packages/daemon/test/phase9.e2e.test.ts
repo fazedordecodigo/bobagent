@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, ChatItem, Routine, RoutineRun, Turn } from "@bobagent/protocol";
+import type { Agent, ChatItem, Routine, RoutineRun, Turn } from "@upbot/protocol";
 import { parseSchedule } from "../src/routines";
 import {
   DaemonClient,
@@ -61,9 +61,9 @@ describe("routines + attachments e2e", () => {
     agentsRoot = tmp("p9-agents-");
     stateDir = tmp("p9-fake-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      BOBAGENT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
-      BOBAGENT_ROUTINE_TICK_MS: "150",
+      UPBOT_ROUTINE_TICK_MS: "150",
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
     a = (await c.request("agents.create", {
@@ -118,7 +118,7 @@ describe("routines + attachments e2e", () => {
       prompt: "echo:tick",
       schedule: "every 5m",
     })) as Routine;
-    const db = new Database(join(dataDir, "bobagent.db"));
+    const db = new Database(join(dataDir, "upbot.db"));
     db.query("UPDATE routines SET next_run_at = 1 WHERE id = ?").run(r.id);
     db.close();
     const ev = (await c.waitForEventWhere(

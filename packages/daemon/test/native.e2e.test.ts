@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, ChatItem, ConfigOption, PendingPermission, Turn } from "@bobagent/protocol";
+import type { Agent, ChatItem, ConfigOption, PendingPermission, Turn } from "@upbot/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -59,9 +59,9 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
   let daemon: DaemonHandle;
   let c: DaemonClient;
   const env = () => ({
-    BOBAGENT_PROVIDER_COMMAND_CLAUDE: JSON.stringify(["bun", join(FIXTURES, "fake-claude.ts")]),
-    BOBAGENT_PROVIDER_COMMAND_CODEX: JSON.stringify(["bun", join(FIXTURES, "fake-codex.ts")]),
-    BOBAGENT_CANCEL_GRACE_MS: "3000",
+    UPBOT_PROVIDER_COMMAND_CLAUDE: JSON.stringify(["bun", join(FIXTURES, "fake-claude.ts")]),
+    UPBOT_PROVIDER_COMMAND_CODEX: JSON.stringify(["bun", join(FIXTURES, "fake-codex.ts")]),
+    UPBOT_CANCEL_GRACE_MS: "3000",
     [cs.stateEnv]: stateDir,
   });
 
@@ -126,12 +126,12 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
     if (cs.provider === "claude") {
       const argv = log.find((l) => l.method === "argv")!.params as string[];
       const cfg = JSON.parse(argv[argv.indexOf("--mcp-config") + 1]!);
-      expect(cfg.mcpServers.bobagent.env.BOBAGENT_BRIDGE_TOKEN).toBeTruthy();
+      expect(cfg.mcpServers.upbot.env.UPBOT_BRIDGE_TOKEN).toBeTruthy();
     } else {
       const start = log.find((l) => l.method === "thread/start")!.params as {
         params: { config: Record<string, { env: Record<string, string> }> };
       };
-      expect(start.params.config["mcp_servers.bobagent"]!.env.BOBAGENT_BRIDGE_TOKEN).toBeTruthy();
+      expect(start.params.config["mcp_servers.upbot"]!.env.UPBOT_BRIDGE_TOKEN).toBeTruthy();
     }
   });
 
@@ -262,7 +262,7 @@ describe("codex signed out", () => {
     const agentsRoot = tmp("nat-auth-agents-");
     const stateDir = tmp("nat-auth-fake-");
     const d = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      BOBAGENT_PROVIDER_COMMAND_CODEX: JSON.stringify(["bun", join(FIXTURES, "fake-codex.ts")]),
+      UPBOT_PROVIDER_COMMAND_CODEX: JSON.stringify(["bun", join(FIXTURES, "fake-codex.ts")]),
       FAKE_CODEX_STATE_DIR: stateDir,
       FAKE_CODEX_NO_AUTH: "1",
       OPENAI_API_KEY: "",

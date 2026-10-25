@@ -1,4 +1,4 @@
-import type { AgentUsage } from "@bobagent/protocol";
+import type { AgentUsage } from "@upbot/protocol";
 import { useEffect, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
 

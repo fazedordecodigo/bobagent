@@ -3,7 +3,7 @@ import {
   type ConfigOption,
   PROVIDER_PERMISSION_CONFIG,
   type ProviderId,
-} from "@bobagent/protocol";
+} from "@upbot/protocol";
 import { useEffect, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
 import { ConfirmDialog } from "./ConfirmDialog";

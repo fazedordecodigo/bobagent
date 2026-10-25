@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { Gateway, GatewayKind, GatewayStatus, Turn } from "@bobagent/protocol";
+import type { Gateway, GatewayKind, GatewayStatus, Turn } from "@upbot/protocol";
 import type { AgentStore } from "../agents";
 import type { ChatStore } from "../chat-store";
 import type { Broadcast } from "../rpc";
@@ -216,7 +216,7 @@ export class GatewayService {
       void t
         .send(
           m.chatId,
-          `This BobAgent gateway doesn't know you yet. Ask its owner to allow user id ${m.userId}.`,
+          `This UpBot gateway doesn't know you yet. Ask its owner to allow user id ${m.userId}.`,
           m.replyTo,
         )
         .catch(() => {});
@@ -254,7 +254,7 @@ export class GatewayService {
       });
     } catch (e) {
       void t
-        .send(m.chatId, `BobAgent could not deliver this: ${(e as Error).message}`, m.replyTo)
+        .send(m.chatId, `UpBot could not deliver this: ${(e as Error).message}`, m.replyTo)
         .catch(() => {});
     }
   }

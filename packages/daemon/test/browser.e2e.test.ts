@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
-import type { Agent, BrowserState, ChatItem, Turn } from "@bobagent/protocol";
+import type { Agent, BrowserState, ChatItem, Turn } from "@upbot/protocol";
 import { findBrowser } from "../src/browser";
 import { DaemonClient, type DaemonHandle, FAKE_AGENT, readPids, startDaemon, tmp } from "./helpers";
 
@@ -50,9 +50,9 @@ describe.skipIf(!hasBrowser)("agent browser e2e (headless Chromium over CDP)", (
     agentsRoot = tmp("br-agents-");
     stateDir = tmp("br-fake-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      BOBAGENT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
-      BOBAGENT_BROWSER_HEADLESS: "1",
+      UPBOT_BROWSER_HEADLESS: "1",
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
     a = (await c.request("agents.create", {

@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { Memory } from "@bobagent/protocol";
+import type { Memory } from "@upbot/protocol";
 
 const PROMPT_BUDGET = 8_000;
 
@@ -68,6 +68,6 @@ export class MemoryStore {
       total += line.length + 1;
     }
     if (lines.length === 0) return "";
-    return `<agent_memories>\nThings you chose to remember earlier (manage them with the bobagent remember/forget tools):\n${lines.join("\n")}\n</agent_memories>\n\n`;
+    return `<agent_memories>\nThings you chose to remember earlier (manage them with the upbot remember/forget tools):\n${lines.join("\n")}\n</agent_memories>\n\n`;
   }
 }

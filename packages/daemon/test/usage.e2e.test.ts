@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import type { Agent, AgentUsage, ChatItem, Turn } from "@bobagent/protocol";
+import type { Agent, AgentUsage, ChatItem, Turn } from "@upbot/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -55,9 +55,9 @@ describe("usage + compaction e2e", () => {
     agentsRoot = tmp("us-agents-");
     stateDir = tmp("us-fake-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      BOBAGENT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
-      BOBAGENT_COMPACT_THRESHOLD: "0.8",
+      UPBOT_COMPACT_THRESHOLD: "0.8",
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
     a = (await c.request("agents.create", {

@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
-import type { ConfigOption, ProviderId } from "@bobagent/protocol";
+import type { ConfigOption, ProviderId } from "@upbot/protocol";
 import { resolveCommand, spawnEnv } from "../env/login-path";
 import { AUTH_RE, authMessage, commandFor, redactSecrets, STDERR_TAIL_LINES } from "./process";
 import {
@@ -273,7 +273,7 @@ export class AcpDriver implements ProviderDriver {
 
     let loading = false;
     const app = acp
-      .client({ name: "bobagent" })
+      .client({ name: "upbot" })
       .onRequest("session/request_permission", async (ctx) => {
         const p = ctx.params as {
           toolCall?: { title?: string; kind?: string };
@@ -312,7 +312,7 @@ export class AcpDriver implements ProviderDriver {
             fs: { readTextFile: false, writeTextFile: false },
             terminal: false,
           },
-          clientInfo: { name: "bobagent", version: "0.2.1" },
+          clientInfo: { name: "upbot", version: "0.2.1" },
         } as never)) as {
           agentCapabilities?: { loadSession?: boolean };
         };

@@ -56,14 +56,14 @@ export class Connectors {
     const path = String(args.path ?? "");
     if (!path.startsWith("/") || path.startsWith("//"))
       throw new Error("`path` must start with / (e.g. /user/repos)");
-    const base = process.env.BOBAGENT_GITHUB_API ?? "https://api.github.com";
+    const base = process.env.UPBOT_GITHUB_API ?? "https://api.github.com";
     const res = await fetch(base + path, {
       method,
       headers: {
         authorization: `Bearer ${token}`,
         accept: "application/vnd.github+json",
         "x-github-api-version": "2022-11-28",
-        "user-agent": "BobAgent",
+        "user-agent": "UpBot",
         ...(args.body !== undefined ? { "content-type": "application/json" } : {}),
       },
       body: args.body !== undefined ? JSON.stringify(args.body) : null,
@@ -76,7 +76,7 @@ export class Connectors {
     const token = this.secret("connector.1password", agentId).trim();
     if (!/^op:\/\/[^\s]+$/.test(reference))
       throw new Error("`reference` must look like op://vault/item/field");
-    return run([...command("BOBAGENT_OP_COMMAND", ["op"]), "read", reference], {
+    return run([...command("UPBOT_OP_COMMAND", ["op"]), "read", reference], {
       ...(token && token !== "desktop" ? { OP_SERVICE_ACCOUNT_TOKEN: token } : {}),
     });
   }
@@ -86,7 +86,7 @@ export class Connectors {
     if (!BW_FIELDS.has(field))
       throw new Error(`\`field\` must be one of ${[...BW_FIELDS].join(", ")}`);
     if (!item.trim()) throw new Error("`item` is required");
-    return run([...command("BOBAGENT_BW_COMMAND", ["bw"]), "get", field, item], {
+    return run([...command("UPBOT_BW_COMMAND", ["bw"]), "get", field, item], {
       BW_SESSION: session,
     });
   }

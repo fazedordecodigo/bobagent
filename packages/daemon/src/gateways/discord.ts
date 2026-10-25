@@ -13,7 +13,7 @@ type Message = {
   mentions?: { id: string }[];
 };
 
-const api = () => process.env.BOBAGENT_DISCORD_API ?? "https://discord.com/api/v10";
+const api = () => process.env.UPBOT_DISCORD_API ?? "https://discord.com/api/v10";
 
 export class DiscordTransport implements Transport {
   private ws: WebSocket | null = null;
@@ -82,7 +82,7 @@ export class DiscordTransport implements Transport {
           d: {
             token: this.token,
             intents: INTENTS,
-            properties: { os: "macos", browser: "bobagent", device: "bobagent" },
+            properties: { os: "macos", browser: "upbot", device: "upbot" },
           },
         }),
       );

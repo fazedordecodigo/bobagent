@@ -1,5 +1,5 @@
-import type { DaemonEventMap, MethodName, MethodParams, MethodResult } from "@bobagent/protocol";
 import { invoke } from "@tauri-apps/api/core";
+import type { DaemonEventMap, MethodName, MethodParams, MethodResult } from "@upbot/protocol";
 
 type DaemonConnection = { port: number; token: string };
 

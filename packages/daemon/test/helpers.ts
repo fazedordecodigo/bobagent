@@ -171,9 +171,9 @@ export async function startDaemon(
         if (idx >= 0) {
           const line = buf.slice(0, idx);
           buf = buf.slice(idx + 1);
-          if (line.startsWith("BOBAGENT_READY ")) {
+          if (line.startsWith("UPBOT_READY ")) {
             clearTimeout(timer);
-            resolve(JSON.parse(line.slice("BOBAGENT_READY ".length)).port);
+            resolve(JSON.parse(line.slice("UPBOT_READY ".length)).port);
             return;
           }
         }

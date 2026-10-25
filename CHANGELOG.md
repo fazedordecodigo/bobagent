@@ -12,10 +12,10 @@
 
 ### New
 - MicroVM sign-in: save a Claude token/API key or an OpenAI API key (encrypted in the vault)
-  and BobAgent passes it to Claude/Codex inside Firecracker sessions only.
+  and UpBot passes it to Claude/Codex inside Firecracker sessions only.
 - Settings & tools: Skills, Marketplace, Browser, Vault, Gateways, Mobile, Team and Hosts in
   one tabbed view.
-- Remote hosts: run agents on a Linux VPS over SSH (`bobagent-host` helper, preflight, bridge
+- Remote hosts: run agents on a Linux VPS over SSH (`upbot-host` helper, preflight, bridge
   over an `ssh -R` unix socket).
 - Firecracker microVM per agent session on KVM hosts, with vsock bridge and a proxy restricted
   to public destinations; `packages/host/rootfs/build-rootfs.sh` builds the guest image.

@@ -20,7 +20,7 @@ import {
 
 const MAIN = join(import.meta.dir, "../src/main.ts");
 
-describe("bobagent-host", () => {
+describe("upbot-host", () => {
   test("readFirstLine keeps the bytes after the spec", async () => {
     const s = new PassThrough();
     const p = readFirstLine(s);
@@ -61,22 +61,22 @@ describe("bobagent-host", () => {
     expect(await proxyTarget("8.8.8.8")).toBe("8.8.8.8");
   });
 
-  test("guest provider env strips inherited internal BobAgent values", () => {
+  test("guest provider env strips inherited internal UpBot values", () => {
     const env = buildGuestProviderEnv(
       {
-        BOBAGENT_GUEST_PROXY: "http://127.0.0.1:3128",
-        BOBAGENT_GUEST_BRIDGE_SOCKET: "/run/bobagent/bridge.sock",
-        BOBAGENT_SENTINEL_TEST: "leak",
+        UPBOT_GUEST_PROXY: "http://127.0.0.1:3128",
+        UPBOT_GUEST_BRIDGE_SOCKET: "/run/upbot/bridge.sock",
+        UPBOT_SENTINEL_TEST: "leak",
         HOME: "/root",
         PATH: "/usr/bin",
       },
-      { BOBAGENT_BRIDGE_TOKEN: "mcp-token", CUSTOM_VALUE: "kept" },
+      { UPBOT_BRIDGE_TOKEN: "mcp-token", CUSTOM_VALUE: "kept" },
       "http://127.0.0.1:3128",
     );
-    expect(env.BOBAGENT_GUEST_PROXY).toBeUndefined();
-    expect(env.BOBAGENT_GUEST_BRIDGE_SOCKET).toBeUndefined();
-    expect(env.BOBAGENT_SENTINEL_TEST).toBeUndefined();
-    expect(env.BOBAGENT_BRIDGE_TOKEN).toBe("mcp-token");
+    expect(env.UPBOT_GUEST_PROXY).toBeUndefined();
+    expect(env.UPBOT_GUEST_BRIDGE_SOCKET).toBeUndefined();
+    expect(env.UPBOT_SENTINEL_TEST).toBeUndefined();
+    expect(env.UPBOT_BRIDGE_TOKEN).toBe("mcp-token");
     expect(env.CUSTOM_VALUE).toBe("kept");
     expect(env.HOME).toBe("/root");
     expect(env.NO_COLOR).toBe("1");
@@ -163,7 +163,7 @@ describe("bobagent-host", () => {
   test("preflight reports readiness without pretending", () => {
     const root = mkdtempSync(join(tmpdir(), "host-root-"));
     const r = spawnSync("bun", [MAIN, "preflight"], {
-      env: { ...process.env, BOBAGENT_HOST_ROOT: root, BOBAGENT_FIRECRACKER_BIN: "/nonexistent" },
+      env: { ...process.env, UPBOT_HOST_ROOT: root, UPBOT_FIRECRACKER_BIN: "/nonexistent" },
       encoding: "utf8",
     });
     expect(r.status).toBe(0);
@@ -206,7 +206,7 @@ describe("bobagent-host", () => {
     const root = mkdtempSync(join(tmpdir(), "host-root-"));
     const r = spawnSync("bun", [MAIN, "run"], {
       input: `${JSON.stringify({ agentId: "a", isolation: "firecracker", cmd: ["true"] })}\n`,
-      env: { ...process.env, BOBAGENT_HOST_ROOT: root, BOBAGENT_FIRECRACKER_BIN: "" },
+      env: { ...process.env, UPBOT_HOST_ROOT: root, UPBOT_FIRECRACKER_BIN: "" },
       encoding: "utf8",
     });
     expect(r.status).not.toBe(0);
@@ -217,7 +217,7 @@ describe("bobagent-host", () => {
     const root = mkdtempSync(join(tmpdir(), "host-root-"));
     const r = spawnSync("bun", [MAIN, "run"], {
       input: `${JSON.stringify({ agentId: "ag1", isolation: "none", cmd: ["sh", "-c", "pwd; cat"] })}\nhello`,
-      env: { ...process.env, BOBAGENT_HOST_ROOT: root },
+      env: { ...process.env, UPBOT_HOST_ROOT: root },
       encoding: "utf8",
     });
     expect(r.status).toBe(0);

@@ -1,4 +1,4 @@
-import { type MethodName, methodMap } from "@bobagent/protocol";
+import { type MethodName, methodMap } from "@upbot/protocol";
 import type { AgentStore } from "./agents";
 import { attachmentsBlock, saveAttachments } from "./attachments";
 import { type BrowserService, findBrowser } from "./browser";
@@ -87,7 +87,7 @@ export class Rpc {
       if (e instanceof ProviderError) {
         return JSON.stringify({ id, error: { code: e.code, message: e.message } });
       }
-      console.error("[bobagentd] handler error", e);
+      console.error("[upbotd] handler error", e);
       return JSON.stringify({ id, error: { code: "internal", message: "internal error" } });
     }
   }
@@ -385,7 +385,7 @@ export class Rpc {
       }
       case "browser.status":
         return {
-          available: findBrowser() !== null && process.env.BOBAGENT_BROWSER !== "off",
+          available: findBrowser() !== null && process.env.UPBOT_BROWSER !== "off",
           running: this.browser.running(),
           tabs: this.browser.list(),
         };

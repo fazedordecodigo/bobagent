@@ -12,7 +12,7 @@ import {
   removeFirecrackerHostRoot,
 } from "./firecracker-fixtures";
 
-const enabled = process.env.BOBAGENT_REAL_FIRECRACKER === "1";
+const enabled = process.env.UPBOT_REAL_FIRECRACKER === "1";
 const hostProcesses: ReturnType<typeof Bun.spawn>[] = [];
 
 type HostRun = {
@@ -33,8 +33,8 @@ function hostRun(
     cwd: REPO_ROOT,
     env: {
       ...process.env,
-      BOBAGENT_HOST_ROOT: root,
-      BOBAGENT_VM_WORKSPACE_MIB: "32",
+      UPBOT_HOST_ROOT: root,
+      UPBOT_VM_WORKSPACE_MIB: "32",
     },
     stdin: "pipe",
     stdout: "pipe",
@@ -80,7 +80,7 @@ async function waitForExit(run: HostRun, timeoutMs = 60000) {
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
           run.proc.kill("SIGKILL");
-          reject(new Error(`bobagent-host did not exit within ${timeoutMs} ms`));
+          reject(new Error(`upbot-host did not exit within ${timeoutMs} ms`));
         }, timeoutMs);
       }),
     ]);
@@ -238,13 +238,13 @@ describe.skipIf(!enabled)("real Firecracker host", () => {
         }),
         JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
       ];
-      const script = `printf '%s\\n' ${requestsFromGuest.map(shellQuote).join(" ")} | bobagent-bridge`;
+      const script = `printf '%s\\n' ${requestsFromGuest.map(shellQuote).join(" ")} | upbot-bridge`;
       const result = await waitForExit(
         hostRun(
           root,
           spec("bridge", ["sh", "-c", script], {
             bridgeSocket: socketPath,
-            env: { BOBAGENT_BRIDGE_TOKEN: "bridge-test-token" },
+            env: { UPBOT_BRIDGE_TOKEN: "bridge-test-token" },
           }),
         ),
       );
@@ -258,10 +258,10 @@ describe.skipIf(!enabled)("real Firecracker host", () => {
     }
   }, 90000);
 
-  test("does not expose internal BobAgent variables to guest commands", async () => {
+  test("does not expose internal UpBot variables to guest commands", async () => {
     const result = await waitForExit(hostRun(root, spec("guest-env", ["env"])));
     expect(result.code).toBe(0);
-    expect(result.stdout).not.toMatch(/^BOBAGENT_/m);
+    expect(result.stdout).not.toMatch(/^UPBOT_/m);
     expect(result.stdout).toContain("HTTPS_PROXY=http://127.0.0.1:3128");
     expect(result.stdout).toContain("NO_COLOR=1");
   }, 90000);

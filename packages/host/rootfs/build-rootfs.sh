@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Builds the guest image for BobAgent microVMs on the Linux host:
-#   ~/.bobagent/firecracker/rootfs.ext4  (Debian + bun + socat + provider CLIs)
-#   ~/.bobagent/firecracker/vmlinux      (Firecracker CI guest kernel)
-#   ~/.bobagent/firecracker/firecracker  (release binary)
+# Builds the guest image for UpBot microVMs on the Linux host:
+#   ~/.upbot/firecracker/rootfs.ext4  (Debian + bun + socat + provider CLIs)
+#   ~/.upbot/firecracker/vmlinux      (Firecracker CI guest kernel)
+#   ~/.upbot/firecracker/firecracker  (release binary)
 # Requires: docker, curl, mkfs.ext4, sudo (for loop mounts). No credentials go into the
-# image; sign in to provider CLIs inside a microVM or pass API keys via the BobAgent vault.
+# image; sign in to provider CLIs inside a microVM or pass API keys via the UpBot vault.
 #
 # usage: build-rootfs.sh [--size-mib 4096] [--providers "claude codex"] [--base image]
 set -euo pipefail
@@ -12,7 +12,7 @@ FC_VERSION="${FC_VERSION:-v1.12.1}"
 KERNEL_URL="${KERNEL_URL:-https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.12/$(uname -m)/vmlinux-6.1.128}"
 SIZE_MIB=4096
 PROVIDERS="claude codex"
-BASE="${BOBAGENT_ROOTFS_BASE:-}"
+BASE="${UPBOT_ROOTFS_BASE:-}"
 BASE_EXPLICIT=0
 [ -n "$BASE" ] && BASE_EXPLICIT=1
 while [ $# -gt 0 ]; do
@@ -28,13 +28,13 @@ while [ $# -gt 0 ]; do
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
-ROOT="${BOBAGENT_HOST_ROOT:-$HOME/.bobagent}"
+ROOT="${UPBOT_HOST_ROOT:-$HOME/.upbot}"
 OUT="$ROOT/firecracker"
 HERE="$(cd "$(dirname "$0")" && pwd)"
-HELPER="$ROOT/bin/bobagent-host.ts"
+HELPER="$ROOT/bin/upbot-host.ts"
 if [ ! -f "$HELPER" ]; then
   HELPER="$HERE/../src/main.ts"
-  [ -f "$HELPER" ] || { echo "bobagent-host source not found; run this script from a BobAgent checkout or install the helper first" >&2; exit 1; }
+  [ -f "$HELPER" ] || { echo "upbot-host source not found; run this script from a UpBot checkout or install the helper first" >&2; exit 1; }
 fi
 [ -e /dev/kvm ] || echo "warning: /dev/kvm missing; microVMs will not boot on this host" >&2
 mkdir -p "$OUT"
@@ -84,8 +84,8 @@ fi
 
 work="$(mktemp -d)"
 trap 'sudo umount "$work/mnt" 2>/dev/null || true; rm -rf "$work"' EXIT
-cp "$HELPER" "$work/bobagent-host.ts"
-cp "$HERE/bobagent-init" "$work/bobagent-init" 2>/dev/null || cp "$ROOT/bin/bobagent-init" "$work/bobagent-init"
+cp "$HELPER" "$work/upbot-host.ts"
+cp "$HERE/upbot-init" "$work/upbot-init" 2>/dev/null || cp "$ROOT/bin/upbot-init" "$work/upbot-init"
 cat > "$work/Dockerfile" <<DOCKER
 FROM ${BASE}
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git socat iproute2 unzip xz-utils \
@@ -101,11 +101,11 @@ RUN set -eu; \
  tar -xJf "/tmp/node-dist/\$tarball" -C /usr/local --strip-components=1; \
  rm -rf /tmp/node-dist
 RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
-COPY bobagent-host.ts /opt/bobagent/bobagent-host.ts
-COPY bobagent-init /sbin/bobagent-init
-RUN chmod 0755 /sbin/bobagent-init \
- && printf '#!/bin/sh\nexec bun /opt/bobagent/bobagent-host.ts bridge\n' > /usr/local/bin/bobagent-bridge \
- && chmod 0755 /usr/local/bin/bobagent-bridge
+COPY upbot-host.ts /opt/upbot/upbot-host.ts
+COPY upbot-init /sbin/upbot-init
+RUN chmod 0755 /sbin/upbot-init \
+ && printf '#!/bin/sh\nexec bun /opt/upbot/upbot-host.ts bridge\n' > /usr/local/bin/upbot-bridge \
+ && chmod 0755 /usr/local/bin/upbot-bridge
 RUN for p in ${PROVIDERS}; do case "\$p" in \
       claude) npm install -g @anthropic-ai/claude-code ;; \
       codex) npm install -g @openai/codex ;; \
@@ -113,8 +113,8 @@ RUN for p in ${PROVIDERS}; do case "\$p" in \
       opencode) npm install -g opencode-ai ;; \
     esac; done
 DOCKER
-docker build -t bobagent-guest "$work"
-cid="$(docker create bobagent-guest)"
+docker build -t upbot-guest "$work"
+cid="$(docker create upbot-guest)"
 docker export "$cid" -o "$work/rootfs.tar"
 docker rm "$cid" >/dev/null
 truncate -s "${SIZE_MIB}M" "$work/rootfs.ext4"
@@ -124,6 +124,6 @@ sudo mount -o loop "$work/rootfs.ext4" "$work/mnt"
 sudo tar -xf "$work/rootfs.tar" -C "$work/mnt"
 sudo umount "$work/mnt"
 mv "$work/rootfs.ext4" "$OUT/rootfs.ext4"
-sha256sum "$work/bobagent-host.ts" | awk '{print $1}' > "$OUT/guest-helper.sha256"
+sha256sum "$work/upbot-host.ts" | awk '{print $1}' > "$OUT/guest-helper.sha256"
 sha256sum "$OUT/vmlinux" "$OUT/rootfs.ext4" "$OUT/firecracker" > "$OUT/SHA256SUMS"
-echo "ready: $OUT (run Check in BobAgent → Settings → Hosts)"
+echo "ready: $OUT (run Check in UpBot → Settings → Hosts)"

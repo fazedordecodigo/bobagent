@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { Channel, ChannelMessage, Turn } from "@bobagent/protocol";
+import type { Channel, ChannelMessage, Turn } from "@upbot/protocol";
 import type { AgentStore } from "./agents";
 import { MAX_HOPS } from "./bridge";
 import type { ChatStore } from "./chat-store";
@@ -8,7 +8,7 @@ import { RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
 
 // Channels: a shared conversation between the user and several agents. User posts go
-// to the channel owner; the owner can delegate to members (bobagent `delegate` tool).
+// to the channel owner; the owner can delegate to members (upbot `delegate` tool).
 // When a channel-triggered turn ends, the agent's reply is posted to the channel, and
 // a member's reply is forwarded to the owner.
 
@@ -220,7 +220,7 @@ export class ChannelService {
     const members = ch.memberIds.map((id) => this.name(id)).join(", ");
     const ownerHint =
       role === "owner"
-        ? `You own this channel's task. Delegate work to members with the bobagent delegate tool (channel="${xmlAttr(ch.name)}"), then combine their results.`
+        ? `You own this channel's task. Delegate work to members with the upbot delegate tool (channel="${xmlAttr(ch.name)}"), then combine their results.`
         : "You are a member helping the channel owner. Your final reply is posted to the channel automatically.";
     return `<channel_context name="${xmlAttr(ch.name)}" id="${ch.id}" role="${role}" members="${xmlAttr(members)}">
 ${ownerHint}

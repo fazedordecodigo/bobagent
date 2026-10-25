@@ -8,8 +8,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { Agent } from "@bobagent/protocol";
-import { ProviderId } from "@bobagent/protocol";
+import type { Agent } from "@upbot/protocol";
+import { ProviderId } from "@upbot/protocol";
 import type { AgentStore } from "./agents";
 import type { BrowserService } from "./browser";
 import type { ChannelService } from "./channels";
@@ -24,8 +24,8 @@ import type { SkillLibrary } from "./skills";
 import type { SubagentService } from "./subagents";
 import type { Vault } from "./vault";
 
-// Local MCP bridge: each provider session gets a `bobagent` stdio MCP server
-// (`bobagentd mcp-bridge`) that forwards tool calls to POST /bridge with a
+// Local MCP bridge: each provider session gets a `upbot` stdio MCP server
+// (`upbotd mcp-bridge`) that forwards tool calls to POST /bridge with a
 // per-agent token, so agents can message each other and hand over files.
 
 export const MAX_HOPS = 6;
@@ -38,13 +38,13 @@ export const BRIDGE_TOOLS = [
   {
     name: "list_agents",
     description:
-      "List the other BobAgent agents you can message (id, name, provider, status). Your own entry is marked you=true.",
+      "List the other UpBot agents you can message (id, name, provider, status). Your own entry is marked you=true.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
     name: "send_message",
     description:
-      "Send a message to another BobAgent agent. It is queued and the agent handles it as a new turn; replies arrive as messages to you.",
+      "Send a message to another UpBot agent. It is queued and the agent handles it as a new turn; replies arrive as messages to you.",
     inputSchema: {
       type: "object",
       properties: {
@@ -72,7 +72,7 @@ export const BRIDGE_TOOLS = [
   },
   {
     name: "list_channels",
-    description: "List the BobAgent channels you belong to, with owner, members and status.",
+    description: "List the UpBot channels you belong to, with owner, members and status.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -203,7 +203,7 @@ export const BRIDGE_TOOLS = [
   },
   {
     name: "create_agent",
-    description: "Create a new BobAgent agent with its own workspace.",
+    description: "Create a new UpBot agent with its own workspace.",
     inputSchema: {
       type: "object",
       properties: {
@@ -220,7 +220,7 @@ export const BRIDGE_TOOLS = [
     [
       [
         "browser_open",
-        "Open an http(s) URL in your own tab of the BobAgent browser.",
+        "Open an http(s) URL in your own tab of the UpBot browser.",
         { url: { type: "string" } },
         ["url"],
       ],
@@ -360,12 +360,12 @@ export class Bridge {
     const { command, args } = bridgeCommand();
     return [
       {
-        name: "bobagent",
+        name: "upbot",
         command,
         args,
         env: {
-          BOBAGENT_BRIDGE_URL: `http://127.0.0.1:${this.port}/bridge`,
-          BOBAGENT_BRIDGE_TOKEN: this.tokenFor(agentId),
+          UPBOT_BRIDGE_URL: `http://127.0.0.1:${this.port}/bridge`,
+          UPBOT_BRIDGE_TOKEN: this.tokenFor(agentId),
         },
       },
     ];

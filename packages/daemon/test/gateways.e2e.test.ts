@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "
 setDefaultTimeout(30000);
 
 import { rmSync } from "node:fs";
-import type { Agent, ChatItem, Gateway, VaultEntry } from "@bobagent/protocol";
+import type { Agent, ChatItem, Gateway, VaultEntry } from "@upbot/protocol";
 import { splitText } from "../src/gateways/common";
 import { DaemonClient, type DaemonHandle, FAKE_AGENT, readPids, startDaemon, tmp } from "./helpers";
 
@@ -143,12 +143,12 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
     agentsRoot = tmp("gw-agents-");
     stateDir = tmp("gw-fake-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      BOBAGENT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
-      BOBAGENT_VAULT_KEY: "cd".repeat(32),
-      BOBAGENT_TELEGRAM_API: base,
-      BOBAGENT_SLACK_API: `${base}/slack`,
-      BOBAGENT_DISCORD_API: `${base}/discord`,
+      UPBOT_VAULT_KEY: "cd".repeat(32),
+      UPBOT_TELEGRAM_API: base,
+      UPBOT_SLACK_API: `${base}/slack`,
+      UPBOT_DISCORD_API: `${base}/discord`,
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
     a = (await c.request("agents.create", {

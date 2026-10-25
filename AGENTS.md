@@ -1,18 +1,18 @@
-# BobAgent
+# UpBot
 
 Local-first macOS desktop workspace for multiple persistent AI coding agents.
-Bun workspaces monorepo: a Bun sidecar daemon (`bobagentd`) owns SQLite state and
+Bun workspaces monorepo: a Bun sidecar daemon (`upbotd`) owns SQLite state and
 serves a token-authenticated WebSocket API; a Tauri 2 + React desktop app spawns and
 talks to it.
 
 ## Layout
 
-- `packages/protocol` — `@bobagent/protocol`: zod 4 schemas + the typed method map
+- `packages/protocol` — `@upbot/protocol`: zod 4 schemas + the typed method map
   (`methodMap`) shared by daemon and UI. Single source of truth for the wire contract.
-- `packages/daemon` — `@bobagent/daemon`: `src/main.ts` is the sidecar entry.
-  Args: `--data-dir <path>` (required), `--agents-root <path>` (default `~/BobAgent/agents`).
+- `packages/daemon` — `@upbot/daemon`: `src/main.ts` is the sidecar entry.
+  Args: `--data-dir <path>` (required), `--agents-root <path>` (default `~/UpBot/agents`).
   The auth token is the first line on stdin (required; never via env, so agent CLIs can't
-  read it). Prints `BOBAGENT_READY {"port":N}` on
+  read it). Prints `UPBOT_READY {"port":N}` on
   stdout when listening on 127.0.0.1; all other logs go to stderr.
   Exits on SIGTERM/SIGINT and on stdin EOF. Migrations live in `src/db/migrations.ts`
   (ordered SQL array, tracked in `schema_migrations`). Agent delete is a soft delete;
@@ -31,19 +31,19 @@ talks to it.
 Each agent gets a lazy `AgentRuntime` (`packages/daemon/src/runtime/`) that owns one
 provider session at a time. Turns stream ACP updates into `items` rows; permission
 requests pause in `awaiting_permission` until `permissions.respond`. Cancel sends
-`session/cancel` and hard-kills after `BOBAGENT_CANCEL_GRACE_MS` (default 10000).
+`session/cancel` and hard-kills after `UPBOT_CANCEL_GRACE_MS` (default 10000).
 On daemon start, turns left `running` are marked `interrupted`. Provider CLIs are
 found via a login-shell PATH merge (`src/env/login-path.ts`) — spawned agents get
 `NO_COLOR=1` and a resolved absolute binary path.
 
 Daemon auth: the token is delivered on the FIRST STDIN LINE (never env — provider
 children must not see it). Missing/empty token or no line within 10 s -> exit 2.
-stdin EOF afterwards = shutdown. `spawnEnv` strips all `BOBAGENT_*` vars.
+stdin EOF afterwards = shutdown. `spawnEnv` strips all `UPBOT_*` vars.
 
 Env vars (daemon):
-- `BOBAGENT_ACP_COMMAND_<PROVIDER>` — JSON array overriding the spawn command per
-  provider (e.g. `BOBAGENT_ACP_COMMAND_DEVIN='["bun","path/to/agent.ts"]'`).
-- `BOBAGENT_CANCEL_GRACE_MS` — ms after `chat.cancel` before the process is killed.
+- `UPBOT_ACP_COMMAND_<PROVIDER>` — JSON array overriding the spawn command per
+  provider (e.g. `UPBOT_ACP_COMMAND_DEVIN='["bun","path/to/agent.ts"]'`).
+- `UPBOT_CANCEL_GRACE_MS` — ms after `chat.cancel` before the process is killed.
 
 Sign-in commands surfaced on auth errors: `devin auth login`, `agent login`,
 `grok login`, `opencode auth login`, `claude auth login`, `codex login` (all verified via --help). Gemini: `gemini`
@@ -70,7 +70,7 @@ New (non-resumed) sessions with prior history get a `<conversation_history>` blo
 (`src/runtime/handoff.ts`, pure fn) before the first prompt.
 
 `spikes/mode-probe.ts` — per provider x mode permission probe -> `spikes/out/mode-probe.json`.
-- `BOBAGENT_DEBUG_PROMPTS_DIR` — when set, the daemon writes every outgoing prompt to
+- `UPBOT_DEBUG_PROMPTS_DIR` — when set, the daemon writes every outgoing prompt to
   `<dir>/<agentId>-<turnId>.txt` (debugging only).
 
 ## Native Claude + Codex (Phase 4)
@@ -91,20 +91,20 @@ stderr tail, JSONL and auth helpers live in `process.ts`.
   Config: `mode` (auto = workspace-write, read-only; both `on-request`), `model`, `effort`,
   sent with each `turn/start`.
 - Verified against real CLIs (signed out) on the VM: claude 2.1.310, codex-cli 0.164.0.
-- `BOBAGENT_PROVIDER_COMMAND_<PROVIDER>` overrides any provider's spawn command
-  (`BOBAGENT_ACP_COMMAND_<PROVIDER>` still works). Tests use
+- `UPBOT_PROVIDER_COMMAND_<PROVIDER>` overrides any provider's spawn command
+  (`UPBOT_ACP_COMMAND_<PROVIDER>` still works). Tests use
   `test/fixtures/fake-claude.ts` / `fake-codex.ts` (`$FAKE_CLAUDE_STATE_DIR`,
   `$FAKE_CODEX_STATE_DIR`, `FAKE_CODEX_NO_AUTH=1`) from `test/native.e2e.test.ts`.
 
 ## Agent-to-agent bridge (Phase 5)
 
-Every provider session gets a `bobagent` stdio MCP server: the daemon binary run as
-`bobagentd mcp-bridge` (dev: `bun src/main.ts mcp-bridge`), with
-`BOBAGENT_BRIDGE_URL`/`BOBAGENT_BRIDGE_TOKEN` in its env. The token is per agent,
+Every provider session gets a `upbot` stdio MCP server: the daemon binary run as
+`upbotd mcp-bridge` (dev: `bun src/main.ts mcp-bridge`), with
+`UPBOT_BRIDGE_URL`/`UPBOT_BRIDGE_TOKEN` in its env. The token is per agent,
 regenerated each daemon start, and never the daemon's main token. The bridge forwards
 `tools/list`/`tools/call` to `POST /bridge` (Bearer bridge token; any Origin header ->
 403). Passed via ACP `mcpServers`, Claude `--mcp-config`, Codex `thread/start.config`
-(`mcp_servers.bobagent`). Tools (`src/bridge.ts`):
+(`mcp_servers.upbot`). Tools (`src/bridge.ts`):
 - `list_agents`, `send_message {to, text}`: enqueues on the recipient with
   `queue.from_agent_id` + `hops` (migration 5). The recipient's prompt is framed by
   `<agent_message_context>` (`wrapAgentMessage`); its `user_message` item has `from`.
@@ -112,7 +112,7 @@ regenerated each daemon start, and never the daemon's main token. The bridge for
 - `share_file {to, path, note?}`: only regular files inside the sender workspace, max 100 MB.
   It copies the file to `<shared>/Transfers/<id>/` with `manifest.json` (sha256), delivers it
   to `<recipient ws>/transfers/<id>/<name>`, and notifies the recipient. Shared root is
-  `BOBAGENT_SHARED_ROOT` or `dirname(agentsRoot)/Shared` (default `~/BobAgent/Shared`).
+  `UPBOT_SHARED_ROOT` or `dirname(agentsRoot)/Shared` (default `~/UpBot/Shared`).
 Tests: `test/bridge.e2e.test.ts` (the fake ACP agent's `mcp:<tool> <json>` prompt
 spawns the real bridge and calls the tool).
 
@@ -138,9 +138,9 @@ Claude `result.usage`/`total_cost_usd`/`modelUsage.contextWindow`, Codex
 (`usedTokens`/`contextWindow`) and cumulative in/out tokens and cost; `agents.usage` RPC +
 `agent.usage` event; UI `components/UsageBar.tsx`. Compaction (`AgentRuntime.compact`, via
 `agents.compact` or automatically after a completed turn when used/window >=
-`BOBAGENT_COMPACT_THRESHOLD`, default 0.85, `off` disables): the agent answers a
+`UPBOT_COMPACT_THRESHOLD`, default 0.85, `off` disables): the agent answers a
 `<compaction_request>` prompt (output captured, permissions denied, timeout
-`BOBAGENT_COMPACT_TIMEOUT_MS`), the provider session is dropped and forgotten, and a
+`UPBOT_COMPACT_TIMEOUT_MS`), the provider session is dropped and forgotten, and a
 `compaction` chat item stores the summary. The next fresh session gets
 `<conversation_summary>` plus only the history after it. The queue waits while compacting.
 Tests: `test/usage.e2e.test.ts`.
@@ -162,7 +162,7 @@ prefixed with `<agent_memories>` and `<skills_library>` (index only). UI:
 
 Routines (`src/routines.ts`, migration 9: `routines`, `routine_runs`) are saved prompts sent
 to an agent with `trigger` schedule|webhook|manual. Schedules: `every <n>m|h|d`, `daily HH:MM`,
-`weekly <day> HH:MM` (local time); the scheduler ticks every `BOBAGENT_ROUTINE_TICK_MS`
+`weekly <day> HH:MM` (local time); the scheduler ticks every `UPBOT_ROUTINE_TICK_MS`
 (default 30000) and collapses missed runs into one. Webhooks: `POST /hooks/<routineId>` with
 `Authorization: Bearer <webhookToken>` (per-routine token; Origin rejected), body passed as
 `<webhook_payload>` (20 KB cap). RPC `routines.list/create/update/delete/run/runs`, events
@@ -175,33 +175,33 @@ extracted with `unzip`) and listed in an `<attachments>` block. Tests: `test/pha
 ## Agent browser (Phase 10)
 
 `src/browser.ts`: one Chromium-family browser (Chrome/Chromium/Edge/Brave, or
-`BOBAGENT_BROWSER_PATH`) launched lazily with `--remote-debugging-port=0` and its own profile
+`UPBOT_BROWSER_PATH`) launched lazily with `--remote-debugging-port=0` and its own profile
 (`<data-dir>/browser-profile`, port read from `DevToolsActivePort`), driven over CDP (flattened
 `Target.attachToTarget` sessions). Each agent gets one tab. Bridge tools: `browser_open`
 (http/https only), `browser_snapshot` (numbered interactive elements via `data-bob-ref` + page
 text), `browser_click`, `browser_type`, `browser_press`, `browser_back`, `browser_screenshot`
 (PNG into `<workspace>/browser/`), `browser_close`. RPC `browser.status/closeTab/close`, event
-`browser.updated`; UI `BrowserView`. `BOBAGENT_BROWSER=off` disables it,
-`BOBAGENT_BROWSER_HEADLESS=1` for tests. Tests: `test/browser.e2e.test.ts` (skipped when no
+`browser.updated`; UI `BrowserView`. `UPBOT_BROWSER=off` disables it,
+`UPBOT_BROWSER_HEADLESS=1` for tests. Tests: `test/browser.e2e.test.ts` (skipped when no
 browser is installed).
 
 ## Vault, connectors, Computer Use, voice (Phase 11)
 
 Vault (`src/vault.ts`, migration 10 `vault` + `settings`): AES-256-GCM secrets; key in the
-macOS Keychain (service `BobAgent`, account `vault-key`), else `<data-dir>/vault.key`;
-`BOBAGENT_VAULT_KEY` (64 hex) overrides for tests. Per-secret agent allowlist. RPC
+macOS Keychain (service `UpBot`, account `vault-key`), else `<data-dir>/vault.key`;
+`UPBOT_VAULT_KEY` (64 hex) overrides for tests. Per-secret agent allowlist. RPC
 `vault.list/set/setAccess/delete` (values never returned), event `vault.changed`; bridge
 `vault_list`, `vault_get`. Connectors (`src/connectors.ts`) use shared secrets without
 returning them: `connector.github` -> `github_api` (REST proxy, token redacted,
-`BOBAGENT_GITHUB_API` for tests); `connector.1password` -> `onepassword_read` (`op read`,
+`UPBOT_GITHUB_API` for tests); `connector.1password` -> `onepassword_read` (`op read`,
 optional service-account token); `connector.bitwarden` -> `bitwarden_get` (`bw get`,
-BW_SESSION). `BOBAGENT_OP_COMMAND`/`BOBAGENT_BW_COMMAND` override the CLIs.
+BW_SESSION). `UPBOT_OP_COMMAND`/`UPBOT_BW_COMMAND` override the CLIs.
 Computer Use (`src/computer.ts`, macOS): off per agent until `computer.setAccess`; bridge
 `computer_screenshot` (screencapture), `computer_click` (CoreGraphics via JXA),
 `computer_type`, `computer_key` (System Events, whitelisted keys/modifiers);
-`BOBAGENT_COMPUTER_DRYRUN=<file>` logs commands instead (tests).
-Voice (`src/voice.ts`): `voice.speak/stop` (`say`, or `BOBAGENT_TTS_COMMAND` with text on
-stdin), `voice.transcribe` (`BOBAGENT_STT_COMMAND` with `{file}`, or `whisper` on PATH),
+`UPBOT_COMPUTER_DRYRUN=<file>` logs commands instead (tests).
+Voice (`src/voice.ts`): `voice.speak/stop` (`say`, or `UPBOT_TTS_COMMAND` with text on
+stdin), `voice.transcribe` (`UPBOT_STT_COMMAND` with `{file}`, or `whisper` on PATH),
 `voice.status`. UI: Vault view, Computer Use toggle, composer mic, read-aloud button;
 `src-tauri/Info.plist` has the microphone usage string. Tests: `test/phase11.e2e.test.ts`.
 
@@ -216,13 +216,13 @@ their id back); `@AgentName text` routes to another agent; in Slack/Discord chan
 mentions count, DMs always. Prompt is wrapped in `<external_message>`; the queue
 `meta_json.gateway` drives the reply on `turn.ended`. RPC `gateways.list/create/update/delete`,
 events `gateway.updated/deleted`; UI `GatewaysView`. Test base URLs:
-`BOBAGENT_TELEGRAM_API`, `BOBAGENT_SLACK_API`, `BOBAGENT_DISCORD_API`.
+`UPBOT_TELEGRAM_API`, `UPBOT_SLACK_API`, `UPBOT_DISCORD_API`.
 Tests: `test/gateways.e2e.test.ts`.
 
 ## Marketplace (Phase 12b)
 
 `marketplace/` holds the default registry (`index.json` + `skills/*.md` + `agents/*.json`),
-fetched from raw.githubusercontent.com (`BOBAGENT_MARKETPLACE_URL` overrides; user sources in
+fetched from raw.githubusercontent.com (`UPBOT_MARKETPLACE_URL` overrides; user sources in
 `settings.marketplace_sources`, http(s)/file URLs). `src/marketplace.ts` verifies each file's
 sha256 before installing; skills go to the skills library (author `marketplace:<author>`),
 agent templates create an agent (chosen provider) and install their listed skills. RPC
@@ -233,7 +233,7 @@ agent templates create an agent (chosen provider) and install their listed skill
 
 `src/mobile.ts` + `src/mobile-app.ts` (vanilla JS PWA as a string): opt-in LAN
 server (`mobile.enable`, `0.0.0.0`, port remembered in `settings.mobile`;
-`BOBAGENT_MOBILE_HOST`/`BOBAGENT_MOBILE_PORT` override). Pairing: `mobile.pair` shows a
+`UPBOT_MOBILE_HOST`/`UPBOT_MOBILE_PORT` override). Pairing: `mobile.pair` shows a
 6-digit code (5 min, 5 attempts) -> `POST /api/pair` returns a device token (sha256 stored in
 `mobile_devices`, migration 12). Devices call `POST /api/rpc` with an allowlist (agents.list/
 statuses, chat.history/send/cancel, queue.get, permissions.list/respond; no attachments) and
@@ -273,32 +273,32 @@ events `hosts.changed`, `placement.updated`, `subagent.updated`; UI `components/
 (Settings → Hosts). SSH runs the system `ssh` with `BatchMode=yes`,
 `StrictHostKeyChecking=accept-new`, keepalives, `-p`, optional `-i`, then `--` and the target
 (validated by `SshTarget`, so it cannot be an option); remote commands are single-quoted.
-`BOBAGENT_SSH_COMMAND` (JSON array) replaces `ssh` (tests: `test/fixtures/fake-ssh.ts`,
+`UPBOT_SSH_COMMAND` (JSON array) replaces `ssh` (tests: `test/fixtures/fake-ssh.ts`,
 `$FAKE_SSH_HOME`, `$FAKE_SSH_LOG`, targets `unreachable*` fail). Install uploads
 `packages/host/src/main.ts` (embedded as text) to
-`${BOBAGENT_HOST_ROOT:-$HOME/.bobagent}/bin/bobagent-host.ts` and runs `preflight`; install and
-check honor the same remote `BOBAGENT_HOST_ROOT`. When an agent's placement has a host,
+`${UPBOT_HOST_ROOT:-$HOME/.upbot}/bin/upbot-host.ts` and runs `preflight`; install and
+check honor the same remote `UPBOT_HOST_ROOT`. When an agent's placement has a host,
 `AgentRuntime` passes a `RemoteLaunch` to
 the driver: the provider command is spawned as `ssh -R <sock>:127.0.0.1:<daemon port> ...
-bobagent-host run` (first stdin line = RunSpec JSON), and the `bobagent` MCP server becomes
-`bobagent-host bridge` on the host (POSTs `/bridge` through the forwarded socket). Changing a
+upbot-host run` (first stdin line = RunSpec JSON), and the `upbot` MCP server becomes
+`upbot-host bridge` on the host (POSTs `/bridge` through the forwarded socket). Changing a
 placement drops the provider session. Firecracker placement requires a host whose preflight
 says `firecrackerReady` (Linux + /dev/kvm + firecracker + vmlinux + rootfs.ext4 + `mkfs.ext4`,
 with no stale guest helper);
 there is no fallback. Build the guest from a checkout with
 `bash packages/host/rootfs/build-rootfs.sh`; the host needs Docker, curl, sudo and e2fsprogs,
 and the user needs `/dev/kvm` access (`sudo usermod -aG kvm "$USER"`, then re-login).
-`packages/host` (`bobagent-host run` with `isolation: "firecracker"`) boots one VM per session
+`packages/host` (`upbot-host run` with `isolation: "firecracker"`) boots one VM per session
 (`firecracker --no-api --config-file`, fresh root disk copied from the base rootfs, vCPU 1-32,
 memory 256-65536 MiB) and gives each agent a persistent sparse `workspace.ext4` (default
-8192 MiB, configurable with `BOBAGENT_VM_WORKSPACE_MIB`) mounted at `/persist`, with `/workspace`
+8192 MiB, configurable with `UPBOT_VM_WORKSPACE_MIB`) mounted at `/persist`, with `/workspace`
 and `/root` bind-mounted from it. It connects vsock 1024 for provider stdio, serves guest vsock
 5000 (bridge) and 3128 (CONNECT proxy), syncs storage when a provider exits, and removes the
 per-run root disk on session end. With `setpriv` installed, Firecracker runs with
 `--pdeathsig KILL`. On the Linux x86_64/KVM test host, boot to first guest output measured 1.7
 seconds. The proxy resolves DNS once, rejects a hostname if any IPv4 answer is non-public, and
 connects to the approved address. CONNECT requests are audited at `vms/<agentId>/proxy.log`
-(rotated to `.1` above 1 MiB); provider processes drop inherited `BOBAGENT_*` variables while
+(rotated to `.1` above 1 MiB); provider processes drop inherited `UPBOT_*` variables while
 retaining explicit RunSpec env.
 MicroVM sign-in (`src/remote/credentials.ts`): `vmCredentials.list/set/delete` store
 `vmcred.<provider>` in the vault (hidden from `vault.list`, never on an allowlist):
@@ -306,23 +306,23 @@ claude `oauth_token` -> `CLAUDE_CODE_OAUTH_TOKEN`, `api_key` -> `ANTHROPIC_API_K
 `api_key` -> `OPENAI_API_KEY` + `CODEX_API_KEY`. `HostStore.launchFor` adds them to
 `RemoteLaunch.credentials` and the RunSpec env only for `firecracker` placements; when Codex
 reports signed out and a key is present the driver calls `account/login/start {type:"apiKey"}`.
-Credentialed Codex sessions set `CODEX_HOME=/run/bobagent/codex-home` on guest tmpfs; fake-key
+Credentialed Codex sessions set `CODEX_HOME=/run/upbot/codex-home` on guest tmpfs; fake-key
 runs found no `/root/.codex/auth.json` on the persistent workspace. Fake `OPENAI_API_KEY` or
 `CODEX_API_KEY` alone left `account/read` signed out. Rejected credentials surface a redacted
 provider detail and a Settings → Hosts prompt. Tests: `test/vm-credentials.test.ts` and
 `bun run test:firecracker:providers` (real SSH/Firecracker, fake Claude API/OAuth and Codex
 keys, persistence and leak checks). Codex's home/thread cache is ephemeral; the driver falls
 back to `thread/start` if a thread cannot be resumed.
-Guest image: `packages/host/rootfs/` (`bobagent-init`, `build-rootfs.sh`); run the real host and
+Guest image: `packages/host/rootfs/` (`upbot-init`, `build-rootfs.sh`); run the real host and
 SSH integration tests with `bun run test:firecracker` on a Linux Firecracker host; signed-out
 real Claude/Codex flows use `bun run test:firecracker:providers`. `--base <image>` overrides
-`BOBAGENT_ROOTFS_BASE`; defaults try Debian Hub, mirror.gcr.io, then public ECR, selecting the
+`UPBOT_ROOTFS_BASE`; defaults try Debian Hub, mirror.gcr.io, then public ECR, selecting the
 first cached or pullable image. This host's default-provider build selected Debian Hub and took
 1m 0s: rootfs 4.0 GiB apparent / 1.6 GiB allocated, 1643 MiB ext4 used; Docker image 2.35 GB
 disk usage / 775 MB content size. Re-run the build after updating or reinstalling the helper;
 preflight reports `guestHelperCurrent`.
 Subagents (`src/subagents.ts`): bridge `spawn_subagents {tasks:[{task,name?}], provider?,
-keep?}` (max 8 per call, `BOBAGENT_MAX_SUBAGENTS` running per parent, default 8, depth 2)
+keep?}` (max 8 per call, `UPBOT_MAX_SUBAGENTS` running per parent, default 8, depth 2)
 creates child agents that inherit the parent's placement, sends each its task, and when the
 whole batch has ended delivers one `<subagent_results>` message to the parent; non-kept
 children are then deleted (stopping their process/VM). `list_subagents`, `stop_subagent`.
@@ -339,11 +339,11 @@ configs, so it does not reflect stock defaults. Gemini's config path is unverifi
 ## Verified commands (run from repo root)
 
 - `bun install` — install workspace deps.
-- `bun run build:daemon` — compile `bobagentd-aarch64-apple-darwin` into
+- `bun run build:daemon` — compile `upbotd-aarch64-apple-darwin` into
   `apps/desktop/src-tauri/binaries/` (Tauri externalBin naming).
 - `bun run dev` — build the sidecar, then `tauri dev` (Vite on :1420).
 - `bun run build:app` — `tauri build --debug --bundles app` ->
-  `apps/desktop/src-tauri/target/debug/bundle/macos/BobAgent.app`.
+  `apps/desktop/src-tauri/target/debug/bundle/macos/UpBot.app`.
 - `bun run test` — `bun test packages/daemon packages/host` (daemon e2e: spawns the real daemon).
 - `bun run lint` — `biome check .`
 - `bun run typecheck` — `tsc -p` for protocol, daemon, relay, host, desktop (sequential).

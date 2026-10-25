@@ -32,7 +32,7 @@ export function UpdateButton() {
     none: "Up to date",
     available: `Install ${update?.version ?? "update"}`,
     installing: "Installing…",
-    done: "Restart BobAgent to finish",
+    done: "Restart UpBot to finish",
     error: "Update check failed",
   }[state];
   return (

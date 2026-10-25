@@ -5,7 +5,7 @@ import type {
   Channel,
   PendingPermission,
   ProviderId,
-} from "@bobagent/protocol";
+} from "@upbot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AgentSettings, btnCls, inputCls, PROVIDERS } from "./components/AgentSettings";
 import { ChannelCreateForm, ChannelView } from "./components/ChannelView";
@@ -180,7 +180,7 @@ export default function App() {
     <div className="flex h-screen">
       <aside className="flex w-64 flex-col border-r border-zinc-800">
         <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
-          <h1 className="text-sm font-semibold">BobAgent</h1>
+          <h1 className="text-sm font-semibold">UpBot</h1>
           <button
             type="button"
             className={`${btnCls} bg-zinc-800 hover:bg-zinc-700`}

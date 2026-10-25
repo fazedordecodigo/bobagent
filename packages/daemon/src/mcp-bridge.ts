@@ -1,4 +1,4 @@
-// `bobagentd mcp-bridge`: a stdio MCP server spawned by provider CLIs. It forwards
+// `upbotd mcp-bridge`: a stdio MCP server spawned by provider CLIs. It forwards
 // tools/list and tools/call to the daemon's /bridge endpoint.
 
 import { createInterface } from "node:readline";
@@ -8,10 +8,10 @@ const PROTOCOL_VERSION = "2025-06-18";
 type Msg = { jsonrpc?: string; id?: number | string; method?: string; params?: unknown };
 
 export async function runMcpBridge(): Promise<void> {
-  const url = process.env.BOBAGENT_BRIDGE_URL;
-  const token = process.env.BOBAGENT_BRIDGE_TOKEN;
+  const url = process.env.UPBOT_BRIDGE_URL;
+  const token = process.env.UPBOT_BRIDGE_TOKEN;
   if (!url || !token) {
-    console.error("bobagentd mcp-bridge: BOBAGENT_BRIDGE_URL / BOBAGENT_BRIDGE_TOKEN missing");
+    console.error("upbotd mcp-bridge: UPBOT_BRIDGE_URL / UPBOT_BRIDGE_TOKEN missing");
     process.exit(2);
   }
   const send = (m: unknown) => process.stdout.write(`${JSON.stringify(m)}\n`);
@@ -46,7 +46,7 @@ export async function runMcpBridge(): Promise<void> {
           reply(m.id, {
             protocolVersion: requested ?? PROTOCOL_VERSION,
             capabilities: { tools: {} },
-            serverInfo: { name: "bobagent", version: "0.2.1" },
+            serverInfo: { name: "upbot", version: "0.2.1" },
           });
           return;
         }
