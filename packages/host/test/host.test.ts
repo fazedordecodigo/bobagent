@@ -1,10 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { blockedHost, type RunSpec, readFirstLine, vmConfig } from "../src/main";
+import {
+  blockedHost,
+  proxyServer,
+  proxyTarget,
+  type RunSpec,
+  readFirstLine,
+  vmConfig,
+} from "../src/main";
 
 const MAIN = join(import.meta.dir, "../src/main.ts");
 
@@ -28,6 +36,12 @@ describe("bobagent-host", () => {
       "192.168.1.1",
       "169.254.169.254",
       "0.0.0.0",
+      "100.64.0.1",
+      "100.127.255.254",
+      "192.0.0.1",
+      "198.18.0.1",
+      "198.19.255.254",
+      "224.0.0.1",
       "::1",
       "[fd00::1]",
       "metadata.google.internal",
@@ -35,6 +49,40 @@ describe("bobagent-host", () => {
       expect(blockedHost(h)).toBe(true);
     for (const h of ["api.anthropic.com", "8.8.8.8", "172.32.0.1"])
       expect(blockedHost(h)).toBe(false);
+  });
+
+  test("proxyTarget rejects hostnames resolving to blocked addresses", async () => {
+    expect(await proxyTarget("2130706433")).toBeNull();
+    expect(await proxyTarget("localhost")).toBeNull();
+    expect(await proxyTarget("8.8.8.8")).toBe("8.8.8.8");
+  });
+
+  test("proxy rejects a numeric hostname resolving to loopback", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "proxy-test-"));
+    const socketPath = join(dir, "proxy.sock");
+    const target = createServer((conn) => conn.destroy());
+    const proxy = proxyServer();
+    await new Promise<void>((resolve) => target.listen(0, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) => proxy.listen(socketPath, resolve));
+    try {
+      const port = (target.address() as { port: number }).port;
+      const response = await new Promise<string>((resolve, reject) => {
+        const client = createConnection({ path: socketPath });
+        let text = "";
+        client.setTimeout(3000, () => client.destroy(new Error("proxy response timeout")));
+        client.on("data", (data) => (text += data.toString()));
+        client.on("end", () => resolve(text));
+        client.on("error", reject);
+        client.on("connect", () =>
+          client.write(`CONNECT 2130706433:${port} HTTP/1.1\r\nHost: proxy\r\n\r\n`),
+        );
+      });
+      expect(response).toStartWith("HTTP/1.1 403 Forbidden");
+    } finally {
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+      await new Promise<void>((resolve) => target.close(() => resolve()));
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("vm config clamps resources and wires vsock", () => {
@@ -45,10 +93,23 @@ describe("bobagent-host", () => {
       vcpus: 999,
       memMib: 1,
     };
-    const cfg = vmConfig(spec, "/d.ext4", "/v.sock");
+    const cfg = vmConfig(spec, "/root.ext4", "/v.sock", "/workspace.ext4");
     expect(cfg["machine-config"]).toEqual({ vcpu_count: 32, mem_size_mib: 256 });
     expect(cfg.vsock).toEqual({ guest_cid: 3, uds_path: "/v.sock" });
-    expect(cfg.drives[0]?.path_on_host).toBe("/d.ext4");
+    expect(cfg.drives).toEqual([
+      {
+        drive_id: "rootfs",
+        path_on_host: "/root.ext4",
+        is_root_device: true,
+        is_read_only: false,
+      },
+      {
+        drive_id: "workspace",
+        path_on_host: "/workspace.ext4",
+        is_root_device: false,
+        is_read_only: false,
+      },
+    ]);
   });
 
   test("preflight reports readiness without pretending", () => {

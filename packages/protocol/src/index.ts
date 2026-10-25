@@ -416,6 +416,7 @@ export const HostPreflight = z
     firecracker: z.object({ path: z.string(), version: z.string().nullable() }).nullable(),
     kernelImage: z.string().nullable(),
     rootfs: z.string().nullable(),
+    mkfsExt4: z.string().nullable(),
     providers: z.record(z.string(), z.string().nullable()),
     firecrackerReady: z.boolean(),
   })

@@ -23,7 +23,10 @@ ROOT="${BOBAGENT_HOST_ROOT:-$HOME/.bobagent}"
 OUT="$ROOT/firecracker"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 HELPER="$ROOT/bin/bobagent-host.ts"
-[ -f "$HELPER" ] || { echo "install the helper first (BobAgent → Settings → Hosts → Install)" >&2; exit 1; }
+if [ ! -f "$HELPER" ]; then
+  HELPER="$HERE/../src/main.ts"
+  [ -f "$HELPER" ] || { echo "bobagent-host source not found; run this script from a BobAgent checkout or install the helper first" >&2; exit 1; }
+fi
 [ -e /dev/kvm ] || echo "warning: /dev/kvm missing; microVMs will not boot on this host" >&2
 mkdir -p "$OUT"
 ARCH="$(uname -m)"

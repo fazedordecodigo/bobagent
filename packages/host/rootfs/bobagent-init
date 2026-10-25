@@ -9,8 +9,17 @@ export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 mount -t proc proc /proc
 mount -t sysfs sys /sys
 mount -t devtmpfs dev /dev 2>/dev/null || true
-mkdir -p /dev/pts /run/bobagent /tmp /workspace && mount -t devpts devpts /dev/pts
+mount -t tmpfs tmpfs /run
+mkdir -p /dev/pts /tmp /workspace && mount -t devpts devpts /dev/pts
 mount -t tmpfs tmpfs /tmp
+mkdir -p /run/bobagent
+if [ -e /dev/vdb ]; then
+  mkdir -p /persist
+  mount -t ext4 /dev/vdb /persist
+  mkdir -p /persist/workspace /persist/root
+  mount --bind /persist/workspace /workspace
+  mount --bind /persist/root /root
+fi
 hostname bobagent-vm
 ip link set lo up 2>/dev/null || true
 export HOME=/root BOBAGENT_GUEST_PROXY=http://127.0.0.1:3128
@@ -18,4 +27,4 @@ export BOBAGENT_GUEST_BRIDGE_SOCKET=/run/bobagent/bridge.sock
 socat UNIX-LISTEN:/run/bobagent/bridge.sock,fork,mode=600 VSOCK-CONNECT:2:5000 &
 socat TCP-LISTEN:3128,bind=127.0.0.1,fork,reuseaddr VSOCK-CONNECT:2:3128 &
 cd /workspace
-exec socat VSOCK-LISTEN:1024,fork,reuseaddr EXEC:"bun /opt/bobagent/bobagent-host.ts guest-exec"
+exec socat -t 10 VSOCK-LISTEN:1024,fork,reuseaddr EXEC:"bun /opt/bobagent/bobagent-host.ts guest-exec"

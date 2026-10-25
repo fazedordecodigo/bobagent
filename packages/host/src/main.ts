@@ -12,7 +12,9 @@
 // guest-initiated vsock ports: 5000 = bobagent bridge, 3128 = HTTPS CONNECT proxy (the guest
 // has no network device; outbound traffic goes through this proxy).
 
-import { spawn, spawnSync } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { lookup } from "node:dns/promises";
 import {
   accessSync,
   closeSync,
@@ -21,6 +23,7 @@ import {
   existsSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -124,9 +127,15 @@ function preflight() {
     firecracker: fc ? { path: fc, version: fcVersion } : null,
     kernelImage: existsSync(kernel) ? kernel : null,
     rootfs: existsSync(rootfs) ? rootfs : null,
+    mkfsExt4: which("mkfs.ext4"),
     providers,
     firecrackerReady:
-      platform() === "linux" && kvm && !!fcVersion && existsSync(kernel) && existsSync(rootfs),
+      platform() === "linux" &&
+      kvm &&
+      !!fcVersion &&
+      existsSync(kernel) &&
+      existsSync(rootfs) &&
+      !!which("mkfs.ext4"),
   };
   process.stdout.write(`${JSON.stringify(report)}\n`);
 }
@@ -135,6 +144,53 @@ function preflight() {
 function pumpStdin(rest: Buffer, sink: NodeJS.WritableStream) {
   if (rest.length) sink.write(rest);
   process.stdin.pipe(sink);
+}
+
+async function pumpFramedStdin(rest: Buffer, sink: NodeJS.WritableStream) {
+  const writeFrame = async (data: Buffer) => {
+    const frame = Buffer.allocUnsafe(data.length + 4);
+    frame.writeUInt32BE(data.length);
+    data.copy(frame, 4);
+    if (!sink.write(frame)) await new Promise<void>((resolve) => sink.once("drain", resolve));
+  };
+  if (rest.length) await writeFrame(rest);
+  for await (const chunk of process.stdin) await writeFrame(Buffer.from(chunk));
+  await writeFrame(Buffer.alloc(0));
+}
+
+function pumpGuestStdin(rest: Buffer, source: NodeJS.ReadableStream, sink: NodeJS.WritableStream) {
+  let buffer = rest;
+  let ended = false;
+  const finish = () => {
+    if (ended) return;
+    ended = true;
+    sink.end();
+  };
+  const onData = (chunk: Buffer) => {
+    if (ended) return;
+    buffer = Buffer.concat([buffer, chunk]);
+    for (;;) {
+      if (buffer.length < 4) return;
+      const length = buffer.readUInt32BE(0);
+      if (length === 0) {
+        buffer = buffer.subarray(4);
+        finish();
+        return;
+      }
+      if (buffer.length < length + 4) return;
+      sink.write(buffer.subarray(4, length + 4));
+      buffer = buffer.subarray(length + 4);
+    }
+  };
+  source.on("data", onData);
+  source.once("end", finish);
+  if (rest.length) onData(Buffer.alloc(0));
+  source.resume();
+}
+
+function finish(code: number) {
+  process.stdin.destroy();
+  process.exitCode = code;
 }
 
 function runLocal(spec: RunSpec, rest: Buffer) {
@@ -153,7 +209,7 @@ function runLocal(spec: RunSpec, rest: Buffer) {
   child.stdin.on("error", () => {});
   pumpStdin(rest, child.stdin);
   process.stdin.on("end", () => setTimeout(() => child.kill("SIGKILL"), 5000).unref());
-  child.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+  child.on("close", (code, signal) => finish(code ?? (signal ? 1 : 0)));
 }
 
 export function blockedHost(host: string): boolean {
@@ -166,20 +222,38 @@ export function blockedHost(host: string): boolean {
       a === 127 ||
       a === 0 ||
       a === 10 ||
+      (a === 100 && b >= 64 && b <= 127) ||
       (a === 169 && b === 254) ||
       (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168)
+      (a === 192 && b === 0) ||
+      (a === 192 && b === 168) ||
+      (a === 198 && (b === 18 || b === 19)) ||
+      a >= 224
     );
   }
   if (isIP(h.replace(/^\[|\]$/g, "")) === 6) return true;
   return false;
 }
 
+export async function proxyTarget(host: string): Promise<string | null> {
+  const normalized = host.replace(/^\[|\]$/g, "").toLowerCase();
+  if (blockedHost(normalized)) return null;
+  if (isIP(normalized) === 4) return normalized;
+  if (isIP(normalized) === 6) return null;
+  try {
+    const addresses = await lookup(normalized, { all: true, family: 4 });
+    if (!addresses.length || addresses.some(({ address }) => blockedHost(address))) return null;
+    return addresses[0]!.address;
+  } catch {
+    return null;
+  }
+}
+
 /** Minimal HTTP CONNECT proxy for the guest (public destinations only). */
 export function proxyServer(): Server {
   return createServer((conn) => {
     let head = Buffer.alloc(0);
-    const onData = (chunk: Buffer) => {
+    const onData = async (chunk: Buffer) => {
       head = Buffer.concat([head, chunk]);
       const end = head.indexOf("\r\n\r\n");
       if (end < 0) {
@@ -190,12 +264,17 @@ export function proxyServer(): Server {
       const m = /^CONNECT ([^\s:]+|\[[^\]]+\]):(\d{1,5}) HTTP\/1\.[01]\r\n/.exec(
         head.toString("latin1"),
       );
-      if (!m || blockedHost(m[1]!)) {
+      if (!m) {
+        conn.end("HTTP/1.1 403 Forbidden\r\n\r\n");
+        return;
+      }
+      const target = await proxyTarget(m[1]!);
+      if (!target) {
         conn.end("HTTP/1.1 403 Forbidden\r\n\r\n");
         return;
       }
       const upstream = createConnection({
-        host: m[1]!.replace(/^\[|\]$/g, ""),
+        host: target,
         port: Number(m[2]),
       });
       upstream.once("connect", () => {
@@ -234,6 +313,17 @@ function vsockConnect(uds: string, port: number): Promise<Socket> {
   return new Promise((ok, fail) => {
     const s = createConnection({ path: uds });
     let buf = "";
+    let settled = false;
+    const timer = setTimeout(() => {
+      s.destroy();
+      finishFail(new Error("vsock connection timed out"));
+    }, 3000);
+    const finishFail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fail(error);
+    };
     const onData = (d: Buffer) => {
       buf += d.toString("latin1");
       const nl = buf.indexOf("\n");
@@ -241,16 +331,19 @@ function vsockConnect(uds: string, port: number): Promise<Socket> {
       s.off("data", onData);
       if (!buf.startsWith("OK")) {
         s.destroy();
-        fail(new Error(`vsock refused: ${buf.slice(0, nl)}`));
+        finishFail(new Error(`vsock refused: ${buf.slice(0, nl)}`));
         return;
       }
+      settled = true;
+      clearTimeout(timer);
       const extra = buf.slice(nl + 1);
       s.pause();
       if (extra) s.unshift(Buffer.from(extra, "latin1"));
       ok(s);
     };
     s.on("data", onData);
-    s.once("error", fail);
+    s.once("error", finishFail);
+    s.once("close", () => finishFail(new Error("vsock closed before OK")));
     s.once("connect", () => s.write(`CONNECT ${port}\n`));
   });
 }
@@ -268,13 +361,21 @@ async function connectGuest(uds: string, timeoutMs: number, alive: () => boolean
   }
 }
 
-export function vmConfig(spec: RunSpec, disk: string, uds: string) {
+export function vmConfig(spec: RunSpec, rootDisk: string, uds: string, workspaceDisk: string) {
   return {
     "boot-source": {
       kernel_image_path: join(ROOT, "firecracker", "vmlinux"),
       boot_args: "console=ttyS0 reboot=k panic=1 pci=off init=/sbin/bobagent-init",
     },
-    drives: [{ drive_id: "rootfs", path_on_host: disk, is_root_device: true, is_read_only: false }],
+    drives: [
+      { drive_id: "rootfs", path_on_host: rootDisk, is_root_device: true, is_read_only: false },
+      {
+        drive_id: "workspace",
+        path_on_host: workspaceDisk,
+        is_root_device: false,
+        is_read_only: false,
+      },
+    ],
     "machine-config": {
       vcpu_count: Math.min(Math.max(spec.vcpus ?? 2, 1), 32),
       mem_size_mib: Math.min(Math.max(spec.memMib ?? 2048, 256), 65536),
@@ -283,70 +384,159 @@ export function vmConfig(spec: RunSpec, disk: string, uds: string) {
   };
 }
 
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+async function removeStaleRuns(agentDir: string): Promise<void> {
+  for (const entry of readdirSync(agentDir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^r[0-9a-f]{8}$/.test(entry.name)) continue;
+    const runDir = join(agentDir, entry.name);
+    const pidFile = join(runDir, "firecracker.pid");
+    if (existsSync(pidFile)) {
+      const pid = Number(readFileSync(pidFile, "utf8"));
+      if (Number.isInteger(pid) && pid > 1) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {}
+        const deadline = Date.now() + 3000;
+        while (pidAlive(pid) && Date.now() < deadline) await Bun.sleep(50);
+      }
+    }
+    rmSync(runDir, { recursive: true, force: true });
+  }
+}
+
+function ensureWorkspaceDisk(path: string): void {
+  if (existsSync(path)) return;
+  const size = Number(process.env.BOBAGENT_VM_WORKSPACE_MIB ?? 8192);
+  if (!Number.isInteger(size) || size < 1)
+    die("BOBAGENT_VM_WORKSPACE_MIB must be a positive integer");
+  const mkfs = which("mkfs.ext4") ?? die("mkfs.ext4 not found; install e2fsprogs on the host");
+  const truncate = spawnSync("truncate", ["-s", `${size}M`, path]);
+  if (truncate.status !== 0)
+    die(`cannot create workspace disk: ${truncate.stderr.toString().trim()}`);
+  const format = spawnSync(mkfs, ["-q", "-F", path]);
+  if (format.status !== 0) {
+    rmSync(path, { force: true });
+    die(`cannot format workspace disk: ${format.stderr.toString().trim()}`);
+  }
+}
+
 async function runFirecracker(spec: RunSpec, rest: Buffer) {
   const id = safeId(spec.agentId);
-  const fc = firecrackerBin();
-  if (!fc) die("firecracker binary not found (run `bobagent-host preflight`)");
+  const fc =
+    firecrackerBin() ?? die("firecracker binary not found (run `bobagent-host preflight`)");
   const base = join(ROOT, "firecracker", "rootfs.ext4");
   if (!existsSync(base)) die(`missing ${base}`);
   if (!existsSync(join(ROOT, "firecracker", "vmlinux"))) die("missing firecracker/vmlinux");
-  const vmDir = join(ROOT, "vms", id);
-  mkdirSync(vmDir, { recursive: true });
-  const disk = join(vmDir, "disk.ext4");
-  if (!existsSync(disk)) {
-    const cp = spawnSync("cp", ["--reflink=auto", "--sparse=always", base, disk]);
-    if (cp.status !== 0) copyFileSync(base, disk);
-  }
+  const agentDir = join(ROOT, "vms", id);
+  mkdirSync(agentDir, { recursive: true });
+  await removeStaleRuns(agentDir);
+  const workspaceDisk = join(agentDir, "workspace.ext4");
+  ensureWorkspaceDisk(workspaceDisk);
+  const vmDir = join(agentDir, `r${randomBytes(4).toString("hex")}`);
+  mkdirSync(vmDir);
+  const disk = join(vmDir, "root.ext4");
+  const cp = spawnSync("cp", ["--reflink=auto", "--sparse=always", base, disk]);
+  if (cp.status !== 0) copyFileSync(base, disk);
   const pidFile = join(vmDir, "firecracker.pid");
-  if (existsSync(pidFile)) {
-    const old = Number(readFileSync(pidFile, "utf8"));
-    if (old > 0) {
-      try {
-        process.kill(old, "SIGKILL");
-      } catch {}
-    }
-  }
   const uds = join(vmDir, "v.sock");
+  if (Buffer.byteLength(`${uds}_${VSOCK_PROXY_PORT}`) > 107) {
+    rmSync(vmDir, { recursive: true, force: true });
+    return die(
+      `Firecracker socket path exceeds Linux's 107-byte limit: ${uds}; use a shorter BOBAGENT_HOST_ROOT`,
+    );
+  }
   const servers: Server[] = [];
   const proxy = proxyServer();
-  await listenUnix(proxy, `${uds}_${VSOCK_PROXY_PORT}`);
   servers.push(proxy);
-  if (spec.bridgeSocket) {
-    const bridge = relayServer(spec.bridgeSocket);
-    await listenUnix(bridge, `${uds}_${VSOCK_BRIDGE_PORT}`);
-    servers.push(bridge);
+  try {
+    await listenUnix(proxy, `${uds}_${VSOCK_PROXY_PORT}`);
+    if (spec.bridgeSocket) {
+      const bridge = relayServer(spec.bridgeSocket);
+      servers.push(bridge);
+      await listenUnix(bridge, `${uds}_${VSOCK_BRIDGE_PORT}`);
+    }
+  } catch (e) {
+    for (const server of servers) {
+      try {
+        server.close();
+      } catch {}
+    }
+    rmSync(vmDir, { recursive: true, force: true });
+    return die(`cannot start Firecracker socket server: ${(e as Error).message}`);
   }
-  rmSync(uds, { force: true });
   const configPath = join(vmDir, "vm.json");
-  writeFileSync(configPath, JSON.stringify(vmConfig(spec, disk, uds), null, 2));
+  writeFileSync(configPath, JSON.stringify(vmConfig(spec, disk, uds, workspaceDisk), null, 2));
   const logPath = join(vmDir, "console.log");
   const log = openSync(logPath, "w");
-  const vm = spawn(fc as string, ["--no-api", "--config-file", configPath, "--id", id], {
-    stdio: ["ignore", log, log],
-    cwd: vmDir,
-  });
+  const vmArgs = ["--no-api", "--config-file", configPath, "--id", id];
+  const setpriv = which("setpriv");
+  const vm: ChildProcess = spawn(
+    setpriv ?? (fc as string),
+    setpriv ? ["--pdeathsig", "KILL", "--", fc, ...vmArgs] : vmArgs,
+    {
+      stdio: ["ignore", log, log],
+      cwd: vmDir,
+    },
+  );
   closeSync(log);
   writeFileSync(pidFile, String(vm.pid ?? ""));
   let vmAlive = true;
-  const cleanup = () => {
-    for (const s of servers) s.close();
-    try {
-      vm.kill("SIGKILL");
-    } catch {}
-    rmSync(pidFile, { force: true });
-    for (const p of [uds, `${uds}_${VSOCK_PROXY_PORT}`, `${uds}_${VSOCK_BRIDGE_PORT}`])
-      rmSync(p, { force: true });
+  let cleaned = false;
+  let cleanup = () => {};
+  const onSignal = () => {
+    cleanup();
+    process.exit(0);
   };
-  vm.on("exit", (code) => {
+  const onHostDisconnect = () => {
+    cleanup();
+    finish(0);
+  };
+  const onVmExit = (code: number | null, signal: NodeJS.Signals | null) => {
     vmAlive = false;
     const tail = existsSync(logPath) ? readFileSync(logPath, "utf8").slice(-1500) : "";
     cleanup();
-    die(`microVM exited (code ${code})${tail ? `\n${tail}` : ""}`);
-  });
-  process.on("SIGTERM", () => {
+    die(
+      `microVM exited (code ${code}${signal ? `, signal ${signal}` : ""})${tail ? `\n${tail}` : ""}`,
+    );
+  };
+  cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    vmAlive = false;
+    vm.removeListener("exit", onVmExit);
+    process.off("SIGTERM", onSignal);
+    process.off("SIGINT", onSignal);
+    process.off("SIGHUP", onSignal);
+    process.stdout.off("close", onHostDisconnect);
+    process.stdout.off("error", onHostDisconnect);
+    for (const server of servers) {
+      try {
+        server.close();
+      } catch {}
+    }
+    try {
+      vm.kill("SIGKILL");
+    } catch {}
+    rmSync(vmDir, { recursive: true, force: true });
+  };
+  vm.on("exit", onVmExit);
+  vm.on("error", (e) => {
     cleanup();
-    process.exit(0);
+    die(`cannot start firecracker: ${e.message}`);
   });
+  process.once("SIGTERM", onSignal);
+  process.once("SIGINT", onSignal);
+  process.once("SIGHUP", onSignal);
+  process.stdout.once("close", onHostDisconnect);
+  process.stdout.once("error", onHostDisconnect);
   let guest: Socket;
   try {
     guest = await connectGuest(
@@ -362,12 +552,10 @@ async function runFirecracker(spec: RunSpec, rest: Buffer) {
   guest.pipe(process.stdout);
   guest.resume();
   guest.on("error", () => {});
-  pumpStdin(rest, guest);
-  process.stdin.on("end", () => setTimeout(() => guest.destroy(), 5000).unref());
+  void pumpFramedStdin(rest, guest).catch(() => {});
   guest.on("close", () => {
-    vm.removeAllListeners("exit");
     cleanup();
-    process.exit(0);
+    finish(0);
   });
 }
 
@@ -403,8 +591,11 @@ async function guestExec() {
   child.on("error", (e) => die(`cannot start ${bin}: ${e.message}`, 127));
   child.stdout.pipe(process.stdout);
   child.stdin.on("error", () => {});
-  pumpStdin(rest, child.stdin);
-  child.on("exit", (code) => process.exit(code ?? 1));
+  pumpGuestStdin(rest, process.stdin, child.stdin);
+  child.on("close", (code, signal) => {
+    spawnSync("sync");
+    finish(code ?? (signal ? 1 : 0));
+  });
 }
 
 async function bridge() {
