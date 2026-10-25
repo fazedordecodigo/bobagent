@@ -24,6 +24,7 @@ import {
   TeamView,
   VaultView,
 } from "./components/Library";
+import { UpdateButton } from "./components/UpdateButton";
 import { DaemonClient } from "./lib/daemon";
 
 export default function App() {
@@ -354,6 +355,7 @@ export default function App() {
             </li>
           ))}
         </ul>
+        <UpdateButton />
       </aside>
       <main className="flex-1 overflow-hidden">
         {teamOpen && clientReady ? (

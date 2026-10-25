@@ -252,6 +252,19 @@ selected agents, runs incoming messages as `<team_message>` turns and replies on
 RPC `team.status/connect/disconnect/share/send/messages`, events `team.updated/message`;
 UI `TeamView`. Tests: `test/team.e2e.test.ts` (spawns the relay).
 
+## CI, releases, updates, branding
+
+- `.github/workflows/ci.yml` (macos-14): lint, typecheck, test, build:daemon, cargo check, vite build.
+- `.github/workflows/release.yml`: on `v*` tags, tauri-action builds `.app` + `.dmg` with
+  `createUpdaterArtifacts`, publishes a GitHub release with `latest.json`. Updater signing
+  uses the `TAURI_SIGNING_PRIVATE_KEY` repo secret (pubkey in `tauri.conf.json`
+  `plugins.updater`); Apple signing/notarization turn on when `APPLE_CERTIFICATE`,
+  `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` (+ `APPLE_ID`, `APPLE_PASSWORD`,
+  `APPLE_TEAM_ID`) secrets exist. Bump `version` in `tauri.conf.json` before tagging.
+- In-app updates: `tauri-plugin-updater` + `components/UpdateButton.tsx` (sidebar footer).
+- Icon source: `apps/desktop/branding/icon.svg` -> `icon.png` (Chrome headless render) ->
+  `bunx tauri icon branding/icon.png` (from `apps/desktop`).
+
 ## Permissions
 
 Provider agents ask for approval only when THEIR OWN config says so

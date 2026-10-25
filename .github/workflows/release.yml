@@ -1,0 +1,67 @@
+name: Release
+
+# Push a tag like v0.2.0 (matching apps/desktop/src-tauri/tauri.conf.json "version") to build
+# BobAgent.app + .dmg, sign the updater artifacts and publish a GitHub release with latest.json.
+# macOS code signing + notarization run when the APPLE_* secrets are set; otherwise the build
+# is unsigned (Gatekeeper will ask users to right-click > Open).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - run: bun install --frozen-lockfile
+      - run: bun run test
+      - name: Enable Apple signing when configured
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+            for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY; do
+              { echo "$v<<__EOF__"; printenv "$v"; echo "__EOF__"; } >> "$GITHUB_ENV"
+            done
+            echo "Code signing enabled"
+            if [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+              for v in APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+                { echo "$v<<__EOF__"; printenv "$v"; echo "__EOF__"; } >> "$GITHUB_ENV"
+              done
+              echo "Notarization enabled"
+            fi
+          else
+            echo "APPLE_* secrets not set: building unsigned"
+          fi
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: bunx tauri
+          args: --bundles app,dmg --config {"bundle":{"createUpdaterArtifacts":true}}
+          tagName: ${{ github.ref_name }}
+          releaseName: BobAgent ${{ github.ref_name }}
+          releaseBody: See the commits since the previous release.
+          releaseDraft: false
+          includeUpdaterJson: true
