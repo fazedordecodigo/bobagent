@@ -513,7 +513,7 @@ export class CodexDriver implements ProviderDriver {
     const session = new CodexSession(proc, hooks, cwd, vmKey);
     try {
       await session.request("initialize", {
-        clientInfo: { name: "bobagent", title: "BobAgent", version: "0.1.0" },
+        clientInfo: { name: "bobagent", title: "BobAgent", version: "0.2.0" },
         capabilities: null,
       });
       session.notify("initialized");

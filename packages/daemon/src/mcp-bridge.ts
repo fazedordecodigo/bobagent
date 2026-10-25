@@ -46,7 +46,7 @@ export async function runMcpBridge(): Promise<void> {
           reply(m.id, {
             protocolVersion: requested ?? PROTOCOL_VERSION,
             capabilities: { tools: {} },
-            serverInfo: { name: "bobagent", version: "0.1.0" },
+            serverInfo: { name: "bobagent", version: "0.2.0" },
           });
           return;
         }
