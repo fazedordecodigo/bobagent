@@ -156,6 +156,7 @@ export const ChatItem = z.discriminatedUnion("kind", [
     kind: z.literal("user_message"),
     text: z.string(),
     from: z.object({ agentId: z.string(), name: z.string() }).nullable().optional(),
+    channelId: z.string().nullable().optional(),
   }),
   ChatItemBase.extend({ kind: z.literal("agent_message"), text: z.string() }),
   ChatItemBase.extend({ kind: z.literal("agent_thought"), text: z.string() }),
@@ -274,6 +275,57 @@ export const PermissionsRespondParams = z
 export type PermissionsRespondParams = z.infer<typeof PermissionsRespondParams>;
 export const PermissionsRespondResult = z.object({ ok: z.literal(true) });
 
+// ---- Channels ----
+
+export const ChannelStatus = z.enum(["active", "stopped", "archived"]);
+export type ChannelStatus = z.infer<typeof ChannelStatus>;
+export const Channel = z.object({
+  id: z.string(),
+  name: z.string(),
+  ownerId: z.string().nullable(),
+  memberIds: z.array(z.string()),
+  status: ChannelStatus,
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+export type Channel = z.infer<typeof Channel>;
+export const ChannelMessage = z.object({
+  id: z.string(),
+  channelId: z.string(),
+  seq: z.number(),
+  authorKind: z.enum(["user", "agent", "system"]),
+  authorAgentId: z.string().nullable(),
+  text: z.string(),
+  createdAt: z.number(),
+});
+export type ChannelMessage = z.infer<typeof ChannelMessage>;
+
+const ChannelIdParams = z.object({ channelId: z.string() }).strict();
+export const ChannelsListParams = z.object({ includeArchived: z.boolean().optional() }).strict();
+export const ChannelsCreateParams = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    memberIds: z.array(z.string()).min(1).max(20),
+    ownerId: z.string().nullable().optional(),
+  })
+  .strict();
+export const ChannelsHistoryParams = z
+  .object({ channelId: z.string(), limit: z.number().int().min(1).max(1000).optional() })
+  .strict();
+export const ChannelsHistoryResult = z.object({
+  channel: Channel,
+  messages: z.array(ChannelMessage),
+});
+export const ChannelsPostParams = z
+  .object({ channelId: z.string(), text: z.string().trim().min(1).max(100_000) })
+  .strict();
+export const ChannelsReassignParams = z
+  .object({ channelId: z.string(), ownerId: z.string() })
+  .strict();
+export const ChannelsSetMembersParams = z
+  .object({ channelId: z.string(), memberIds: z.array(z.string()).min(1).max(20) })
+  .strict();
+
 // ---- Events ----
 
 export const AgentCreatedEvent = z.object({ event: z.literal("agent.created"), data: Agent });
@@ -302,6 +354,16 @@ export const methodMap = {
   "agents.statuses": { params: AgentsStatusesParams, result: AgentsStatusesResult },
   "permissions.list": { params: PermissionsListParams, result: PermissionsListResult },
   "permissions.respond": { params: PermissionsRespondParams, result: PermissionsRespondResult },
+  "channels.list": { params: ChannelsListParams, result: z.array(Channel) },
+  "channels.create": { params: ChannelsCreateParams, result: Channel },
+  "channels.history": { params: ChannelsHistoryParams, result: ChannelsHistoryResult },
+  "channels.post": { params: ChannelsPostParams, result: z.object({ messageId: z.string() }) },
+  "channels.stop": { params: ChannelIdParams, result: Channel },
+  "channels.resume": { params: ChannelIdParams, result: Channel },
+  "channels.archive": { params: ChannelIdParams, result: Channel },
+  "channels.restore": { params: ChannelIdParams, result: Channel },
+  "channels.reassign": { params: ChannelsReassignParams, result: Channel },
+  "channels.setMembers": { params: ChannelsSetMembersParams, result: Channel },
 } as const;
 
 export type MethodName = keyof typeof methodMap;
@@ -322,5 +384,8 @@ export type DaemonEventMap = {
   "permission.resolved": { requestId: string; agentId: string; optionId: string | null };
   "queue.updated": QueueState;
   "agent.config": { agentId: string; configOptions: ConfigOption[] };
+  "channel.created": Channel;
+  "channel.updated": Channel;
+  "channel.message": ChannelMessage;
 };
 export type DaemonEventName = keyof DaemonEventMap;

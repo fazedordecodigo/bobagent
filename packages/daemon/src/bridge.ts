@@ -10,6 +10,7 @@ import {
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Agent } from "@bobagent/protocol";
 import type { AgentStore } from "./agents";
+import type { ChannelService } from "./channels";
 import type { McpServerSpec } from "./providers/types";
 import type { RuntimeManager } from "./runtime/runtime-manager";
 
@@ -59,6 +60,26 @@ export const BRIDGE_TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "list_channels",
+    description: "List the BobAgent channels you belong to, with owner, members and status.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "delegate",
+    description:
+      "Delegate a task to another member of a channel. Their reply is posted to the channel and forwarded to the owner.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        channel: { type: "string", description: "Channel name or id" },
+        to: { type: "string", description: "Member agent name or id" },
+        task: { type: "string", description: "What the member should do" },
+      },
+      required: ["channel", "to", "task"],
+      additionalProperties: false,
+    },
+  },
 ] as const;
 
 /** Command that runs this daemon build in `mcp-bridge` mode. */
@@ -73,6 +94,7 @@ export class Bridge {
   private tokens = new Map<string, string>();
   private byAgent = new Map<string, string>();
   port = 0;
+  channels: ChannelService | null = null;
 
   constructor(
     private agents: AgentStore,
@@ -177,6 +199,32 @@ export class Bridge {
       }
       case "share_file":
         return this.shareFile(me, args);
+      case "list_channels": {
+        const chans = (this.channels?.forAgent(me.id) ?? []).map((c) => ({
+          id: c.id,
+          name: c.name,
+          status: c.status,
+          owner: c.ownerId ? (this.agents.get(c.ownerId)?.name ?? null) : null,
+          members: c.memberIds.map((id) => this.agents.get(id)?.name ?? id),
+          youAreOwner: c.ownerId === me.id,
+        }));
+        return { text: JSON.stringify(chans, null, 2) };
+      }
+      case "delegate": {
+        if (!this.channels) throw new Error("channels are unavailable");
+        const task = typeof args.task === "string" ? args.task : "";
+        if (!task.trim()) throw new Error("`task` is required");
+        const hops = this.nextHops(me.id);
+        return {
+          text: this.channels.delegate(
+            me.id,
+            String(args.channel ?? ""),
+            String(args.to ?? ""),
+            task,
+            hops,
+          ),
+        };
+      }
       default:
         throw new Error(`unknown tool ${name}`);
     }

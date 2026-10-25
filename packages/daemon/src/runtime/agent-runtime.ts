@@ -71,6 +71,7 @@ export class AgentRuntime {
   private cancelTimer: ReturnType<typeof setTimeout> | null = null;
   private draining = false;
   private turnHops = 0;
+  private turnChannelId: string | null = null;
   private disposing = false;
 
   constructor(
@@ -85,6 +86,10 @@ export class AgentRuntime {
   /** Agent-to-agent hop count of the running turn (0 when idle or user-initiated). */
   currentHops(): number {
     return this.turn ? this.turnHops : 0;
+  }
+
+  currentChannelId(): string | null {
+    return this.turn ? this.turnChannelId : null;
   }
 
   updateAgent(agent: Agent) {
@@ -168,6 +173,7 @@ export class AgentRuntime {
       this.turn = { id: turnRow.id, cancelled: false, byUser: false };
       this.openTextItem = null;
       this.turnHops = next.hops ?? 0;
+      this.turnChannelId = next.channel_id ?? null;
       const sender = next.from_agent_id
         ? {
             agentId: next.from_agent_id,
@@ -177,12 +183,13 @@ export class AgentRuntime {
       const userItem = this.store.createItem(this.agent.id, turnRow.id, "user_message", {
         text: next.text,
         ...(sender ? { from: sender } : {}),
+        ...(next.channel_id ? { channelId: next.channel_id } : {}),
       });
       this.setStatus("starting");
       this.broadcast("turn.started", turnRow);
       this.broadcast("item.created", userItem);
       this.emitQueue();
-      const promptText = sender ? wrapAgentMessage(sender, next.text) : next.text;
+      const promptText = next.prompt ?? (sender ? wrapAgentMessage(sender, next.text) : next.text);
       this.runTurn(promptText, turnRow.id).catch(() => {});
     } finally {
       this.draining = false;

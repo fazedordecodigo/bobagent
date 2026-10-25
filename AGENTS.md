@@ -116,6 +116,20 @@ regenerated each daemon start, and never the daemon's main token. The bridge for
 Tests: `test/bridge.e2e.test.ts` (the fake ACP agent's `mcp:<tool> <json>` prompt
 spawns the real bridge and calls the tool).
 
+## Channels (Phase 6)
+
+`src/channels.ts` (`ChannelService`, migration 6: `channels`, `channel_members`,
+`channel_messages`, `queue.channel_id` + `queue.prompt`). RPC `channels.list/create/
+history/post/stop/resume/archive/restore/reassign/setMembers`; events `channel.created`,
+`channel.updated`, `channel.message`. A user post goes to the owner (default: first
+member) as a queue item whose provider prompt (`queue.prompt`) carries a
+`<channel_context>` block with role and recent transcript. When a channel turn ends
+(`turn.ended` hook in `main.ts`), the agent's reply is posted to the channel, and a
+member's reply is forwarded to the owner (hop-limited by `MAX_HOPS`). Bridge tools
+`list_channels` and `delegate {channel, to, task}` (members only). Stop/archive remove
+queued channel items and cancel running channel turns; posting needs `active`.
+UI: sidebar "Channels" + `components/ChannelView.tsx`. Tests: `test/channels.e2e.test.ts`.
+
 ## Permissions
 
 Provider agents ask for approval only when THEIR OWN config says so

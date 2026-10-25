@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { AgentStore } from "./agents";
 import { Bridge } from "./bridge";
+import { ChannelService } from "./channels";
 import { ChatStore, QueueStore } from "./chat-store";
 import { openDatabase } from "./db";
 import { mergedPath } from "./env/login-path";
@@ -117,13 +118,25 @@ async function main() {
         ws.send(msg);
       } catch {}
     }
+    if (event === "turn.ended") {
+      const turn = data as import("@bobagent/protocol").Turn;
+      queueMicrotask(() => {
+        try {
+          channels.onTurnEnded(turn, turn.queueId ? queue.row(turn.queueId) : null);
+        } catch (e) {
+          log("channel turn hook failed", e);
+        }
+      });
+    }
   }
 
   const sharedRoot = process.env.BOBAGENT_SHARED_ROOT || join(dirname(agentsRoot), "Shared");
   const bridge = new Bridge(store, () => runtimes, sharedRoot);
   const runtimes = new RuntimeManager(store, chat, queue, broadcast, (id) => bridge.serversFor(id));
   runtimesRef = runtimes;
-  const rpc = new Rpc(store, chat, queue, runtimes, broadcast);
+  const channels = new ChannelService(db, store, chat, () => runtimes, broadcast);
+  bridge.channels = channels;
+  const rpc = new Rpc(store, chat, queue, runtimes, broadcast, channels);
 
   // warm the login-shell PATH cache so provider CLIs resolve like in a terminal
   const path = mergedPath();

@@ -156,7 +156,9 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
     sessionId: string;
     prompt: { type: string; text?: string }[];
   };
-  const text = (prompt?.[0]?.text ?? "").replace(/^[\s\S]*<\/agent_message_context>\n/, "");
+  const text = (prompt?.[0]?.text ?? "")
+    .replace(/^[\s\S]*<\/agent_message_context>\n/, "")
+    .replace(/^[\s\S]*<\/channel_context>\n[^\n]*\n/, "");
   const sessions = loadSessions();
   sessions[sessionId] ??= { prompts: [] };
   sessions[sessionId].prompts.push(text);

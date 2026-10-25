@@ -59,4 +59,30 @@ export const migrations: string[] = [
   // 5: agent-to-agent messages (sender + hop count for loop limits)
   `ALTER TABLE queue ADD COLUMN from_agent_id TEXT;
   ALTER TABLE queue ADD COLUMN hops INTEGER NOT NULL DEFAULT 0`,
+  // 6: channels
+  `CREATE TABLE channels (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    owner_agent_id TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE channel_members (
+    channel_id TEXT NOT NULL REFERENCES channels(id),
+    agent_id TEXT NOT NULL REFERENCES agents(id),
+    PRIMARY KEY (channel_id, agent_id)
+  );
+  CREATE TABLE channel_messages (
+    id TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL REFERENCES channels(id),
+    seq INTEGER NOT NULL,
+    author_kind TEXT NOT NULL,
+    author_agent_id TEXT,
+    text TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX channel_messages_seq ON channel_messages(channel_id, seq);
+  ALTER TABLE queue ADD COLUMN channel_id TEXT;
+  ALTER TABLE queue ADD COLUMN prompt TEXT`,
 ];

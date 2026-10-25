@@ -1,5 +1,6 @@
 import { type MethodName, methodMap } from "@bobagent/protocol";
 import type { AgentStore } from "./agents";
+import type { ChannelService } from "./channels";
 import type { ChatStore, QueueStore } from "./chat-store";
 import { ProviderError } from "./providers/types";
 import { RpcError } from "./runtime/agent-runtime";
@@ -14,6 +15,7 @@ export class Rpc {
     private queue: QueueStore,
     private runtimes: RuntimeManager,
     private broadcast: Broadcast,
+    private channels: ChannelService,
   ) {}
 
   /** Returns the response payload string for one raw incoming message. */
@@ -134,6 +136,34 @@ export class Rpc {
         const p = params as { requestId: string; optionId: string | null };
         this.runtimes.respondPermission(p.requestId, p.optionId);
         return { ok: true };
+      }
+      case "channels.list":
+        return this.channels.list((params as { includeArchived?: boolean }).includeArchived);
+      case "channels.create":
+        return this.channels.create(params as Parameters<ChannelService["create"]>[0]);
+      case "channels.history": {
+        const p = params as { channelId: string; limit?: number };
+        return this.channels.history(p.channelId, p.limit);
+      }
+      case "channels.post": {
+        const p = params as { channelId: string; text: string };
+        return this.channels.post(p.channelId, p.text);
+      }
+      case "channels.stop":
+        return this.channels.stop((params as { channelId: string }).channelId);
+      case "channels.resume":
+        return this.channels.resume((params as { channelId: string }).channelId);
+      case "channels.archive":
+        return this.channels.archive((params as { channelId: string }).channelId);
+      case "channels.restore":
+        return this.channels.restore((params as { channelId: string }).channelId);
+      case "channels.reassign": {
+        const p = params as { channelId: string; ownerId: string };
+        return this.channels.reassign(p.channelId, p.ownerId);
+      }
+      case "channels.setMembers": {
+        const p = params as { channelId: string; memberIds: string[] };
+        return this.channels.setMembers(p.channelId, p.memberIds);
       }
     }
   }

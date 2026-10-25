@@ -133,6 +133,13 @@ export class ChatStore {
     return r ? rowToItem(r) : null;
   }
 
+  itemsForTurn(turnId: string): ChatItem[] {
+    const rows = this.db
+      .query("SELECT * FROM items WHERE turn_id = ? ORDER BY seq ASC")
+      .all(turnId) as ItemRow[];
+    return rows.map(rowToItem);
+  }
+
   history(
     agentId: string,
     beforeSeq: number | undefined,
@@ -191,6 +198,8 @@ export type QueueRow = {
   started_at: number | null;
   from_agent_id: string | null;
   hops: number;
+  channel_id: string | null;
+  prompt: string | null;
 };
 
 export type QueueItemLite = {
@@ -201,7 +210,13 @@ export type QueueItemLite = {
   fromAgentId: string | null;
 };
 
-export type QueueSource = { agentId: string; hops: number };
+export type QueueSource = {
+  agentId: string | null;
+  hops: number;
+  channelId?: string | null;
+  /** Provider prompt when it differs from the displayed text. */
+  prompt?: string;
+};
 
 function rowToQueueItem(r: QueueRow): QueueItemLite {
   return {
@@ -221,9 +236,18 @@ export class QueueStore {
     const now = Date.now();
     this.db
       .query(
-        "INSERT INTO queue (id, agent_id, text, status, created_at, from_agent_id, hops) VALUES (?, ?, ?, 'queued', ?, ?, ?)",
+        "INSERT INTO queue (id, agent_id, text, status, created_at, from_agent_id, hops, channel_id, prompt) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?)",
       )
-      .run(id, agentId, text, now, from?.agentId ?? null, from?.hops ?? 0);
+      .run(
+        id,
+        agentId,
+        text,
+        now,
+        from?.agentId ?? null,
+        from?.hops ?? 0,
+        from?.channelId ?? null,
+        from?.prompt ?? null,
+      );
     return { id, agentId, text, createdAt: now, fromAgentId: from?.agentId ?? null };
   }
 
@@ -240,6 +264,10 @@ export class QueueStore {
         "SELECT * FROM queue WHERE agent_id = ? AND status = 'queued' ORDER BY created_at ASC LIMIT 1",
       )
       .get(agentId) as QueueRow | null;
+  }
+
+  row(queueId: string): QueueRow | null {
+    return this.db.query("SELECT * FROM queue WHERE id = ?").get(queueId) as QueueRow | null;
   }
 
   markStarted(queueId: string, turnId: string): void {

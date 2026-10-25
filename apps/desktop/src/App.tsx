@@ -1,6 +1,13 @@
-import type { Agent, AgentStatusInfo, PendingPermission, ProviderId } from "@bobagent/protocol";
+import type {
+  Agent,
+  AgentStatusInfo,
+  Channel,
+  PendingPermission,
+  ProviderId,
+} from "@bobagent/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AgentSettings, btnCls, inputCls, PROVIDERS } from "./components/AgentSettings";
+import { ChannelCreateForm, ChannelView } from "./components/ChannelView";
 import { ChatView } from "./components/ChatView";
 import { DaemonClient } from "./lib/daemon";
 
@@ -10,17 +17,22 @@ export default function App() {
   const [pendingCounts, setPendingCounts] = useState<Record<string, number>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [channelId, setChannelId] = useState<string | null>(null);
+  const [creatingChannel, setCreatingChannel] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const clientRef = useRef<DaemonClient | null>(null);
   const [clientReady, setClientReady] = useState(false);
 
   const refreshAll = useCallback(async (client: DaemonClient) => {
-    const [list, st, perms] = await Promise.all([
+    const [list, st, perms, chans] = await Promise.all([
       client.request("agents.list", {}),
       client.request("agents.statuses", {}),
       client.request("permissions.list", {}),
+      client.request("channels.list", { includeArchived: true }),
     ]);
+    setChannels(chans);
     setAgents(list);
     setStatuses(st);
     const counts: Record<string, number> = {};
@@ -62,6 +74,10 @@ export default function App() {
       client.on("agent.status", ({ agentId, status, error }) =>
         setStatuses((prev) => ({ ...prev, [agentId]: { status, error } })),
       ),
+      client.on("channel.created", (ch) => setChannels((prev) => [...prev, ch])),
+      client.on("channel.updated", (ch) =>
+        setChannels((prev) => prev.map((p) => (p.id === ch.id ? ch : p))),
+      ),
       client.on("permission.requested", (p) => bump(p.agentId, +1)),
       client.on("permission.resolved", (p) => bump(p.agentId, -1)),
       client.onReconnect(() => {
@@ -76,6 +92,24 @@ export default function App() {
   }, [refreshAll]);
 
   const selected = agents.find((a) => a.id === selectedId) ?? null;
+  const selectedChannel = channels.find((ch) => ch.id === channelId) ?? null;
+  const openAgent = (id: string | null) => {
+    setSelectedId(id);
+    setChannelId(null);
+    setCreating(false);
+    setCreatingChannel(false);
+    setSettingsOpen(false);
+  };
+  const createChannel = useCallback(
+    async (form: { name: string; memberIds: string[]; ownerId: string | null }) => {
+      const client = clientRef.current;
+      if (!client) return;
+      const ch = await client.request("channels.create", form);
+      setCreatingChannel(false);
+      setChannelId(ch.id);
+    },
+    [],
+  );
 
   const createAgent = useCallback(
     async (form: { name: string; provider: ProviderId; instructions: string }) => {
@@ -132,9 +166,8 @@ export default function App() {
             type="button"
             className={`${btnCls} bg-zinc-800 hover:bg-zinc-700`}
             onClick={() => {
+              openAgent(null);
               setCreating(true);
-              setSelectedId(null);
-              setSettingsOpen(false);
             }}
           >
             New agent
@@ -148,11 +181,7 @@ export default function App() {
               <li key={a.id}>
                 <button
                   type="button"
-                  onClick={() => {
-                    setSelectedId(a.id);
-                    setCreating(false);
-                    setSettingsOpen(false);
-                  }}
+                  onClick={() => openAgent(a.id)}
                   className={`w-full px-4 py-2 text-left text-sm hover:bg-zinc-900 ${
                     a.id === selectedId ? "bg-zinc-900" : ""
                   }`}
@@ -174,10 +203,52 @@ export default function App() {
           {agents.length === 0 && (
             <li className="px-4 py-6 text-sm text-zinc-500">No agents yet.</li>
           )}
+          <li className="mt-2 flex items-center justify-between border-t border-zinc-800 px-4 pt-3 pb-1">
+            <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">
+              Channels
+            </span>
+            <button
+              type="button"
+              className="text-xs text-sky-400 hover:text-sky-300"
+              onClick={() => {
+                openAgent(null);
+                setCreatingChannel(true);
+              }}
+            >
+              + New
+            </button>
+          </li>
+          {channels.map((ch) => (
+            <li key={ch.id}>
+              <button
+                type="button"
+                onClick={() => {
+                  openAgent(null);
+                  setChannelId(ch.id);
+                }}
+                className={`w-full px-4 py-1.5 text-left text-sm hover:bg-zinc-900 ${
+                  ch.id === channelId ? "bg-zinc-900" : ""
+                } ${ch.status === "archived" ? "text-zinc-600" : ""}`}
+              >
+                # {ch.name}
+                {ch.status !== "active" && (
+                  <span className="ml-2 text-xs text-zinc-500">{ch.status}</span>
+                )}
+              </button>
+            </li>
+          ))}
         </ul>
       </aside>
       <main className="flex-1 overflow-hidden">
-        {creating ? (
+        {creatingChannel ? (
+          <ChannelCreateForm
+            agents={agents}
+            onSubmit={createChannel}
+            onCancel={() => setCreatingChannel(false)}
+          />
+        ) : selectedChannel && clientReady ? (
+          <ChannelView client={clientRef.current!} channel={selectedChannel} agents={agents} />
+        ) : creating ? (
           <CreateForm onSubmit={createAgent} onCancel={() => setCreating(false)} />
         ) : selected && settingsOpen ? (
           <div className="h-full overflow-y-auto">

@@ -47,6 +47,12 @@ export class RuntimeManager {
     return this.runtimeFor(agentId).send(text, from);
   }
 
+  cancelChannelTurns(channelId: string): void {
+    for (const rt of this.runtimes.values()) {
+      if (rt.currentChannelId() === channelId) rt.cancel();
+    }
+  }
+
   currentHops(agentId: string): number {
     return this.runtimes.get(agentId)?.currentHops() ?? 0;
   }
