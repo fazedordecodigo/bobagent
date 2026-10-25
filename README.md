@@ -32,20 +32,42 @@ system `ssh` with `BatchMode=yes` (keys from `~/.ssh` or your ssh-agent; no keys
 are stored), uploads a helper to `~/.bobagent/bin/` on the host and runs a preflight. Then pick,
 per agent, **This Mac**, **Process** (provider CLI on the VPS) or **Firecracker microVM**.
 
-Host requirements: Linux, [Bun](https://bun.sh), the provider CLIs you use (signed in on the
-host), and for microVMs `/dev/kvm` access plus the guest image:
+Host requirements: Linux, [Bun](https://bun.sh), `curl`, Docker, `sudo`, and `e2fsprogs`.
+For the real integration tests, also install `openssh-server`, `socat`, and `unzip`. On
+Debian/Ubuntu:
 
 ```sh
-# on the VPS, after Install
-bash bobagent/packages/host/rootfs/build-rootfs.sh --providers "claude codex"
+sudo apt-get install curl docker.io e2fsprogs openssh-server socat sudo unzip
+sudo usermod -aG kvm,docker "$USER"
+# log out and back in so the new groups apply
 ```
 
-This downloads a checksummed Firecracker release and guest kernel and builds `rootfs.ext4`
-(Debian, bun, socat, CLIs) into `~/.bobagent/firecracker/`. Each agent session boots its own VM
-with no network device: provider stdio, the agent-to-agent bridge and an HTTPS proxy that only
-reaches public addresses all go over vsock. Agents can call `spawn_subagents` to run up to 8
-tasks in parallel (each subagent inherits the parent's host and isolation); the results come
-back as one message, and agents talk to each other with `send_message`.
+From a BobAgent checkout on the host, build the default guest image (Claude and Codex CLIs):
+
+```sh
+bash packages/host/rootfs/build-rootfs.sh
+```
+
+The build downloads a checksummed Firecracker release and guest kernel and creates
+`~/.bobagent/firecracker/` with the rootfs. For a custom host root, set
+`BOBAGENT_HOST_ROOT` in the remote SSH environment; install and check use that same root.
+Firecracker placement requires `/dev/kvm`, the image, and `mkfs.ext4`. Each session gets a
+fresh root disk and an agent-persistent `workspace.ext4`, mounted at `/persist` with
+`/workspace` and `/root` backed by it. The workspace image is sparse and defaults to 8192 MiB;
+set `BOBAGENT_VM_WORKSPACE_MIB` in the remote host environment to change its size. When
+available, `setpriv --pdeathsig KILL` ensures Firecracker dies if its host helper is killed.
+The guest syncs storage when a provider exits. On the Linux x86_64/KVM test host, boot to the
+first guest output measured 1.7 seconds.
+
+VMs have no network device: provider stdio, the agent-to-agent bridge, and an HTTPS proxy all
+use vsock. The proxy resolves hostnames once and rejects requests if any IPv4 result is not
+public. Agents can call `spawn_subagents` to run up to 8 tasks in parallel (each subagent
+inherits the parent's host and isolation); the results come back as one message, and agents
+talk to each other with `send_message`.
+
+On a Linux host with Firecracker artifacts installed, run the opt-in host/SSH integration
+suite with `bun run test:firecracker`. It uses temporary host roots and does not modify
+`~/.bobagent`.
 
 ## Develop
 

@@ -275,18 +275,30 @@ events `hosts.changed`, `placement.updated`, `subagent.updated`; UI `components/
 (validated by `SshTarget`, so it cannot be an option); remote commands are single-quoted.
 `BOBAGENT_SSH_COMMAND` (JSON array) replaces `ssh` (tests: `test/fixtures/fake-ssh.ts`,
 `$FAKE_SSH_HOME`, `$FAKE_SSH_LOG`, targets `unreachable*` fail). Install uploads
-`packages/host/src/main.ts` (embedded as text) to `~/.bobagent/bin/bobagent-host.ts` and runs
-`preflight`. When an agent's placement has a host, `AgentRuntime` passes a `RemoteLaunch` to
+`packages/host/src/main.ts` (embedded as text) to
+`${BOBAGENT_HOST_ROOT:-$HOME/.bobagent}/bin/bobagent-host.ts` and runs `preflight`; install and
+check honor the same remote `BOBAGENT_HOST_ROOT`. When an agent's placement has a host,
+`AgentRuntime` passes a `RemoteLaunch` to
 the driver: the provider command is spawned as `ssh -R <sock>:127.0.0.1:<daemon port> ...
 bobagent-host run` (first stdin line = RunSpec JSON), and the `bobagent` MCP server becomes
 `bobagent-host bridge` on the host (POSTs `/bridge` through the forwarded socket). Changing a
 placement drops the provider session. Firecracker placement requires a host whose preflight
-says `firecrackerReady` (Linux + /dev/kvm + firecracker + vmlinux + rootfs.ext4); there is no
-fallback. `packages/host` (`bobagent-host run` with `isolation: "firecracker"`) boots one VM per
-session (`firecracker --no-api --config-file`, disk copied from the base rootfs, vCPU 1-32,
-memory 256-65536 MiB), connects vsock 1024 for provider stdio, serves guest vsock 5000 (bridge)
-and 3128 (CONNECT proxy, public destinations only), and kills the VM when the session ends.
-Guest image: `packages/host/rootfs/` (`bobagent-init`, `build-rootfs.sh`).
+says `firecrackerReady` (Linux + /dev/kvm + firecracker + vmlinux + rootfs.ext4 + `mkfs.ext4`);
+there is no fallback. Build the guest from a checkout with
+`bash packages/host/rootfs/build-rootfs.sh`; the host needs Docker, curl, sudo and e2fsprogs,
+and the user needs `/dev/kvm` access (`sudo usermod -aG kvm "$USER"`, then re-login).
+`packages/host` (`bobagent-host run` with `isolation: "firecracker"`) boots one VM per session
+(`firecracker --no-api --config-file`, fresh root disk copied from the base rootfs, vCPU 1-32,
+memory 256-65536 MiB) and gives each agent a persistent sparse `workspace.ext4` (default
+8192 MiB, configurable with `BOBAGENT_VM_WORKSPACE_MIB`) mounted at `/persist`, with `/workspace`
+and `/root` bind-mounted from it. It connects vsock 1024 for provider stdio, serves guest vsock
+5000 (bridge) and 3128 (CONNECT proxy), syncs storage when a provider exits, and removes the
+per-run root disk on session end. With `setpriv` installed, Firecracker runs with
+`--pdeathsig KILL`. On the Linux x86_64/KVM test host, boot to first guest output measured 1.7
+seconds. The proxy resolves DNS once, rejects a hostname if any IPv4 answer is non-public, and
+connects to the approved address.
+Guest image: `packages/host/rootfs/` (`bobagent-init`, `build-rootfs.sh`); run the real host and
+SSH integration tests with `bun run test:firecracker` on a Linux Firecracker host.
 Subagents (`src/subagents.ts`): bridge `spawn_subagents {tasks:[{task,name?}], provider?,
 keep?}` (max 8 per call, `BOBAGENT_MAX_SUBAGENTS` running per parent, default 8, depth 2)
 creates child agents that inherit the parent's placement, sends each its task, and when the
