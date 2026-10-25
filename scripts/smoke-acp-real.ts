@@ -18,6 +18,7 @@ const BINARY = join(ROOT, "apps/desktop/src-tauri/binaries/openagentd-aarch64-ap
 const TOKEN = `smoke-${crypto.randomUUID()}`;
 const TURN_TIMEOUT_MS = 180_000;
 const PROVIDERS = ["devin", "cursor", "grok", "opencode"] as const;
+const DBG_DIR = mkdtempSync(join(tmpdir(), "oa-smoke-prompts-"));
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: unknown) => void };
 
@@ -108,6 +109,7 @@ async function startDaemon(
       HOME: process.env.HOME ?? "",
       SHELL: process.env.SHELL ?? "/bin/zsh",
       TMPDIR: process.env.TMPDIR ?? "/tmp",
+      OPENAGENT_DEBUG_PROMPTS_DIR: DBG_DIR,
     },
     stdin: "pipe",
     stdout: "pipe",
@@ -161,6 +163,19 @@ async function main() {
         instructions: "Always answer in lowercase.",
       })) as Agent;
       rec.agentId = agent.id;
+
+      try {
+        const co = (await c.request("agents.configOptions", { agentId: agent.id })) as {
+          configOptions: { id: string; category: string | null; currentValue: string }[];
+        };
+        rec.configOptions = co.configOptions.map((o) => ({
+          id: o.id,
+          category: o.category,
+          currentValue: o.currentValue,
+        }));
+      } catch (e) {
+        rec.configOptionsError = String(e);
+      }
 
       const permWatch = c
         .waitEvent(
@@ -217,13 +232,13 @@ async function main() {
 
       // turn 2: recall previous reply
       t0 = Date.now();
-      await c.request("chat.send", {
+      const s2 = (await c.request("chat.send", {
         agentId: agent.id,
         text: "Which single word did you reply with in your previous message? Answer with that one word only.",
-      });
+      })) as { queueId: string };
       const t2 = (await c.waitEvent(
         "turn.ended",
-        (d) => (d as Turn).agentId === agent.id,
+        (d) => (d as Turn).queueId === s2.queueId,
         TURN_TIMEOUT_MS,
       )) as Turn;
       rec.turn2 = {
@@ -243,6 +258,66 @@ async function main() {
       db2.close();
       rec.sessionResumed = sessBefore !== null && sessAfter?.session_id === sessBefore.session_id;
       rec.sessionId = sessAfter?.session_id ?? null;
+
+      // handoff: devin agent learns a secret, switch provider to grok, ask it back
+      if (provider === "devin") {
+        const s3 = (await c.request("chat.send", {
+          agentId: agent.id,
+          text: "My secret word is mango. Reply only: ok",
+        })) as { queueId: string };
+        const t3 = (await c.waitEvent(
+          "turn.ended",
+          (d) => (d as Turn).queueId === s3.queueId,
+          TURN_TIMEOUT_MS,
+        )) as Turn;
+        rec.handoffTurn1 = { status: t3.status };
+        if (t3.status !== "completed") throw new Error(`mango turn ended ${t3.status}`);
+        await c.request("agents.update", { id: agent.id, provider: "grok" });
+        const s4 = (await c.request("chat.send", {
+          agentId: agent.id,
+          text: "What is my secret word? Answer with one word.",
+        })) as { queueId: string };
+        const t4 = (await c.waitEvent(
+          "turn.ended",
+          (d) => (d as Turn).queueId === s4.queueId,
+          TURN_TIMEOUT_MS,
+        )) as Turn;
+        rec.handoffTurn2 = { status: t4.status };
+        const h3 = (await c.request("chat.history", { agentId: agent.id })) as {
+          items: ChatItem[];
+        };
+        const msgs3 = h3.items.filter((i) => i.kind === "agent_message") as {
+          text: string;
+        }[];
+        rec.handoffReply = msgs3[msgs3.length - 1]?.text?.trim() ?? null;
+      }
+
+      // grok setConfig: pick a different listed model, send pong, expect completed
+      if (provider === "grok") {
+        const co = (await c.request("agents.configOptions", { agentId: agent.id })) as {
+          configOptions: { id: string; currentValue: string; options: { value: string }[] }[];
+        };
+        const model = co.configOptions.find((o) => o.id === "model" || o.category === "model");
+        const other = model?.options.find((v) => v.value !== model.currentValue)?.value;
+        if (other) {
+          await c.request("agents.setConfig", {
+            agentId: agent.id,
+            configId: model?.id,
+            value: other,
+          });
+          rec.setConfigApplied = other;
+          const s5 = (await c.request("chat.send", {
+            agentId: agent.id,
+            text: "Reply with exactly one word: pong",
+          })) as { queueId: string };
+          const t5 = (await c.waitEvent(
+            "turn.ended",
+            (d) => (d as Turn).queueId === s5.queueId,
+            TURN_TIMEOUT_MS,
+          )) as Turn;
+          rec.setConfigTurn = { status: t5.status, stopReason: t5.stopReason };
+        }
+      }
     } catch (e) {
       rec.error = e instanceof Error ? e.message : String(e);
     }
@@ -261,7 +336,7 @@ async function main() {
   mkdirSync(join(ROOT, "spikes/out"), { recursive: true });
   const outPath = join(ROOT, "spikes/out/phase2-real-smoke.json");
   writeFileSync(outPath, JSON.stringify({ ranAt: new Date().toISOString(), results }, null, 2));
-  console.log(`wrote ${outPath}`);
+  console.log(`wrote ${outPath} (prompts in ${DBG_DIR})`);
   process.exit(0);
 }
 

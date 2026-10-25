@@ -35,6 +35,40 @@ function logRequest(method: string, params: unknown) {
   } catch {}
 }
 
+const MODE_VALUES = ["ask-all", "default", "bypass", "accept-edits"];
+const MODEL_VALUES = ["m1", "m2"];
+
+function configOptions() {
+  return [
+    {
+      id: "mode",
+      name: "Mode",
+      category: "mode",
+      type: "select",
+      currentValue: state.config.mode ?? "default",
+      options: MODE_VALUES.map((v) => ({ value: v, name: v })),
+    },
+    {
+      id: "model",
+      name: "Model",
+      category: "model",
+      type: "select",
+      currentValue: state.config.model ?? "m1",
+      options: MODEL_VALUES.map((v) => ({ value: v, name: v })),
+    },
+  ];
+}
+
+const state = {
+  config: { mode: undefined as string | undefined, model: undefined as string | undefined },
+};
+try {
+  Object.assign(state, JSON.parse(readFileSync(join(STATE_DIR, "state.json"), "utf8")));
+} catch {}
+function saveState() {
+  writeFileSync(join(STATE_DIR, "state.json"), JSON.stringify(state));
+}
+
 function loadSessions(): Record<string, { prompts: string[] }> {
   try {
     return JSON.parse(readFileSync(SESSIONS_FILE, "utf8"));
@@ -157,6 +191,21 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
     }
   }
 
+  if (text === "switchmodel") {
+    state.config.model = "m2";
+    saveState();
+    await ctx.client.notify("session/update", {
+      sessionId,
+      update: { sessionUpdate: "config_option_update", configOptions: configOptions() },
+    });
+    return { stopReason: "end_turn" };
+  }
+
+  if (text === "history") {
+    await say("agent_message_chunk", text);
+    return { stopReason: "end_turn" };
+  }
+
   if (text === "crash") {
     await say("agent_message_chunk", "before crash");
     process.exit(1);
@@ -187,11 +236,13 @@ acp
   })
   .onRequest("session/new", async (ctx) => {
     logRequest("session/new", ctx.params);
+    const delay = Number.parseInt(process.env.FAKE_ACP_NEW_DELAY_MS ?? "", 10) || 0;
+    if (delay > 0) await sleep(delay);
     const sessions = loadSessions();
     const sessionId = `fake-${Date.now()}-${sessionCounter++}`;
     sessions[sessionId] = { prompts: [] };
     saveSessions(sessions);
-    return { sessionId } as never;
+    return { sessionId, configOptions: configOptions() } as never;
   })
   .onRequest("session/load", async (ctx) => {
     const params = ctx.params as { sessionId: string; cwd?: string };
@@ -205,7 +256,16 @@ acp
       "session/update",
       chunk(params.sessionId, "agent_message_chunk", "[replayed history]"),
     );
-    return {} as never;
+    return { configOptions: configOptions() } as never;
+  })
+  .onRequest("session/set_config_option", async (ctx) => {
+    const params = ctx.params as { configId: string; value: string };
+    logRequest("session/set_config_option", params);
+    if (params.configId === "mode" || params.configId === "model") {
+      state.config[params.configId] = params.value;
+      saveState();
+    }
+    return { configOptions: configOptions() } as never;
   })
   .onRequest("session/prompt", async (ctx) => {
     logRequest("session/prompt", ctx.params);

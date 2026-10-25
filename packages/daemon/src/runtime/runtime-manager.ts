@@ -1,6 +1,12 @@
-import type { Agent, AgentStatusInfo, PendingPermission } from "@openagent/protocol";
+import type {
+  Agent,
+  AgentStatusInfo,
+  ConfigOption,
+  PendingPermission,
+  QueueState,
+} from "@openagent/protocol";
 import type { AgentStore } from "../agents";
-import type { ChatStore } from "../chat-store";
+import type { ChatStore, QueueStore } from "../chat-store";
 import { AgentRuntime, type Broadcast, RpcError } from "./agent-runtime";
 
 export class RuntimeManager {
@@ -9,6 +15,7 @@ export class RuntimeManager {
   constructor(
     private agents: AgentStore,
     private chat: ChatStore,
+    private queue: QueueStore,
     private broadcast: Broadcast,
   ) {}
 
@@ -17,14 +24,65 @@ export class RuntimeManager {
     if (!rt) {
       const agent = this.agents.get(agentId);
       if (!agent) throw new RpcError("not_found", "agent not found");
-      rt = new AgentRuntime(agent, this.chat, this.broadcast);
+      rt = new AgentRuntime(agent, this.agents, this.chat, this.queue, this.broadcast);
       this.runtimes.set(agentId, rt);
     }
     return rt;
   }
 
-  send(agentId: string, text: string): { turnId: string } {
+  send(agentId: string, text: string): { queueId: string } {
     return this.runtimeFor(agentId).send(text);
+  }
+
+  getQueue(agentId: string): QueueState {
+    if (!this.agents.get(agentId)) throw new RpcError("not_found", "agent not found");
+    const rt = this.runtimes.get(agentId);
+    if (rt) return rt.getQueue();
+    return {
+      agentId,
+      paused: this.agents.queuePaused(agentId),
+      items: this.queue.queued(agentId),
+    };
+  }
+
+  removeQueued(queueId: string): void {
+    for (const rt of this.runtimes.values()) {
+      if (rt.getQueue().items.some((i) => i.id === queueId)) {
+        rt.removeQueued(queueId);
+        return;
+      }
+    }
+    if (!this.queue.remove(queueId)) {
+      throw new RpcError("not_found", "queue item not found or already started");
+    }
+  }
+
+  pauseQueue(agentId: string): QueueState {
+    return this.runtimeFor(agentId).pauseQueue();
+  }
+
+  resumeQueue(agentId: string): QueueState {
+    return this.runtimeFor(agentId).resumeQueue();
+  }
+
+  async configOptions(agentId: string): Promise<ConfigOption[]> {
+    return this.runtimeFor(agentId).configOptionsList();
+  }
+
+  async setConfig(agentId: string, configId: string, value: string): Promise<ConfigOption[]> {
+    return this.runtimeFor(agentId).setConfig(configId, value);
+  }
+
+  /** Resume draining for every agent that still has queued items (startup). */
+  resumeAllQueues(): void {
+    for (const agentId of this.queue.agentsWithQueued()) {
+      if (this.agents.queuePaused(agentId)) continue;
+      try {
+        this.runtimeFor(agentId).drain();
+      } catch (e) {
+        console.error(`[openagentd] drain failed for ${agentId}:`, (e as Error).message);
+      }
+    }
   }
 
   cancel(agentId: string): void {
@@ -61,26 +119,23 @@ export class RuntimeManager {
     return out;
   }
 
-  onAgentUpdated(before: Agent, after: Agent): void {
-    const rt = this.runtimes.get(after.id);
+  /** Agent update: refresh the runtime's cached agent; kill session if provider changed. */
+  async agentUpdated(agent: Agent, providerChanged: boolean): Promise<void> {
+    const rt = this.runtimes.get(agent.id);
     if (!rt) return;
-    if (before.provider !== after.provider) {
-      rt.kill().catch(() => {});
-      this.runtimes.delete(after.id);
-    } else {
-      rt.updateAgent(after);
-    }
+    rt.updateAgent(agent);
+    if (providerChanged) await rt.dispose(true);
   }
 
-  onAgentDeleted(agentId: string): void {
+  async agentDeleted(agentId: string): Promise<void> {
     const rt = this.runtimes.get(agentId);
     this.runtimes.delete(agentId);
-    rt?.kill().catch(() => {});
+    await rt?.dispose();
   }
 
   async closeAll(): Promise<void> {
-    const all = [...this.runtimes.values()];
+    const all = [...this.runtimes.values()].map((rt) => rt.dispose());
+    await Promise.allSettled(all);
     this.runtimes.clear();
-    await Promise.allSettled(all.map((rt) => rt.dispose()));
   }
 }

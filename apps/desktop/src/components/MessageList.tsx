@@ -47,7 +47,11 @@ function PermissionCard({
       <div className="text-sm font-medium text-amber-200">{item.title}</div>
       {item.resolution ? (
         <div className="mt-1 text-xs text-zinc-400">
-          Resolved: {item.resolution.optionId ?? "cancelled"}
+          Resolved:{" "}
+          {item.resolution.optionId === null
+            ? "Cancelled"
+            : (item.options.find((o) => o.optionId === item.resolution?.optionId)?.name ??
+              item.resolution.optionId)}
         </div>
       ) : (
         <div className="mt-2 flex flex-wrap gap-2">

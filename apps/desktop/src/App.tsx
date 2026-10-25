@@ -82,14 +82,13 @@ export default function App() {
   const selected = agents.find((a) => a.id === selectedId) ?? null;
 
   const createAgent = useCallback(
-    async (form: { name: string; provider: ProviderId; instructions: string; model: string }) => {
+    async (form: { name: string; provider: ProviderId; instructions: string }) => {
       const client = clientRef.current;
       if (!client) return;
       const agent = await client.request("agents.create", {
         name: form.name,
         provider: form.provider,
         instructions: form.instructions,
-        ...(form.model ? { model: form.model } : {}),
       });
       setCreating(false);
       setSelectedId(agent.id);
@@ -104,7 +103,6 @@ export default function App() {
       patch: {
         name?: string;
         instructions?: string;
-        model?: string | null;
         provider?: ProviderId;
       },
     ) => {
@@ -187,7 +185,12 @@ export default function App() {
           <CreateForm onSubmit={createAgent} onCancel={() => setCreating(false)} />
         ) : selected && settingsOpen ? (
           <div className="h-full overflow-y-auto">
-            <AgentSettings agent={selected} onUpdate={updateAgent} onDelete={deleteAgent} />
+            <AgentSettings
+              client={clientRef.current!}
+              agent={selected}
+              onUpdate={updateAgent}
+              onDelete={deleteAgent}
+            />
           </div>
         ) : selected && clientReady ? (
           <ChatView
@@ -219,18 +222,12 @@ function CreateForm({
   onSubmit,
   onCancel,
 }: {
-  onSubmit: (f: {
-    name: string;
-    provider: ProviderId;
-    instructions: string;
-    model: string;
-  }) => Promise<void>;
+  onSubmit: (f: { name: string; provider: ProviderId; instructions: string }) => Promise<void>;
   onCancel: () => void;
 }) {
   const [name, setName] = useState("");
   const [provider, setProvider] = useState<ProviderId>("devin");
   const [instructions, setInstructions] = useState("");
-  const [model, setModel] = useState("");
   const [busy, setBusy] = useState(false);
 
   return (
@@ -240,7 +237,7 @@ function CreateForm({
         e.preventDefault();
         setBusy(true);
         try {
-          await onSubmit({ name, provider, instructions, model });
+          await onSubmit({ name, provider, instructions });
         } finally {
           setBusy(false);
         }
@@ -271,12 +268,6 @@ function CreateForm({
         placeholder="Instructions"
         value={instructions}
         onChange={(e) => setInstructions(e.target.value)}
-      />
-      <input
-        className={inputCls}
-        placeholder="Model (optional)"
-        value={model}
-        onChange={(e) => setModel(e.target.value)}
       />
       <div className="flex gap-2">
         <button type="submit" disabled={busy} className={`${btnCls} bg-sky-600 hover:bg-sky-500`}>

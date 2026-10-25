@@ -55,6 +55,32 @@ interactive sign-in — UNVERIFIED, CLI not installed.
 Tests drive `packages/daemon/test/fixtures/fake-acp-agent.ts` (an ACP-speaking fake
 that logs requests to `$FAKE_ACP_STATE_DIR/log.jsonl` and its pid to `pids.txt`).
 
+## Queue + config (Phase 3)
+
+`chat.send` always enqueues (`queue` table, status queued|started|removed); the runtime
+drains oldest-first while idle and unpaused. User `chat.cancel` pauses the queue when
+items remain; a `failed` turn auto-pauses. `queue.get/remove/pause/resume` +
+`queue.updated` events. `Agent.config` (configId->value) is applied to every new
+provider session before its first prompt via `session/set_config_option`;
+`DEFAULT_MODE` in `src/providers/acp.ts` picks the safe per-provider mode
+(devin=accept-edits, cursor=agent, opencode=build — measured by `spikes/mode-probe.ts`;
+never a bypass/auto-approve value). `agents.configOptions` starts a session to read
+options; `agents.setConfig` validates against live options (busy while a turn runs).
+New (non-resumed) sessions with prior history get a `<conversation_history>` block
+(`src/runtime/handoff.ts`, pure fn) before the first prompt.
+
+`spikes/mode-probe.ts` — per provider x mode permission probe -> `spikes/out/mode-probe.json`.
+- `OPENAGENT_DEBUG_PROMPTS_DIR` — when set, the daemon writes every outgoing prompt to
+  `<dir>/<agentId>-<turnId>.txt` (debugging only).
+
+## Permissions
+
+Provider agents ask for approval only when THEIR OWN config says so
+(`PROVIDER_PERMISSION_CONFIG` in `packages/protocol` maps provider -> config path).
+The UI shows this as a notice; we never change or sandbox those configs.
+Note: `spikes/out/mode-probe.json` was measured with the user's permissive global
+configs, so it does not reflect stock defaults. Gemini's config path is unverified.
+
 ## Verified commands (run from repo root)
 
 - `bun install` — install workspace deps.

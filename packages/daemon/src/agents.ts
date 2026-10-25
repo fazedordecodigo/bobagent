@@ -9,6 +9,7 @@ type Row = {
   instructions: string;
   provider: string;
   model: string | null;
+  config_json: string | null;
   workspace_path: string;
   created_at: number;
   updated_at: number;
@@ -21,7 +22,7 @@ function rowToAgent(r: Row): Agent {
     name: r.name,
     instructions: r.instructions,
     provider: r.provider as Agent["provider"],
-    model: r.model,
+    config: r.config_json ? (JSON.parse(r.config_json) as Record<string, string>) : {},
     workspacePath: r.workspace_path,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -63,7 +64,7 @@ export class AgentStore {
         params.name,
         params.instructions ?? "",
         params.provider,
-        params.model ?? null,
+        "{}",
         workspacePath,
         now,
         now,
@@ -77,13 +78,29 @@ export class AgentStore {
     const name = params.name ?? existing.name;
     const instructions = params.instructions ?? existing.instructions;
     const provider = params.provider ?? existing.provider;
-    const model = params.model === undefined ? existing.model : params.model;
     this.db
       .query(
-        "UPDATE agents SET name = ?, instructions = ?, provider = ?, model = ?, updated_at = ? WHERE id = ?",
+        "UPDATE agents SET name = ?, instructions = ?, provider = ?, updated_at = ? WHERE id = ?",
       )
-      .run(name, instructions, provider, model, Date.now(), params.id);
+      .run(name, instructions, provider, Date.now(), params.id);
     return this.get(params.id);
+  }
+
+  setConfig(id: string, config: Record<string, string>): void {
+    this.db
+      .query("UPDATE agents SET config_json = ?, updated_at = ? WHERE id = ?")
+      .run(JSON.stringify(config), Date.now(), id);
+  }
+
+  queuePaused(id: string): boolean {
+    const r = this.db.query("SELECT queue_paused AS p FROM agents WHERE id = ?").get(id) as {
+      p: number;
+    } | null;
+    return (r?.p ?? 0) === 1;
+  }
+
+  setQueuePaused(id: string, paused: boolean): void {
+    this.db.query("UPDATE agents SET queue_paused = ? WHERE id = ?").run(paused ? 1 : 0, id);
   }
 
   softDelete(id: string): boolean {

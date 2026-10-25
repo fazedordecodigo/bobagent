@@ -295,7 +295,7 @@ describe("daemon e2e", () => {
 
     const db = new Database(join(dataDir, "openagent.db"), { readonly: true });
     const rows = db.query("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number };
-    expect(rows.n).toBe(2);
+    expect(rows.n).toBe(4);
     db.close();
   });
 

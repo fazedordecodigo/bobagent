@@ -2,6 +2,7 @@ import type { Agent } from "@openagent/protocol";
 import { useState } from "react";
 import { useChat } from "../hooks/useChat";
 import type { DaemonClient } from "../lib/daemon";
+import { PermissionNotice } from "./AgentSettings";
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
 
@@ -22,7 +23,18 @@ export function ChatView({
   agent: Agent;
   onOpenSettings: () => void;
 }) {
-  const { items, hasMore, runningTurn, status, loadEarlier } = useChat(client, agent.id);
+  const {
+    items,
+    hasMore,
+    runningTurn,
+    loaded,
+    status,
+    queue,
+    loadEarlier,
+    queuePause,
+    queueResume,
+    queueRemove,
+  } = useChat(client, agent.id);
   const [sendBusy, setSendBusy] = useState(false);
 
   return (
@@ -60,6 +72,11 @@ export function ChatView({
           </svg>
         </button>
       </div>
+      {items.length === 0 && loaded && (
+        <div className="px-4 pt-3">
+          <PermissionNotice provider={agent.provider} />
+        </div>
+      )}
       <MessageList
         items={items}
         hasMore={hasMore}
@@ -68,6 +85,57 @@ export function ChatView({
           void client.request("permissions.respond", { requestId, optionId }).catch(() => {});
         }}
       />
+      {queue && queue.items.length > 0 && (
+        <div className="border-t border-zinc-800 px-4 py-2">
+          {queue.paused && (
+            <div className="mb-2 flex items-center justify-between rounded bg-amber-900/40 px-2 py-1 text-xs text-amber-300">
+              Queue paused
+              <button type="button" className="underline" onClick={queueResume}>
+                Resume
+              </button>
+            </div>
+          )}
+          {!queue.paused && (
+            <div className="mb-1 flex justify-end">
+              <button
+                type="button"
+                className="text-xs text-zinc-500 underline"
+                onClick={queuePause}
+              >
+                Pause queue
+              </button>
+            </div>
+          )}
+          <ul className="space-y-1">
+            {queue.items.map((q) => (
+              <li
+                key={q.id}
+                className="flex items-center justify-between rounded bg-zinc-900 px-2 py-1 text-xs text-zinc-300"
+              >
+                <span className="truncate">Queued: {q.text.slice(0, 80)}</span>
+                <button
+                  type="button"
+                  aria-label="Remove queued message"
+                  className="ml-2 text-zinc-500 hover:text-zinc-200"
+                  onClick={() => queueRemove(q.id)}
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {queue?.paused && queue.items.length === 0 && (
+        <div className="border-t border-zinc-800 px-4 py-2">
+          <div className="flex items-center justify-between rounded bg-amber-900/40 px-2 py-1 text-xs text-amber-300">
+            Queue paused
+            <button type="button" className="underline" onClick={queueResume}>
+              Resume
+            </button>
+          </div>
+        </div>
+      )}
       <Composer
         running={runningTurn !== null || sendBusy}
         onSend={async (text) => {

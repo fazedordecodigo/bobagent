@@ -30,14 +30,17 @@ describe("chat e2e (fake acp agent)", () => {
   }
 
   async function send(agentId: string, text: string): Promise<string> {
-    const res = (await c.request("chat.send", { agentId, text })) as { turnId: string };
-    return res.turnId;
+    const res = (await c.request("chat.send", { agentId, text })) as { queueId: string };
+    (lastQueueId.get(agentId) ?? lastQueueId.set(agentId, []).get(agentId)!).push(res.queueId);
+    return res.queueId;
   }
 
-  async function waitTurnEnd(agentId: string, timeout = 15000): Promise<Turn> {
+  const lastQueueId = new Map<string, string[]>();
+  async function waitTurnEnd(agentId: string, timeout = 15000, queueId?: string): Promise<Turn> {
+    const qid = queueId ?? lastQueueId.get(agentId)?.shift();
     return (await c.waitForEventWhere(
       "turn.ended",
-      (d) => (d as Turn).agentId === agentId,
+      (d) => (d as Turn).agentId === agentId && (qid === undefined || (d as Turn).queueId === qid),
       timeout,
     )) as Turn;
   }
@@ -56,6 +59,7 @@ describe("chat e2e (fake acp agent)", () => {
     stateDir = tmp("oa2-fake-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
       OPENAGENT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      OPENAGENT_ACP_COMMAND_CURSOR: JSON.stringify(["bun", FAKE_AGENT]),
       OPENAGENT_ACP_COMMAND_GROK: JSON.stringify(["bun", FAKE_AGENT]),
       OPENAGENT_ACP_COMMAND_GEMINI: JSON.stringify(["definitely-not-a-binary-oa"]),
       OPENAGENT_CANCEL_GRACE_MS: "1000",
@@ -121,7 +125,7 @@ describe("chat e2e (fake acp agent)", () => {
     const log = readLog(stateDir);
     const prompts = log
       .filter((l) => l.method === "session/prompt")
-      .map((l) => (l.params as { prompt: { text: string }[] }).prompt[0]?.text);
+      .map((l) => (l.params as { prompt: { text: string }[] }).prompt[0]?.text ?? "");
     expect(prompts[prompts.length - 1]).toMatch(/^<agent_instructions>\n/);
     expect(prompts[prompts.length - 1]).toContain("Always answer in lowercase.");
 
@@ -133,7 +137,7 @@ describe("chat e2e (fake acp agent)", () => {
     await waitTurnEnd(agent.id);
     const prompts2 = readLog(stateDir)
       .filter((l) => l.method === "session/prompt")
-      .map((l) => (l.params as { prompt: { text: string }[] }).prompt[0]?.text);
+      .map((l) => (l.params as { prompt: { text: string }[] }).prompt[0]?.text ?? "");
     expect(prompts2[prompts2.length - 1]).not.toContain("<agent_instructions>");
   });
 
@@ -220,15 +224,316 @@ describe("chat e2e (fake acp agent)", () => {
     await waitForPidDead(pid);
   });
 
-  test("send during a running turn -> busy", async () => {
+  test("send during a running turn enqueues instead of busy", async () => {
     const agent = await newAgent("Busy", "devin");
     await send(agent.id, "slow");
     await c.waitForEventWhere("turn.started", (d) => (d as Turn).agentId === agent.id);
+    const res = (await c.request("chat.send", { agentId: agent.id, text: "echo:x" })) as {
+      queueId: string;
+    };
+    expect(res.queueId).toBeTruthy();
+    await c.request("chat.cancel", { agentId: agent.id });
+    await waitTurnEnd(agent.id);
+    // user cancel pauses the queue while items remain
+    const q = (await c.request("queue.get", { agentId: agent.id })) as {
+      paused: boolean;
+      items: { id: string }[];
+    };
+    expect(q.paused).toBe(true);
+    expect(q.items.length).toBe(1);
+    // resume drains it
+    await c.request("queue.resume", { agentId: agent.id });
+    await waitTurnEnd(agent.id);
+  });
+
+  test("queue: order, remove, pause-on-stop, resume", async () => {
+    const agent = await newAgent("Queue", "devin");
+    await send(agent.id, "slow");
+    await c.waitForEventWhere("turn.started", (d) => (d as Turn).agentId === agent.id);
+    const ids: string[] = [];
+    for (const t of ["echo:a", "echo:b", "echo:c"]) {
+      const r = (await c.request("chat.send", { agentId: agent.id, text: t })) as {
+        queueId: string;
+      };
+      ids.push(r.queueId);
+      (lastQueueId.get(agent.id) ?? lastQueueId.set(agent.id, []).get(agent.id)!).push(r.queueId);
+    }
+    let q = (await c.request("queue.get", { agentId: agent.id })) as {
+      paused: boolean;
+      items: { id: string; text: string }[];
+    };
+    expect(q.items.length).toBe(3);
+    await c.request("queue.remove", { queueId: ids[1]! });
+    await c.request("chat.cancel", { agentId: agent.id });
+    await waitTurnEnd(agent.id);
+    q = (await c.request("queue.get", { agentId: agent.id })) as typeof q;
+    expect(q.paused).toBe(true);
+    expect(q.items.map((i) => i.text)).toEqual(["echo:a", "echo:c"]);
+    await c.request("queue.resume", { agentId: agent.id });
+    await waitTurnEnd(agent.id, 15000, ids[0]!); // a
+    await waitTurnEnd(agent.id, 15000, ids[2]!); // c
+    const prompts = readLog(stateDir)
+      .filter((l) => l.method === "session/prompt")
+      .map((l) => (l.params as { prompt: { text: string }[] }).prompt[0]?.text ?? "");
+    // first prompt of the new session may carry a handoff/instructions prefix
+    const seen = prompts.map((p) => p.match(/echo:[abc]$/)?.[0]).filter((p): p is string => !!p);
+    expect(seen).toEqual(["echo:a", "echo:c"]);
+  });
+
+  test("queue: pause while idle then resume", async () => {
+    const agent = await newAgent("Paused", "devin");
+    await c.request("queue.pause", { agentId: agent.id });
+    await send(agent.id, "echo:p");
     await expect(
-      c.request("chat.send", { agentId: agent.id, text: "echo:x" }),
+      c.waitForEventWhere("turn.started", (d) => (d as Turn).agentId === agent.id, 500),
+    ).rejects.toThrow();
+    await c.request("queue.resume", { agentId: agent.id });
+    const t = await waitTurnEnd(agent.id);
+    expect(t.status).toBe("completed");
+  });
+
+  test("queue: failed turn auto-pauses with items kept", async () => {
+    const agent = await newAgent("Crasher", "devin");
+    await send(agent.id, "crash");
+    await send(agent.id, "echo:q");
+    const t = await waitTurnEnd(agent.id);
+    expect(t.status).toBe("failed");
+    const q = (await c.request("queue.get", { agentId: agent.id })) as {
+      paused: boolean;
+      items: { text: string }[];
+    };
+    expect(q.paused).toBe(true);
+    expect(q.items.map((i) => i.text)).toEqual(["echo:q"]);
+  });
+
+  test("queue: kill -9 leaves started item alone, queued item runs after restart", async () => {
+    const agent = await newAgent("K9", "devin");
+    await send(agent.id, "slow");
+    await c.waitForEventWhere("turn.started", (d) => (d as Turn).agentId === agent.id);
+    const qx = await send(agent.id, "echo:x");
+    daemon.proc.kill("SIGKILL");
+    await daemon.proc.exited;
+    daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
+      OPENAGENT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      OPENAGENT_ACP_COMMAND_CURSOR: JSON.stringify(["bun", FAKE_AGENT]),
+      OPENAGENT_ACP_COMMAND_GROK: JSON.stringify(["bun", FAKE_AGENT]),
+      OPENAGENT_ACP_COMMAND_GEMINI: JSON.stringify(["definitely-not-a-binary-oa"]),
+      OPENAGENT_CANCEL_GRACE_MS: "1000",
+      FAKE_ACP_STATE_DIR: stateDir,
+    });
+    c = await DaemonClient.connect(daemon.port, TOKEN);
+    const h = (await c.request("chat.history", { agentId: agent.id })) as {
+      turns: Turn[];
+      items: ChatItem[];
+    };
+    expect(h.turns.some((t) => t.status === "interrupted")).toBe(true);
+    // queued echo:x drains automatically; slow's started item never re-runs
+    const t2 = await waitTurnEnd(agent.id, 15000, qx);
+    expect(t2.status).toBe("completed");
+    const prompts = readLog(stateDir)
+      .filter((l) => l.method === "session/prompt")
+      .map((l) => (l.params as { prompt: { text: string }[] }).prompt[0]?.text ?? "");
+    // slow's started queue item must not re-run; echo:x drains (possibly prefixed)
+    expect(prompts.filter((p) => p.endsWith("slow")).length).toBeLessThanOrEqual(1);
+    expect(prompts.some((p) => p.endsWith("echo:x"))).toBe(true);
+  });
+
+  test("config: configOptions, setConfig persistence, busy, invalid, defaults", async () => {
+    const agent = await newAgent("Cfg", "devin");
+    const opts = (await c.request("agents.configOptions", { agentId: agent.id })) as {
+      configOptions: { id: string; category: string | null; options: { value: string }[] }[];
+    };
+    const ids = opts.configOptions.map((o) => o.id);
+    expect(ids).toEqual(expect.arrayContaining(["mode", "model"]));
+
+    const updatedP = c.waitForEventWhere("agent.updated", () => true, 5000);
+    const r = (await c.request("agents.setConfig", {
+      agentId: agent.id,
+      configId: "model",
+      value: "m2",
+    })) as { configOptions: { id: string; currentValue: string }[] };
+    await updatedP;
+    expect(r.configOptions.find((o) => o.id === "model")?.currentValue).toBe("m2");
+    const list = (await c.request("agents.list", {})) as Agent[];
+    expect(list.find((a) => a.id === agent.id)?.config.model).toBe("m2");
+    await expect(
+      c.request("agents.setConfig", { agentId: agent.id, configId: "model", value: "zzz" }),
+    ).rejects.toMatchObject({ code: "bad_request" });
+
+    await send(agent.id, "slow");
+    await c.waitForEventWhere("turn.started", (d) => (d as Turn).agentId === agent.id);
+    await expect(
+      c.request("agents.setConfig", { agentId: agent.id, configId: "model", value: "m1" }),
     ).rejects.toMatchObject({ code: "busy" });
     await c.request("chat.cancel", { agentId: agent.id });
     await waitTurnEnd(agent.id);
+
+    // DEFAULT_MODE applied to devin since user never set mode: fake got mode=accept-edits
+    const sets = readLog(stateDir)
+      .filter((l) => l.method === "session/set_config_option")
+      .map((l) => l.params as { configId: string; value: string });
+    expect(sets.some((s) => s.configId === "model" && s.value === "m2")).toBe(true);
+    expect(sets.some((s) => s.configId === "mode" && s.value === "accept-edits")).toBe(true);
+
+    // switchmodel: agent-side config_option_update is broadcast
+    const cfgP = c.waitForEventWhere(
+      "agent.config",
+      (d) =>
+        (d as { agentId: string }).agentId === agent.id &&
+        (d as { configOptions: { id: string; currentValue: string }[] }).configOptions.find(
+          (o) => o.id === "model",
+        )?.currentValue === "m2",
+      10000,
+    );
+    await send(agent.id, "switchmodel");
+    await waitTurnEnd(agent.id);
+    await cfgP;
+  });
+
+  test("queue: send while session is starting outside a turn still drains", async () => {
+    const dir2 = tmp("oa2-stall-data-");
+    const root2 = tmp("oa2-stall-agents-");
+    const state2 = tmp("oa2-stall-fake-");
+    const d = await startDaemon(dir2, root2, TOKEN, {
+      OPENAGENT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      FAKE_ACP_STATE_DIR: state2,
+      FAKE_ACP_NEW_DELAY_MS: "600",
+    });
+    const c2 = await DaemonClient.connect(d.port, TOKEN);
+    try {
+      const agent = (await c2.request("agents.create", {
+        name: "Stall",
+        provider: "devin",
+      })) as Agent;
+      const cfg = c2.request("agents.configOptions", { agentId: agent.id }); // slow session/new
+      await c2.request("chat.send", { agentId: agent.id, text: "echo:x" });
+      const ended = (await c2.waitForEventWhere(
+        "turn.ended",
+        (t) => (t as Turn).agentId === agent.id,
+        15000,
+      )) as Turn;
+      expect(ended.status).toBe("completed");
+      await cfg;
+    } finally {
+      d.proc.kill("SIGKILL");
+      await d.proc.exited;
+      c2.close();
+    }
+  });
+
+  test("handoff: new session gets history block, resumed and later prompts do not", async () => {
+    const agent = await newAgent("Handoff", "devin");
+    await send(agent.id, "echo:first");
+    await waitTurnEnd(agent.id);
+    // switch provider to cursor (also the fake)
+    await c.request("agents.update", { id: agent.id, provider: "cursor" });
+    await send(agent.id, "history");
+    await waitTurnEnd(agent.id);
+    const h = (await c.request("chat.history", { agentId: agent.id })) as { items: ChatItem[] };
+    const reply = [...h.items].reverse().find((i) => i.kind === "agent_message") as
+      | { text: string }
+      | undefined;
+    expect(reply?.text).toContain("<conversation_history>");
+    expect(reply?.text).toContain("[user]");
+    expect(reply?.text).toContain("[assistant]");
+    // second prompt in the same session: no block
+    await send(agent.id, "history");
+    await waitTurnEnd(agent.id);
+    const h2 = (await c.request("chat.history", { agentId: agent.id })) as {
+      items: ChatItem[];
+    };
+    const replies = h2.items.filter((i) => i.kind === "agent_message") as { text: string }[];
+    expect(replies[replies.length - 1]?.text).not.toContain("<conversation_history>");
+  });
+
+  test("provider change during a running turn cancels it, queue keeps items", async () => {
+    const agent = await newAgent("Switch", "devin");
+    await send(agent.id, "slow");
+    await c.waitForEventWhere("turn.started", (d) => (d as Turn).agentId === agent.id);
+    const qa1 = await send(agent.id, "echo:after1");
+    const qa2 = await send(agent.id, "echo:after2");
+    await c.request("agents.update", { id: agent.id, provider: "cursor" });
+    const cancelled = (await c.waitForEventWhere(
+      "turn.ended",
+      (d) => (d as Turn).agentId === agent.id && (d as Turn).status === "cancelled",
+      10000,
+    )) as Turn;
+    expect(cancelled.status).toBe("cancelled");
+    // queued items are kept and drain on the new provider's session
+    const t1 = await waitTurnEnd(agent.id, 15000, qa1);
+    const t2 = await waitTurnEnd(agent.id, 15000, qa2);
+    expect([t1.status, t2.status]).toEqual(["completed", "completed"]);
+    const prompts = readLog(stateDir)
+      .filter((l) => l.method === "session/prompt")
+      .map((l) => (l.params as { prompt: { text: string }[] }).prompt[0]?.text ?? "");
+    expect(prompts.some((p) => p.endsWith("echo:after1"))).toBe(true);
+    expect(prompts.some((p) => p.endsWith("echo:after2"))).toBe(true);
+  });
+
+  test("buildHandoff: truncation and budget", async () => {
+    const { buildHandoff } = await import("../src/runtime/handoff");
+    const big = "x".repeat(5000);
+    const out = buildHandoff([
+      { kind: "user_message", text: big },
+      { kind: "agent_message", text: "ok" },
+    ]);
+    expect(out).toContain("<conversation_history>");
+    expect(out).toContain("[…]");
+    expect(out?.length).toBeLessThan(21000);
+    expect(
+      buildHandoff(
+        Array.from({ length: 60 }, (_, i) => ({
+          kind: "agent_message" as const,
+          text: "y".repeat(900) + i,
+        })),
+      )?.length,
+    ).toBeLessThanOrEqual(21000);
+    expect(buildHandoff([])).toBeNull();
+  });
+
+  test("v2 database migrates to v3 preserving agent model into config", async () => {
+    const dir = tmp("oa2-v2-data-");
+    const root = tmp("oa2-v2-agents-");
+    const db = new Database(join(dir, "openagent.db"));
+    const { migrations: MIGRATIONS } = await import("../src/db/migrations");
+    db.exec("BEGIN");
+    db.exec(
+      "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)",
+    );
+    for (let i = 0; i < 2; i++) {
+      db.exec(MIGRATIONS[i]!);
+      db.query("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(
+        i + 1,
+        Date.now(),
+      );
+    }
+    db.exec("COMMIT");
+    db.query(
+      "INSERT INTO agents (id, name, instructions, provider, model, workspace_path, created_at, updated_at) VALUES (?, ?, '', 'devin', 'x', ?, ?, ?)",
+    ).run("agent-v2", "Two", join(root, "agent-v2"), Date.now(), Date.now());
+    db.close();
+    const d = await startDaemon(dir, root, TOKEN, {
+      OPENAGENT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      OPENAGENT_ACP_COMMAND_CURSOR: JSON.stringify(["bun", FAKE_AGENT]),
+      FAKE_ACP_STATE_DIR: stateDir,
+    });
+    try {
+      const c2 = await DaemonClient.connect(d.port, TOKEN);
+      const list = (await c2.request("agents.list", {})) as Agent[];
+      const a = list.find((a) => a.id === "agent-v2");
+      expect(a?.config).toEqual({ model: "x" });
+      c2.close();
+    } finally {
+      d.proc.kill("SIGKILL");
+      await d.proc.exited;
+    }
+    const db2 = new Database(join(dir, "openagent.db"), { readonly: true });
+    expect(
+      (db2.query("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number }).n,
+    ).toBe(4);
+    db2.close();
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
   });
 
   test("crash: turn fails with error item + error status; next send resumes via session/load", async () => {
@@ -261,7 +566,9 @@ describe("chat e2e (fake acp agent)", () => {
     expect(loads.length).toBe(logBefore + 1);
     const lastLoad = loads[loads.length - 1];
     expect(lastLoad).toBeTruthy();
-    expect((lastLoad!.params as { sessionId: string }).sessionId).toBeTruthy();
+    expect(
+      ((lastLoad as NonNullable<typeof lastLoad>).params as { sessionId: string }).sessionId,
+    ).toBeTruthy();
 
     const st2 = (await c.request("agents.statuses", {})) as Record<string, { status: string }>;
     expect(st2[agent.id]?.status).toBe("idle");
@@ -279,6 +586,7 @@ describe("chat e2e (fake acp agent)", () => {
 
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
       OPENAGENT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      OPENAGENT_ACP_COMMAND_CURSOR: JSON.stringify(["bun", FAKE_AGENT]),
       OPENAGENT_ACP_COMMAND_GROK: JSON.stringify(["bun", FAKE_AGENT]),
       OPENAGENT_ACP_COMMAND_GEMINI: JSON.stringify(["definitely-not-a-binary-oa"]),
       OPENAGENT_CANCEL_GRACE_MS: "1000",
@@ -311,6 +619,7 @@ describe("chat e2e (fake acp agent)", () => {
 
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
       OPENAGENT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      OPENAGENT_ACP_COMMAND_CURSOR: JSON.stringify(["bun", FAKE_AGENT]),
       OPENAGENT_ACP_COMMAND_GROK: JSON.stringify(["bun", FAKE_AGENT]),
       OPENAGENT_ACP_COMMAND_GEMINI: JSON.stringify(["definitely-not-a-binary-oa"]),
       OPENAGENT_CANCEL_GRACE_MS: "1000",
@@ -384,6 +693,7 @@ describe("chat e2e (fake acp agent)", () => {
 
     const d = await startDaemon(dir, root, TOKEN, {
       OPENAGENT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      OPENAGENT_ACP_COMMAND_CURSOR: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
     });
     try {
@@ -398,7 +708,7 @@ describe("chat e2e (fake acp agent)", () => {
 
     const db2 = new Database(join(dir, "openagent.db"), { readonly: true });
     const n = (db2.query("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number }).n;
-    expect(n).toBe(2);
+    expect(n).toBe(4);
     db2.close();
     rmSync(dir, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });

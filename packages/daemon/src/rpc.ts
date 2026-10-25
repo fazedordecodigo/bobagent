@@ -1,6 +1,6 @@
 import { type MethodName, methodMap } from "@openagent/protocol";
 import type { AgentStore } from "./agents";
-import type { ChatStore } from "./chat-store";
+import type { ChatStore, QueueStore } from "./chat-store";
 import { ProviderError } from "./providers/types";
 import { RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
@@ -11,6 +11,7 @@ export class Rpc {
   constructor(
     private agents: AgentStore,
     private chat: ChatStore,
+    private queue: QueueStore,
     private runtimes: RuntimeManager,
     private broadcast: Broadcast,
   ) {}
@@ -57,7 +58,7 @@ export class Rpc {
     }
   }
 
-  private dispatch(method: MethodName, params: unknown): Promise<unknown> | unknown {
+  private async dispatch(method: MethodName, params: unknown): Promise<unknown> {
     switch (method) {
       case "agents.list":
         return this.agents.list();
@@ -71,7 +72,7 @@ export class Rpc {
         const before = this.agents.get(p.id);
         const agent = this.agents.update(p);
         if (!agent) throw new RpcError("not_found", "agent not found");
-        if (before) this.runtimes.onAgentUpdated(before, agent);
+        if (before) void this.runtimes.agentUpdated(agent, before.provider !== agent.provider);
         queueMicrotask(() => this.broadcast("agent.updated", agent));
         return agent;
       }
@@ -79,7 +80,8 @@ export class Rpc {
         const p = params as { id: string };
         const ok = this.agents.softDelete(p.id);
         if (!ok) throw new RpcError("not_found", "agent not found");
-        this.runtimes.onAgentDeleted(p.id);
+        this.queue.removeAllForAgent(p.id);
+        this.runtimes.agentDeleted(p.id);
         queueMicrotask(() => this.broadcast("agent.deleted", { id: p.id }));
         return { ok: true };
       }
@@ -93,6 +95,31 @@ export class Rpc {
       case "chat.send": {
         const p = params as { agentId: string; text: string };
         return this.runtimes.send(p.agentId, p.text);
+      }
+      case "queue.get": {
+        const p = params as { agentId: string };
+        return this.runtimes.getQueue(p.agentId);
+      }
+      case "queue.remove": {
+        const p = params as { queueId: string };
+        this.runtimes.removeQueued(p.queueId);
+        return { ok: true };
+      }
+      case "queue.pause": {
+        const p = params as { agentId: string };
+        return this.runtimes.pauseQueue(p.agentId);
+      }
+      case "queue.resume": {
+        const p = params as { agentId: string };
+        return this.runtimes.resumeQueue(p.agentId);
+      }
+      case "agents.configOptions": {
+        const p = params as { agentId: string };
+        return { configOptions: await this.runtimes.configOptions(p.agentId) };
+      }
+      case "agents.setConfig": {
+        const p = params as { agentId: string; configId: string; value: string };
+        return { configOptions: await this.runtimes.setConfig(p.agentId, p.configId, p.value) };
       }
       case "chat.cancel": {
         const p = params as { agentId: string };

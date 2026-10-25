@@ -1,4 +1,4 @@
-import type { PermissionOption, ToolCallStatus } from "@openagent/protocol";
+import type { ConfigOption, PermissionOption, ToolCallStatus } from "@openagent/protocol";
 
 export type NormalizedUpdate =
   | { type: "message_chunk"; text: string }
@@ -18,6 +18,8 @@ export type NormalizedUpdate =
       status?: ToolCallStatus;
       detail?: string | null;
     }
+  | { type: "config_update"; configOptions: ConfigOption[] }
+  | { type: "mode_update"; modeId: string }
   | { type: "ignored"; kind: string };
 
 export interface ProviderHooks {
@@ -33,6 +35,8 @@ export interface ProviderHooks {
 export interface ProviderSession {
   readonly sessionId: string;
   readonly resumed: boolean;
+  readonly configOptions: ConfigOption[];
+  setConfigOption(configId: string, value: string): Promise<ConfigOption[]>;
   prompt(text: string): Promise<{ stopReason: string }>;
   cancel(): Promise<void>;
   close(): Promise<void>;

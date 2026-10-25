@@ -40,4 +40,20 @@ export const migrations: string[] = [
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   )`,
+  // 3: agent config + message queue
+  `ALTER TABLE agents ADD COLUMN config_json TEXT NOT NULL DEFAULT '{}';
+  UPDATE agents SET config_json = json_object('model', model) WHERE model IS NOT NULL;
+  ALTER TABLE agents ADD COLUMN queue_paused INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE queue (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES agents(id),
+    text TEXT NOT NULL,
+    status TEXT NOT NULL,
+    turn_id TEXT REFERENCES turns(id),
+    created_at INTEGER NOT NULL,
+    started_at INTEGER
+  );
+  CREATE INDEX queue_agent_status ON queue(agent_id, status, created_at)`,
+  // 4: link turns to the queue item that started them
+  `ALTER TABLE turns ADD COLUMN queue_id TEXT`,
 ];

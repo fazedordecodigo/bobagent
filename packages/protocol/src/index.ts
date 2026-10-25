@@ -1,5 +1,16 @@
 import { z } from "zod";
 
+export const PROVIDER_PERMISSION_CONFIG: Record<string, string | null> = {
+  devin: "~/.config/devin/config.json",
+  cursor: "~/.cursor/cli-config.json",
+  grok: "~/.grok/config.toml",
+  opencode: "~/.config/opencode/opencode.json",
+  gemini: "~/.gemini/settings.json",
+  claude: null,
+  codex: null,
+  "openai-compatible": null,
+};
+
 export const ProviderId = z.enum([
   "devin",
   "cursor",
@@ -17,7 +28,7 @@ export const Agent = z.object({
   name: z.string().trim().min(1).max(80),
   instructions: z.string(),
   provider: ProviderId,
-  model: z.string().nullable(),
+  config: z.record(z.string(), z.string()),
   workspacePath: z.string(),
   createdAt: z.number(),
   updatedAt: z.number(),
@@ -67,7 +78,6 @@ export const AgentsCreateParams = z
     name: z.string().trim().min(1).max(80),
     instructions: z.string().optional(),
     provider: ProviderId,
-    model: z.string().trim().min(1).nullable().optional(),
   })
   .strict();
 export type AgentsCreateParams = z.infer<typeof AgentsCreateParams>;
@@ -79,7 +89,6 @@ export const AgentsUpdateParams = z
     name: z.string().trim().min(1).max(80).optional(),
     instructions: z.string().optional(),
     provider: ProviderId.optional(),
-    model: z.string().trim().min(1).nullable().optional(),
   })
   .strict();
 export type AgentsUpdateParams = z.infer<typeof AgentsUpdateParams>;
@@ -106,6 +115,7 @@ export type TurnStatus = z.infer<typeof TurnStatus>;
 export const Turn = z.object({
   id: z.string(),
   agentId: z.string(),
+  queueId: z.string().nullable(),
   status: TurnStatus,
   stopReason: z.string().nullable(),
   error: z.string().nullable(),
@@ -194,7 +204,55 @@ export const ChatSendParams = z
   .object({ agentId: z.string(), text: z.string().min(1).max(100000) })
   .strict();
 export type ChatSendParams = z.infer<typeof ChatSendParams>;
-export const ChatSendResult = z.object({ turnId: z.string() });
+export const ChatSendResult = z.object({ queueId: z.string() });
+
+// ---- Queue + config types ----
+
+export const ConfigOption = z.object({
+  id: z.string(),
+  name: z.string(),
+  category: z.string().nullable(),
+  currentValue: z.string(),
+  options: z.array(
+    z.object({ value: z.string(), name: z.string(), description: z.string().nullable() }),
+  ),
+});
+export type ConfigOption = z.infer<typeof ConfigOption>;
+
+export const QueueItem = z.object({
+  id: z.string(),
+  agentId: z.string(),
+  text: z.string(),
+  createdAt: z.number(),
+});
+export type QueueItem = z.infer<typeof QueueItem>;
+
+export const QueueState = z.object({
+  agentId: z.string(),
+  paused: z.boolean(),
+  items: z.array(QueueItem),
+});
+export type QueueState = z.infer<typeof QueueState>;
+
+export const QueueGetParams = z.object({ agentId: z.string() }).strict();
+export const QueueGetResult = QueueState;
+export const QueueRemoveParams = z.object({ queueId: z.string() }).strict();
+export const QueueRemoveResult = z.object({ ok: z.literal(true) });
+export const QueuePauseParams = z.object({ agentId: z.string() }).strict();
+export const QueueResumeParams = z.object({ agentId: z.string() }).strict();
+export const QueuePauseResumeResult = QueueState;
+
+export const AgentsConfigOptionsParams = z.object({ agentId: z.string() }).strict();
+export const AgentsConfigOptionsResult = z.object({
+  configOptions: z.array(ConfigOption),
+});
+export const AgentsSetConfigParams = z
+  .object({ agentId: z.string(), configId: z.string(), value: z.string() })
+  .strict();
+export type AgentsSetConfigParams = z.infer<typeof AgentsSetConfigParams>;
+export const AgentsSetConfigResult = z.object({
+  configOptions: z.array(ConfigOption),
+});
 
 export const ChatCancelParams = z.object({ agentId: z.string() }).strict();
 export const ChatCancelResult = z.object({ ok: z.literal(true) });
@@ -230,6 +288,12 @@ export const methodMap = {
   "chat.history": { params: ChatHistoryParams, result: ChatHistoryResult },
   "chat.send": { params: ChatSendParams, result: ChatSendResult },
   "chat.cancel": { params: ChatCancelParams, result: ChatCancelResult },
+  "queue.get": { params: QueueGetParams, result: QueueGetResult },
+  "queue.remove": { params: QueueRemoveParams, result: QueueRemoveResult },
+  "queue.pause": { params: QueuePauseParams, result: QueuePauseResumeResult },
+  "queue.resume": { params: QueueResumeParams, result: QueuePauseResumeResult },
+  "agents.configOptions": { params: AgentsConfigOptionsParams, result: AgentsConfigOptionsResult },
+  "agents.setConfig": { params: AgentsSetConfigParams, result: AgentsSetConfigResult },
   "agents.statuses": { params: AgentsStatusesParams, result: AgentsStatusesResult },
   "permissions.list": { params: PermissionsListParams, result: PermissionsListResult },
   "permissions.respond": { params: PermissionsRespondParams, result: PermissionsRespondResult },
@@ -251,5 +315,7 @@ export type DaemonEventMap = {
   "agent.status": { agentId: string; status: AgentStatus; error: string | null };
   "permission.requested": PendingPermission;
   "permission.resolved": { requestId: string; agentId: string; optionId: string | null };
+  "queue.updated": QueueState;
+  "agent.config": { agentId: string; configOptions: ConfigOption[] };
 };
 export type DaemonEventName = keyof DaemonEventMap;

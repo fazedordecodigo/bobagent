@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { AgentStore } from "./agents";
-import { ChatStore } from "./chat-store";
+import { ChatStore, QueueStore } from "./chat-store";
 import { openDatabase } from "./db";
 import { mergedPath } from "./env/login-path";
 import { Rpc } from "./rpc";
@@ -101,6 +101,7 @@ async function main() {
   const chat = new ChatStore(db);
   chat.interruptRunningTurns();
   const store = new AgentStore(db, agentsRoot);
+  const queue = new QueueStore(db);
   const sockets = new Set<import("bun").ServerWebSocket<unknown>>();
 
   function broadcast(event: string, data: unknown) {
@@ -112,9 +113,9 @@ async function main() {
     }
   }
 
-  const runtimes = new RuntimeManager(store, chat, broadcast);
+  const runtimes = new RuntimeManager(store, chat, queue, broadcast);
   runtimesRef = runtimes;
-  const rpc = new Rpc(store, chat, runtimes, broadcast);
+  const rpc = new Rpc(store, chat, queue, runtimes, broadcast);
 
   // warm the login-shell PATH cache so provider CLIs resolve like in a terminal
   const path = mergedPath();
@@ -174,6 +175,7 @@ async function main() {
   });
 
   serverRef = server;
+  runtimes.resumeAllQueues();
   console.log(`OPENAGENT_READY {"port":${server.port}}`);
   log(`listening on 127.0.0.1:${server.port}, data dir ${dataDir}`);
 

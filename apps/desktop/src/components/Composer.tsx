@@ -36,11 +36,11 @@ export function Composer({
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              if (!running) void submit();
+              void submit();
             }
           }}
         />
-        {running ? (
+        {running && (
           <button
             type="button"
             onClick={onStop}
@@ -48,16 +48,15 @@ export function Composer({
           >
             Stop
           </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => void submit()}
-            disabled={!text.trim()}
-            className="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-40"
-          >
-            Send
-          </button>
         )}
+        <button
+          type="button"
+          onClick={() => void submit()}
+          disabled={!text.trim()}
+          className="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-40"
+        >
+          Send
+        </button>
       </div>
     </div>
   );

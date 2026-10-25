@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
-import type { ProviderId } from "@openagent/protocol";
+import type { ConfigOption, ProviderId } from "@openagent/protocol";
 import { resolveCommand, spawnEnv } from "../env/login-path";
 import {
   type NormalizedUpdate,
@@ -20,6 +20,13 @@ const ACP_COMMANDS: Partial<Record<ProviderId, string[]>> = {
 };
 
 const STDERR_TAIL_LINES = 50;
+
+// Task A probe result: the default mode per provider (never bypass/auto-approve).
+export const DEFAULT_MODE: Partial<Record<ProviderId, string>> = {
+  devin: "accept-edits",
+  cursor: "agent",
+  opencode: "build",
+};
 
 function redactSecrets(s: string): string {
   return s
@@ -66,6 +73,52 @@ function authMessage(provider: ProviderId, e: unknown): string {
   return `${provider} requires sign-in. Run \`${loginCmd}\` in a terminal.${detail ? ` (${detail})` : ""}`;
 }
 
+type RawConfigOption = {
+  id?: string;
+  name?: string;
+  category?: string | null;
+  currentValue?: string;
+  options?: (
+    | { value?: string; name?: string; description?: string | null }
+    | { options?: { value?: string; name?: string; description?: string | null }[] }
+  )[];
+};
+
+function normalizeConfigOptions(src: { configOptions?: unknown }): ConfigOption[] {
+  const out: ConfigOption[] = [];
+  for (const o of (src.configOptions ?? []) as RawConfigOption[]) {
+    if (!o?.id) continue;
+    const flat: { value: string; name: string; description: string | null }[] = [];
+    for (const opt of o.options ?? []) {
+      if ("value" in opt && opt.value !== undefined) {
+        flat.push({
+          value: opt.value,
+          name: opt.name ?? opt.value,
+          description: opt.description ?? null,
+        });
+      } else if ("options" in opt && Array.isArray(opt.options)) {
+        for (const sub of opt.options) {
+          if (sub.value !== undefined) {
+            flat.push({
+              value: sub.value,
+              name: sub.name ?? sub.value,
+              description: sub.description ?? null,
+            });
+          }
+        }
+      }
+    }
+    out.push({
+      id: o.id,
+      name: o.name ?? o.id,
+      category: o.category ?? null,
+      currentValue: o.currentValue ?? "",
+      options: flat,
+    });
+  }
+  return out;
+}
+
 type ToolCallContent = {
   type?: string;
   content?: { type?: string; text?: string };
@@ -81,6 +134,8 @@ type SessionUpdatePayload = {
   status?: string;
   content2?: never;
   locations?: { path?: string }[];
+  currentModeId?: string;
+  configOptions?: unknown;
 };
 
 function toolDetail(u: { content?: unknown; locations?: { path?: string }[] }): string | null {
@@ -135,6 +190,10 @@ function mapUpdate(params: unknown): NormalizedUpdate {
       if (d !== null) out.detail = d;
       return out;
     }
+    case "config_option_update":
+      return { type: "config_update", configOptions: normalizeConfigOptions(u) };
+    case "current_mode_update":
+      return { type: "mode_update", modeId: String(u.currentModeId ?? "") };
     default:
       return { type: "ignored", kind: u.sessionUpdate ?? "unknown" };
   }
@@ -142,6 +201,7 @@ function mapUpdate(params: unknown): NormalizedUpdate {
 
 class AcpSession implements ProviderSession {
   private closed = false;
+  configOptions: ConfigOption[] = [];
   constructor(
     readonly sessionId: string,
     readonly resumed: boolean,
@@ -149,6 +209,17 @@ class AcpSession implements ProviderSession {
     private child: ChildProcess,
     _hooks: ProviderHooks,
   ) {}
+
+  async setConfigOption(configId: string, value: string): Promise<ConfigOption[]> {
+    const res = (await this.conn.agent.request("session/set_config_option", {
+      sessionId: this.sessionId,
+      configId,
+      value,
+    } as never)) as { configOptions?: unknown };
+    const opts = normalizeConfigOptions(res ?? {});
+    if (opts.length > 0) this.configOptions = opts;
+    return this.configOptions;
+  }
 
   async prompt(text: string): Promise<{ stopReason: string }> {
     const res = (await this.conn.agent.request("session/prompt", {
@@ -301,22 +372,25 @@ export class AcpDriver implements ProviderDriver {
 
     let sessionId: string;
     let resumed = false;
+    let rawConfig: ConfigOption[] = [];
     if (resumeSessionId && initRes.agentCapabilities?.loadSession === true) {
       try {
         loading = true;
-        await conn.agent.request("session/load", {
+        const lr = (await conn.agent.request("session/load", {
           sessionId: resumeSessionId,
           cwd,
           mcpServers: [],
-        } as never);
+        } as never)) as { configOptions?: unknown };
+        rawConfig = normalizeConfigOptions(lr ?? {});
         sessionId = resumeSessionId;
         resumed = true;
       } catch {
         const res = (await conn.agent.request("session/new", {
           cwd,
           mcpServers: [],
-        } as never)) as { sessionId: string };
+        } as never)) as { sessionId: string; configOptions?: unknown };
         sessionId = res.sessionId;
+        rawConfig = normalizeConfigOptions(res);
       } finally {
         loading = false;
       }
@@ -324,11 +398,13 @@ export class AcpDriver implements ProviderDriver {
       const res = (await conn.agent.request("session/new", {
         cwd,
         mcpServers: [],
-      } as never)) as { sessionId: string };
+      } as never)) as { sessionId: string; configOptions?: unknown };
       sessionId = res.sessionId;
+      rawConfig = normalizeConfigOptions(res);
     }
 
     const session = new AcpSession(sessionId, resumed, conn, child, hooks);
+    session.configOptions = rawConfig;
     const origClose = session.close.bind(session);
     session.close = async () => {
       closedByUs = true;

@@ -1,8 +1,9 @@
-import type { AgentStatusInfo, ChatItem, Turn } from "@openagent/protocol";
+import type { AgentStatusInfo, ChatItem, QueueState, Turn } from "@openagent/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
 
 export type ChatState = {
+  queue: QueueState | null;
   items: ChatItem[];
   turns: Map<string, Turn>;
   hasMore: boolean;
@@ -19,6 +20,7 @@ export function useChat(client: DaemonClient, agentId: string | null) {
     runningTurn: null,
     status: { status: "idle", error: null },
     loaded: false,
+    queue: null as QueueState | null,
   });
   const seqCursor = useRef<number | null>(null);
   const activeAgent = useRef(agentId);
@@ -31,18 +33,22 @@ export function useChat(client: DaemonClient, agentId: string | null) {
     if (activeAgent.current !== forAgent) return; // stale load after switching agents
     seqCursor.current = res.items[0]?.seq ?? null;
     const running = res.turns.find((t) => t.status === "running") ?? null;
+    const queue = await client.request("queue.get", { agentId: forAgent }).catch(() => null);
+    if (activeAgent.current !== forAgent) return;
     setState((s) => ({
       ...s,
       items: res.items,
       turns: new Map(res.turns.map((t) => [t.id, t])),
       hasMore: res.hasMore,
       runningTurn: running,
+      queue,
       loaded: true,
     }));
   }, [client, agentId]);
 
   useEffect(() => {
     setState({
+      queue: null,
       items: [],
       turns: new Map(),
       hasMore: false,
@@ -107,6 +113,10 @@ export function useChat(client: DaemonClient, agentId: string | null) {
         if (!matches(d.agentId)) return;
         setState((s) => ({ ...s, status: { status: d.status, error: d.error } }));
       }),
+      client.on("queue.updated", (q) => {
+        if (!matches(q.agentId)) return;
+        setState((s) => ({ ...s, queue: q }));
+      }),
       client.onReconnect(() => {
         load().catch(() => {});
         client
@@ -138,5 +148,18 @@ export function useChat(client: DaemonClient, agentId: string | null) {
     }));
   }, [client, agentId]);
 
-  return { ...state, loadEarlier };
+  const queuePause = useCallback(() => {
+    if (agentId) client.request("queue.pause", { agentId }).catch(() => {});
+  }, [client, agentId]);
+  const queueResume = useCallback(() => {
+    if (agentId) client.request("queue.resume", { agentId }).catch(() => {});
+  }, [client, agentId]);
+  const queueRemove = useCallback(
+    (queueId: string) => {
+      client.request("queue.remove", { queueId }).catch(() => {});
+    },
+    [client],
+  );
+
+  return { ...state, loadEarlier, queuePause, queueResume, queueRemove };
 }

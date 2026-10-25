@@ -5,6 +5,7 @@ type TurnRow = {
   id: string;
   agent_id: string;
   status: string;
+  queue_id: string | null;
   stop_reason: string | null;
   error: string | null;
   started_at: number;
@@ -26,6 +27,7 @@ function rowToTurn(r: TurnRow): Turn {
   return {
     id: r.id,
     agentId: r.agent_id,
+    queueId: r.queue_id,
     status: r.status as TurnStatus,
     stopReason: r.stop_reason,
     error: r.error,
@@ -57,11 +59,13 @@ export class ChatStore {
       .run(Date.now());
   }
 
-  createTurn(agentId: string): Turn {
+  createTurn(agentId: string, queueId: string | null = null): Turn {
     const id = crypto.randomUUID();
     this.db
-      .query("INSERT INTO turns (id, agent_id, status, started_at) VALUES (?, ?, 'running', ?)")
-      .run(id, agentId, Date.now());
+      .query(
+        "INSERT INTO turns (id, agent_id, status, queue_id, started_at) VALUES (?, ?, 'running', ?, ?)",
+      )
+      .run(id, agentId, queueId, Date.now());
     return this.getTurn(id)!;
   }
 
@@ -173,4 +177,77 @@ function stripBase(item: ChatItem): Record<string, unknown> {
     delete data[key];
   }
   return data;
+}
+
+// ---- Queue ----
+
+export type QueueRow = {
+  id: string;
+  agent_id: string;
+  text: string;
+  status: string;
+  turn_id: string | null;
+  created_at: number;
+  started_at: number | null;
+};
+
+export type QueueItemLite = { id: string; agentId: string; text: string; createdAt: number };
+
+function rowToQueueItem(r: QueueRow): QueueItemLite {
+  return { id: r.id, agentId: r.agent_id, text: r.text, createdAt: r.created_at };
+}
+
+export class QueueStore {
+  constructor(private db: Database) {}
+
+  enqueue(agentId: string, text: string): QueueItemLite {
+    const id = crypto.randomUUID();
+    this.db
+      .query(
+        "INSERT INTO queue (id, agent_id, text, status, created_at) VALUES (?, ?, ?, 'queued', ?)",
+      )
+      .run(id, agentId, text, Date.now());
+    return { id, agentId, text, createdAt: Date.now() };
+  }
+
+  queued(agentId: string): QueueItemLite[] {
+    const rows = this.db
+      .query("SELECT * FROM queue WHERE agent_id = ? AND status = 'queued' ORDER BY created_at ASC")
+      .all(agentId) as QueueRow[];
+    return rows.map(rowToQueueItem);
+  }
+
+  peek(agentId: string): QueueRow | null {
+    return this.db
+      .query(
+        "SELECT * FROM queue WHERE agent_id = ? AND status = 'queued' ORDER BY created_at ASC LIMIT 1",
+      )
+      .get(agentId) as QueueRow | null;
+  }
+
+  markStarted(queueId: string, turnId: string): void {
+    this.db
+      .query("UPDATE queue SET status = 'started', turn_id = ?, started_at = ? WHERE id = ?")
+      .run(turnId, Date.now(), queueId);
+  }
+
+  remove(queueId: string): boolean {
+    const r = this.db
+      .query("UPDATE queue SET status = 'removed' WHERE id = ? AND status = 'queued'")
+      .run(queueId);
+    return (r.changes ?? 0) > 0;
+  }
+
+  removeAllForAgent(agentId: string): void {
+    this.db
+      .query("UPDATE queue SET status = 'removed' WHERE agent_id = ? AND status = 'queued'")
+      .run(agentId);
+  }
+
+  agentsWithQueued(): string[] {
+    const rows = this.db
+      .query("SELECT DISTINCT agent_id FROM queue WHERE status = 'queued'")
+      .all() as { agent_id: string }[];
+    return rows.map((r) => r.agent_id);
+  }
 }
