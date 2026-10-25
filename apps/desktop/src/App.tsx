@@ -13,17 +13,11 @@ import { ChatView } from "./components/ChatView";
 import {
   AvatarBadge,
   AvatarEditor,
-  BrowserView,
   ComputerUsePanel,
-  GatewaysView,
-  MarketplaceView,
   MemoriesPanel,
-  MobileView,
   RoutinesPanel,
-  SkillsView,
-  TeamView,
-  VaultView,
 } from "./components/Library";
+import { ToolsView, type ToolTab } from "./components/ToolsView";
 import { UpdateButton } from "./components/UpdateButton";
 import { DaemonClient } from "./lib/daemon";
 
@@ -36,13 +30,7 @@ export default function App() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [channelId, setChannelId] = useState<string | null>(null);
   const [creatingChannel, setCreatingChannel] = useState(false);
-  const [skillsOpen, setSkillsOpen] = useState(false);
-  const [browserOpen, setBrowserOpen] = useState(false);
-  const [vaultOpen, setVaultOpen] = useState(false);
-  const [gatewaysOpen, setGatewaysOpen] = useState(false);
-  const [marketOpen, setMarketOpen] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [teamOpen, setTeamOpen] = useState(false);
+  const [tool, setTool] = useState<ToolTab | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const clientRef = useRef<DaemonClient | null>(null);
@@ -117,13 +105,7 @@ export default function App() {
   const selected = agents.find((a) => a.id === selectedId) ?? null;
   const selectedChannel = channels.find((ch) => ch.id === channelId) ?? null;
   const openAgent = (id: string | null) => {
-    setSkillsOpen(false);
-    setBrowserOpen(false);
-    setVaultOpen(false);
-    setGatewaysOpen(false);
-    setMarketOpen(false);
-    setMobileOpen(false);
-    setTeamOpen(false);
+    setTool(null);
     setSelectedId(id);
     setChannelId(null);
     setCreating(false);
@@ -259,80 +241,13 @@ export default function App() {
           <li className="mt-2 border-t border-zinc-800 px-4 pt-3">
             <button
               type="button"
-              className={`text-xs font-semibold tracking-wide uppercase ${skillsOpen ? "text-sky-400" : "text-zinc-400"} hover:text-zinc-200`}
+              className={`text-xs font-semibold tracking-wide uppercase ${tool ? "text-sky-400" : "text-zinc-400"} hover:text-zinc-200`}
               onClick={() => {
                 openAgent(null);
-                setCreatingChannel(false);
-                setSkillsOpen(true);
+                setTool("skills");
               }}
             >
-              Skills library
-            </button>
-            <button
-              type="button"
-              className={`ml-4 text-xs font-semibold tracking-wide uppercase ${browserOpen ? "text-sky-400" : "text-zinc-400"} hover:text-zinc-200`}
-              onClick={() => {
-                openAgent(null);
-                setCreatingChannel(false);
-                setBrowserOpen(true);
-              }}
-            >
-              Browser
-            </button>
-            <button
-              type="button"
-              className={`ml-4 text-xs font-semibold tracking-wide uppercase ${vaultOpen ? "text-sky-400" : "text-zinc-400"} hover:text-zinc-200`}
-              onClick={() => {
-                openAgent(null);
-                setCreatingChannel(false);
-                setVaultOpen(true);
-              }}
-            >
-              Vault
-            </button>
-            <button
-              type="button"
-              className={`ml-4 text-xs font-semibold tracking-wide uppercase ${gatewaysOpen ? "text-sky-400" : "text-zinc-400"} hover:text-zinc-200`}
-              onClick={() => {
-                openAgent(null);
-                setCreatingChannel(false);
-                setGatewaysOpen(true);
-              }}
-            >
-              Gateways
-            </button>
-            <button
-              type="button"
-              className={`ml-4 text-xs font-semibold tracking-wide uppercase ${marketOpen ? "text-sky-400" : "text-zinc-400"} hover:text-zinc-200`}
-              onClick={() => {
-                openAgent(null);
-                setCreatingChannel(false);
-                setMarketOpen(true);
-              }}
-            >
-              Marketplace
-            </button>
-            <button
-              type="button"
-              className={`ml-4 text-xs font-semibold tracking-wide uppercase ${mobileOpen ? "text-sky-400" : "text-zinc-400"} hover:text-zinc-200`}
-              onClick={() => {
-                openAgent(null);
-                setCreatingChannel(false);
-                setMobileOpen(true);
-              }}
-            >
-              Mobile
-            </button>
-            <button
-              type="button"
-              className={`ml-4 text-xs font-semibold tracking-wide uppercase ${teamOpen ? "text-sky-400" : "text-zinc-400"} hover:text-zinc-200`}
-              onClick={() => {
-                openAgent(null);
-                setCreatingChannel(false);
-                setTeamOpen(true);
-              }}
-            >
-              Team
+              Settings &amp; tools
             </button>
           </li>
           {channels.map((ch) => (
@@ -358,20 +273,8 @@ export default function App() {
         <UpdateButton />
       </aside>
       <main className="flex-1 overflow-hidden">
-        {teamOpen && clientReady ? (
-          <TeamView client={clientRef.current!} agents={agents} />
-        ) : mobileOpen && clientReady ? (
-          <MobileView client={clientRef.current!} />
-        ) : marketOpen && clientReady ? (
-          <MarketplaceView client={clientRef.current!} />
-        ) : gatewaysOpen && clientReady ? (
-          <GatewaysView client={clientRef.current!} agents={agents} />
-        ) : vaultOpen && clientReady ? (
-          <VaultView client={clientRef.current!} agents={agents} />
-        ) : browserOpen && clientReady ? (
-          <BrowserView client={clientRef.current!} agents={agents} />
-        ) : skillsOpen && clientReady ? (
-          <SkillsView client={clientRef.current!} />
+        {tool && clientReady ? (
+          <ToolsView client={clientRef.current!} agents={agents} tab={tool} onTab={setTool} />
         ) : creatingChannel ? (
           <ChannelCreateForm
             agents={agents}
