@@ -11,6 +11,7 @@ import { ComputerUse } from "./computer";
 import { Connectors } from "./connectors";
 import { openDatabase } from "./db";
 import { mergedPath } from "./env/login-path";
+import { GatewayService } from "./gateways";
 import { runMcpBridge } from "./mcp-bridge";
 import { MemoryStore } from "./memories";
 import { RoutineService } from "./routines";
@@ -130,7 +131,9 @@ async function main() {
       const turn = data as import("@bobagent/protocol").Turn;
       queueMicrotask(() => {
         try {
-          channels.onTurnEnded(turn, turn.queueId ? queue.row(turn.queueId) : null);
+          const row = turn.queueId ? queue.row(turn.queueId) : null;
+          channels.onTurnEnded(turn, row);
+          gateways.onTurnEnded(turn, row);
         } catch (e) {
           log("channel turn hook failed", e);
         }
@@ -165,6 +168,7 @@ async function main() {
   bridge.vault = vault;
   bridge.connectors = new Connectors(vault);
   bridge.computer = computer;
+  const gateways = new GatewayService(db, store, chat, () => runtimes, vault, broadcast);
   const rpc = new Rpc(
     store,
     chat,
@@ -176,7 +180,7 @@ async function main() {
     skills,
     routines,
     browser,
-    { vault, computer, voice },
+    { vault, computer, voice, gateways },
   );
 
   // warm the login-shell PATH cache so provider CLIs resolve like in a terminal
@@ -278,6 +282,7 @@ async function main() {
   runtimes.resumeAllQueues();
   routines.baseUrl = `http://127.0.0.1:${server.port}`;
   routines.start();
+  gateways.startAll();
   console.log(`BOBAGENT_READY {"port":${server.port}}`);
   log(`listening on 127.0.0.1:${server.port}, data dir ${dataDir}`);
 

@@ -129,6 +129,11 @@ export function MessageList({
                   {item.from && (
                     <div className="mb-1 text-xs text-violet-200">From agent {item.from.name}</div>
                   )}
+                  {item.gateway && (
+                    <div className="mb-1 text-xs text-sky-200">
+                      via {item.gateway.kind} · {item.gateway.userName}
+                    </div>
+                  )}
                   {item.routine && (
                     <div className="mb-1 text-xs text-sky-200">
                       ⏰ Routine {item.routine.name} ({item.routine.trigger})

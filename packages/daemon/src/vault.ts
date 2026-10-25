@@ -62,7 +62,9 @@ export class Vault {
   }
 
   list(): VaultEntry[] {
-    const rows = this.db.query("SELECT * FROM vault ORDER BY name ASC").all() as Row[];
+    const rows = this.db
+      .query("SELECT * FROM vault WHERE name NOT LIKE 'gateway.%' ORDER BY name ASC")
+      .all() as Row[];
     return rows.map((r) => ({
       name: r.name,
       agentIds: JSON.parse(r.agent_ids) as string[],
@@ -105,6 +107,20 @@ export class Vault {
       .map((e) => e.name);
   }
 
+  /** Decrypted value for daemon-internal use (gateway tokens); throws when missing. */
+  revealInternal(name: string): string {
+    const r = this.row(name);
+    if (!r) throw new Error(`vault secret "${name}" is missing`);
+    return this.decrypt(r);
+  }
+
+  private decrypt(r: Row): string {
+    const buf = Buffer.from(r.data, "base64");
+    const d = createDecipheriv("aes-256-gcm", this.key(), Buffer.from(r.iv, "hex"));
+    d.setAuthTag(buf.subarray(buf.length - 16));
+    return Buffer.concat([d.update(buf.subarray(0, buf.length - 16)), d.final()]).toString("utf8");
+  }
+
   /** Decrypted value if `agentId` is on the secret's allowlist, else throws. */
   reveal(name: string, agentId: string): string {
     const r = this.row(name);
@@ -113,9 +129,6 @@ export class Vault {
         `no vault secret "${name}" is shared with you (ask the user to grant access)`,
       );
     }
-    const buf = Buffer.from(r.data, "base64");
-    const d = createDecipheriv("aes-256-gcm", this.key(), Buffer.from(r.iv, "hex"));
-    d.setAuthTag(buf.subarray(buf.length - 16));
-    return Buffer.concat([d.update(buf.subarray(0, buf.length - 16)), d.final()]).toString("utf8");
+    return this.decrypt(r);
   }
 }

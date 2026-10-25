@@ -15,6 +15,7 @@ import {
   AvatarEditor,
   BrowserView,
   ComputerUsePanel,
+  GatewaysView,
   MemoriesPanel,
   RoutinesPanel,
   SkillsView,
@@ -34,6 +35,7 @@ export default function App() {
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [browserOpen, setBrowserOpen] = useState(false);
   const [vaultOpen, setVaultOpen] = useState(false);
+  const [gatewaysOpen, setGatewaysOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const clientRef = useRef<DaemonClient | null>(null);
@@ -111,6 +113,7 @@ export default function App() {
     setSkillsOpen(false);
     setBrowserOpen(false);
     setVaultOpen(false);
+    setGatewaysOpen(false);
     setSelectedId(id);
     setChannelId(null);
     setCreating(false);
@@ -277,6 +280,17 @@ export default function App() {
             >
               Vault
             </button>
+            <button
+              type="button"
+              className={`ml-4 text-xs font-semibold tracking-wide uppercase ${gatewaysOpen ? "text-sky-400" : "text-zinc-400"} hover:text-zinc-200`}
+              onClick={() => {
+                openAgent(null);
+                setCreatingChannel(false);
+                setGatewaysOpen(true);
+              }}
+            >
+              Gateways
+            </button>
           </li>
           {channels.map((ch) => (
             <li key={ch.id}>
@@ -300,7 +314,9 @@ export default function App() {
         </ul>
       </aside>
       <main className="flex-1 overflow-hidden">
-        {vaultOpen && clientReady ? (
+        {gatewaysOpen && clientReady ? (
+          <GatewaysView client={clientRef.current!} agents={agents} />
+        ) : vaultOpen && clientReady ? (
           <VaultView client={clientRef.current!} agents={agents} />
         ) : browserOpen && clientReady ? (
           <BrowserView client={clientRef.current!} agents={agents} />

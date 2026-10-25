@@ -2,6 +2,8 @@ import type {
   Agent,
   AgentAvatar,
   BrowserState,
+  Gateway,
+  GatewayKind,
   Memory,
   Routine,
   Skill,
@@ -604,5 +606,208 @@ export function ComputerUsePanel({ client, agentId }: { client: DaemonClient; ag
         macOS asks for Screen Recording and Accessibility permission the first time.
       </p>
     </section>
+  );
+}
+
+const GATEWAY_HELP: Record<GatewayKind, { fields: [string, string][]; help: string }> = {
+  telegram: {
+    fields: [["botToken", "Bot token from @BotFather"]],
+    help: "Message the bot directly. User ids are numeric; unknown users get their id in the reply.",
+  },
+  slack: {
+    fields: [
+      ["botToken", "Bot token (xoxb-…)"],
+      ["appToken", "App-level token with connections:write (xapp-…)"],
+    ],
+    help: "Enable Socket Mode and subscribe to app_mention and message.im. Mention the app in a channel or DM it.",
+  },
+  discord: {
+    fields: [["botToken", "Bot token"]],
+    help: "Enable the Message Content intent. Mention the bot in a server or DM it. User ids are Discord snowflakes.",
+  },
+};
+
+export function GatewaysView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
+  const [items, setItems] = useState<Gateway[]>([]);
+  const [kind, setKind] = useState<GatewayKind>("telegram");
+  const [form, setForm] = useState({
+    name: "",
+    agentId: "",
+    users: "",
+    tokens: {} as Record<string, string>,
+  });
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => {
+    client
+      .request("gateways.list", {})
+      .then(setItems)
+      .catch(() => {});
+  }, [client]);
+  useEffect(() => {
+    load();
+    const a = client.on("gateway.updated", load);
+    const b = client.on("gateway.deleted", load);
+    return () => {
+      a();
+      b();
+    };
+  }, [client, load]);
+  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const users = (s: string) =>
+    s
+      .split(/[\s,]+/)
+      .map((x) => x.trim())
+      .filter(Boolean);
+  const dot = (s: Gateway["status"]) =>
+    s === "connected"
+      ? "bg-emerald-400"
+      : s === "error"
+        ? "bg-red-500"
+        : s === "stopped"
+          ? "bg-zinc-600"
+          : "bg-amber-400";
+  return (
+    <div className="mx-auto max-w-2xl space-y-4 p-6">
+      <h2 className="text-lg font-semibold">Gateways</h2>
+      <p className="text-xs text-zinc-500">
+        Talk to your agents from Telegram, Slack or Discord. Only allowlisted user ids get through;
+        start a message with @AgentName to reach another agent. Tokens are kept in the vault.
+      </p>
+      <ul className="space-y-2">
+        {items.map((g) => (
+          <li key={g.id} className="space-y-1 rounded border border-zinc-800 p-3 text-sm">
+            <div className="flex items-center gap-2">
+              <span className={`inline-block h-2 w-2 rounded-full ${dot(g.status)}`} />
+              <span className="font-medium">{g.name}</span>
+              <span className="text-xs text-zinc-500">
+                {g.kind} · {g.status}
+              </span>
+              <select
+                className="ml-auto rounded bg-zinc-900 px-1 text-xs"
+                value={g.agentId}
+                onChange={(e) =>
+                  client
+                    .request("gateways.update", { id: g.id, agentId: e.target.value })
+                    .catch(fail)
+                }
+              >
+                {agents.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+              <label className="flex items-center gap-1 text-xs text-zinc-400">
+                <input
+                  type="checkbox"
+                  checked={g.enabled}
+                  onChange={(e) =>
+                    client
+                      .request("gateways.update", { id: g.id, enabled: e.target.checked })
+                      .catch(fail)
+                  }
+                />
+                on
+              </label>
+              <button
+                type="button"
+                className="text-xs text-zinc-500 hover:text-red-400"
+                onClick={() => client.request("gateways.delete", { id: g.id }).catch(fail)}
+              >
+                Delete
+              </button>
+            </div>
+            {g.error && <div className="text-xs text-red-400">{g.error}</div>}
+            <input
+              className={`${inputCls} text-xs`}
+              defaultValue={g.allowedUsers.join(", ")}
+              placeholder="Allowed user ids (comma separated)"
+              onBlur={(e) =>
+                client
+                  .request("gateways.update", { id: g.id, allowedUsers: users(e.target.value) })
+                  .catch(fail)
+              }
+            />
+          </li>
+        ))}
+        {items.length === 0 && <li className="text-sm text-zinc-500">No gateways yet.</li>}
+      </ul>
+      <form
+        className="space-y-2 rounded border border-zinc-800 p-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setError(null);
+          client
+            .request("gateways.create", {
+              kind,
+              name: form.name,
+              agentId: form.agentId || agents[0]?.id || "",
+              tokens: form.tokens,
+              allowedUsers: users(form.users),
+            })
+            .then(() => setForm({ name: "", agentId: "", users: "", tokens: {} }))
+            .catch(fail);
+        }}
+      >
+        <h3 className="text-sm font-semibold text-zinc-300">New gateway</h3>
+        <div className="flex gap-2">
+          <select
+            className={inputCls}
+            value={kind}
+            onChange={(e) => setKind(e.target.value as GatewayKind)}
+          >
+            <option value="telegram">Telegram</option>
+            <option value="slack">Slack</option>
+            <option value="discord">Discord</option>
+          </select>
+          <input
+            className={inputCls}
+            placeholder="Name"
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            required
+          />
+          <select
+            className={inputCls}
+            value={form.agentId}
+            onChange={(e) => setForm({ ...form, agentId: e.target.value })}
+          >
+            {agents.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        {GATEWAY_HELP[kind].fields.map(([field, label]) => (
+          <input
+            key={field}
+            className={inputCls}
+            type="password"
+            placeholder={label}
+            value={form.tokens[field] ?? ""}
+            onChange={(e) =>
+              setForm({ ...form, tokens: { ...form.tokens, [field]: e.target.value } })
+            }
+            required
+          />
+        ))}
+        <input
+          className={inputCls}
+          placeholder="Allowed user ids (comma separated)"
+          value={form.users}
+          onChange={(e) => setForm({ ...form, users: e.target.value })}
+        />
+        <p className="text-xs text-zinc-500">{GATEWAY_HELP[kind].help}</p>
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        <button
+          type="submit"
+          className={`${btnCls} bg-sky-600 hover:bg-sky-500`}
+          disabled={agents.length === 0}
+        >
+          Connect
+        </button>
+      </form>
+    </div>
   );
 }

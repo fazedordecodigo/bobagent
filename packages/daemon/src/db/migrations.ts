@@ -141,4 +141,16 @@ export const migrations: string[] = [
     updated_at INTEGER NOT NULL
   );
   CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+  // 11: messaging gateways (tokens live in the vault)
+  `CREATE TABLE gateways (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL,
+    agent_id TEXT NOT NULL REFERENCES agents(id),
+    allowed_users TEXT NOT NULL DEFAULT '[]',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    deleted_at INTEGER
+  )`,
 ];

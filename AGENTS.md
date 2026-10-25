@@ -205,6 +205,20 @@ stdin), `voice.transcribe` (`BOBAGENT_STT_COMMAND` with `{file}`, or `whisper` o
 `voice.status`. UI: Vault view, Computer Use toggle, composer mic, read-aloud button;
 `src-tauri/Info.plist` has the microphone usage string. Tests: `test/phase11.e2e.test.ts`.
 
+## Messaging gateways (Phase 12a)
+
+`src/gateways/` connects Telegram (Bot API long polling), Slack (Socket Mode: `auth.test`,
+`apps.connections.open`, envelope acks, `chat.postMessage` in thread) and Discord (Gateway v10:
+Hello/Identify/heartbeat/READY/MESSAGE_CREATE, intents incl. MESSAGE_CONTENT; REST replies)
+to an agent. Migration 11 `gateways`; tokens in the vault as `gateway.<id>.<field>` (hidden
+from `vault.list`, never shared with agents). Only `allowedUsers` reach the agent (others get
+their id back); `@AgentName text` routes to another agent; in Slack/Discord channels only
+mentions count, DMs always. Prompt is wrapped in `<external_message>`; the queue
+`meta_json.gateway` drives the reply on `turn.ended`. RPC `gateways.list/create/update/delete`,
+events `gateway.updated/deleted`; UI `GatewaysView`. Test base URLs:
+`BOBAGENT_TELEGRAM_API`, `BOBAGENT_SLACK_API`, `BOBAGENT_DISCORD_API`.
+Tests: `test/gateways.e2e.test.ts`.
+
 ## Permissions
 
 Provider agents ask for approval only when THEIR OWN config says so

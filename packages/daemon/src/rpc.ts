@@ -6,6 +6,7 @@ import type { ChannelService } from "./channels";
 import type { ChatStore, QueueStore } from "./chat-store";
 import type { ComputerUse } from "./computer";
 import { draftAgent } from "./draft";
+import type { GatewayService } from "./gateways";
 import type { MemoryStore } from "./memories";
 import { ProviderError } from "./providers/types";
 import type { RoutineService } from "./routines";
@@ -29,7 +30,7 @@ export class Rpc {
     private skills: SkillLibrary,
     private routines: RoutineService,
     private browser: BrowserService,
-    private extras: { vault: Vault; computer: ComputerUse; voice: Voice },
+    private extras: { vault: Vault; computer: ComputerUse; voice: Voice; gateways: GatewayService },
   ) {}
 
   /** Returns the response payload string for one raw incoming message. */
@@ -168,6 +169,15 @@ export class Rpc {
         return this.runtimes.usage((params as { agentId: string }).agentId);
       case "agents.compact":
         await this.runtimes.compact((params as { agentId: string }).agentId);
+        return { ok: true };
+      case "gateways.list":
+        return this.extras.gateways.list();
+      case "gateways.create":
+        return this.extras.gateways.create(params as Parameters<GatewayService["create"]>[0]);
+      case "gateways.update":
+        return this.extras.gateways.update(params as Parameters<GatewayService["update"]>[0]);
+      case "gateways.delete":
+        this.extras.gateways.delete((params as { id: string }).id);
         return { ok: true };
       case "vault.list":
         return this.extras.vault.list();

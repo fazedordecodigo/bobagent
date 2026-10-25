@@ -29,6 +29,8 @@ export const AgentAvatar = z.object({
 });
 export type AgentAvatar = z.infer<typeof AgentAvatar>;
 
+export const GatewayKind = z.enum(["telegram", "slack", "discord"]);
+export type GatewayKind = z.infer<typeof GatewayKind>;
 export const ChatAttachment = z.object({
   name: z.string(),
   mime: z.string(),
@@ -177,6 +179,18 @@ export const ChatItem = z.discriminatedUnion("kind", [
     text: z.string(),
     from: z.object({ agentId: z.string(), name: z.string() }).nullable().optional(),
     channelId: z.string().nullable().optional(),
+    gateway: z
+      .object({
+        id: z.string(),
+        kind: GatewayKind,
+        name: z.string(),
+        chatId: z.string(),
+        userId: z.string(),
+        userName: z.string(),
+      })
+      .passthrough()
+      .nullable()
+      .optional(),
     routine: z
       .object({ id: z.string(), name: z.string(), trigger: RoutineTrigger })
       .nullable()
@@ -347,6 +361,25 @@ export const SkillSaveParams = z
   })
   .strict();
 
+// ---- Messaging gateways ----
+
+export const GatewayStatus = z.enum(["connecting", "connected", "error", "stopped"]);
+export type GatewayStatus = z.infer<typeof GatewayStatus>;
+export const Gateway = z.object({
+  id: z.string(),
+  kind: GatewayKind,
+  name: z.string(),
+  agentId: z.string(),
+  allowedUsers: z.array(z.string()),
+  enabled: z.boolean(),
+  status: GatewayStatus,
+  error: z.string().nullable(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+export type Gateway = z.infer<typeof Gateway>;
+const GatewayTokens = z.record(z.string(), z.string().max(500));
+
 // ---- Vault, Computer Use, voice ----
 
 export const VaultEntry = z.object({
@@ -501,6 +534,37 @@ export const methodMap = {
   "permissions.list": { params: PermissionsListParams, result: PermissionsListResult },
   "permissions.respond": { params: PermissionsRespondParams, result: PermissionsRespondResult },
   "agents.usage": { params: AgentsUsageParams, result: AgentUsage },
+  "gateways.list": { params: z.object({}).strict(), result: z.array(Gateway) },
+  "gateways.create": {
+    params: z
+      .object({
+        kind: GatewayKind,
+        name: z.string().trim().min(1).max(80),
+        agentId: z.string(),
+        tokens: GatewayTokens,
+        allowedUsers: z.array(z.string().max(100)).max(200).optional(),
+        enabled: z.boolean().optional(),
+      })
+      .strict(),
+    result: Gateway,
+  },
+  "gateways.update": {
+    params: z
+      .object({
+        id: z.string(),
+        name: z.string().trim().min(1).max(80).optional(),
+        agentId: z.string().optional(),
+        tokens: GatewayTokens.optional(),
+        allowedUsers: z.array(z.string().max(100)).max(200).optional(),
+        enabled: z.boolean().optional(),
+      })
+      .strict(),
+    result: Gateway,
+  },
+  "gateways.delete": {
+    params: z.object({ id: z.string() }).strict(),
+    result: z.object({ ok: z.literal(true) }),
+  },
   "vault.list": { params: z.object({}).strict(), result: z.array(VaultEntry) },
   "vault.set": {
     params: z
@@ -636,6 +700,8 @@ export type DaemonEventMap = {
   "agent.config": { agentId: string; configOptions: ConfigOption[] };
   "agent.usage": AgentUsage;
   "routine.updated": Routine;
+  "gateway.updated": Gateway;
+  "gateway.deleted": { id: string };
   "vault.changed": Record<string, never>;
   "computer.changed": { agentIds: string[] };
   "browser.updated": { running: boolean; tabs: BrowserTab[] };
