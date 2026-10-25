@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Changed
+- Renamed BobAgent to UpBot and repositioned it as a hub for general-purpose bots that work
+  together (web, files, email, apps), not only coding agents. Existing data is migrated:
+  `~/BobAgent` -> `~/UpBot`, the app data folder, and the vault key in the Keychain.
+- A general-purpose "UpBot" bot is created on first launch; all bots share `~/UpBot/Workspace`
+  and get an `<upbot_context>` with collaboration and safety rules.
+
+### Added
+- Email (IMAP/SMTP) with bot drafts that only the user can send.
+- Connected apps: daemon-hosted MCP servers (catalog + custom) shared with chosen bots.
+- Approvals: ask-first/allow rules, expiry for background requests, secure secret requests,
+  browser take-over.
+- Pages library for bot-built HTML reports and dashboards.
+- Group chats: @mentions, @everyone, replies; ⌘K palette and keyboard shortcuts.
+
 ## 0.2.1
 
 ### Fixed

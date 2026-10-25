@@ -11,6 +11,14 @@ are the bots' brains.
 - Bots message each other, share files and work together in group chats with an owner
 - Memories, a shared skills library and a marketplace of skills and bot templates
 - Scheduled and webhook routines, attachments, a bot-controlled browser, Computer Use
+- Email: connect Gmail, iCloud, Outlook or any IMAP/SMTP account; bots search, read and draft,
+  and nothing is sent until you review the draft and click Send
+- Connected apps: Notion, GitHub, Brave Search, Airtable, Stripe or any MCP server, connected
+  once and shared with the bots you choose (tokens stay in the vault)
+- Approvals: "Ask first" / "Allow automatically" rules, background requests that expire after
+  10 minutes, secure secret requests and browser take-over for sign-in, 2FA and CAPTCHA
+- Pages: bots publish HTML reports, dashboards and trackers to a local library
+- Group chats with @mentions, @everyone and replies; ⌘K search and keyboard shortcuts
 - Encrypted vault with GitHub, 1Password and Bitwarden connectors; voice
 - Reach your bots from Telegram, Slack, Discord, your phone (LAN), or share them with a team relay
 - Run bots on your own Linux VPS over SSH, each in its own Firecracker microVM, and let them
@@ -32,7 +40,8 @@ The app updates itself from there.
 Builds are not yet notarized by Apple. On first launch macOS says it can't verify the app:
 open System Settings → Privacy & Security and click **Open Anyway** (or run
 `xattr -cr /Applications/UpBot.app`). Versions before 0.2.1 were reported as "damaged";
-use the `xattr` command for those.
+use the `xattr` command for those. UpBot was called BobAgent until 0.3.0; updating moves
+`~/BobAgent` to `~/UpBot` and keeps your bots, chats and vault.
 
 ## Remote hosts and Firecracker microVMs
 
