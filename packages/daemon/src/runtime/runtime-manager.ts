@@ -6,7 +6,8 @@ import type {
   QueueState,
 } from "@bobagent/protocol";
 import type { AgentStore } from "../agents";
-import type { ChatStore, QueueStore } from "../chat-store";
+import type { ChatStore, QueueSource, QueueStore } from "../chat-store";
+import type { McpServerSpec } from "../providers/types";
 import { AgentRuntime, type Broadcast, RpcError } from "./agent-runtime";
 
 export class RuntimeManager {
@@ -17,6 +18,7 @@ export class RuntimeManager {
     private chat: ChatStore,
     private queue: QueueStore,
     private broadcast: Broadcast,
+    private mcpServers: (agentId: string) => McpServerSpec[] = () => [],
   ) {}
 
   private runtimeFor(agentId: string): AgentRuntime {
@@ -24,7 +26,14 @@ export class RuntimeManager {
     if (!rt) {
       const agent = this.agents.get(agentId);
       if (!agent) throw new RpcError("not_found", "agent not found");
-      rt = new AgentRuntime(agent, this.agents, this.chat, this.queue, this.broadcast);
+      rt = new AgentRuntime(
+        agent,
+        this.agents,
+        this.chat,
+        this.queue,
+        this.broadcast,
+        this.mcpServers,
+      );
       this.runtimes.set(agentId, rt);
     }
     return rt;
@@ -32,6 +41,14 @@ export class RuntimeManager {
 
   send(agentId: string, text: string): { queueId: string } {
     return this.runtimeFor(agentId).send(text);
+  }
+
+  sendFrom(agentId: string, text: string, from: QueueSource): { queueId: string } {
+    return this.runtimeFor(agentId).send(text, from);
+  }
+
+  currentHops(agentId: string): number {
+    return this.runtimes.get(agentId)?.currentHops() ?? 0;
   }
 
   getQueue(agentId: string): QueueState {

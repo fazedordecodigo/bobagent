@@ -42,11 +42,19 @@ export interface ProviderSession {
   close(): Promise<void>;
 }
 
+export type McpServerSpec = {
+  name: string;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+};
+
 export interface ProviderDriver {
   start(opts: {
     cwd: string;
     resumeSessionId: string | null;
     hooks: ProviderHooks;
+    mcpServers?: McpServerSpec[];
   }): Promise<ProviderSession>;
 }
 

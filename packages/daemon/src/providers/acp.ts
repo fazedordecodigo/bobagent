@@ -5,6 +5,7 @@ import type { ConfigOption, ProviderId } from "@bobagent/protocol";
 import { resolveCommand, spawnEnv } from "../env/login-path";
 import { AUTH_RE, authMessage, commandFor, redactSecrets, STDERR_TAIL_LINES } from "./process";
 import {
+  type McpServerSpec,
   type NormalizedUpdate,
   type ProviderDriver,
   ProviderError,
@@ -199,8 +200,15 @@ export class AcpDriver implements ProviderDriver {
     cwd: string;
     resumeSessionId: string | null;
     hooks: ProviderHooks;
+    mcpServers?: McpServerSpec[];
   }): Promise<ProviderSession> {
     const { cwd, resumeSessionId, hooks } = opts;
+    const mcpServers = (opts.mcpServers ?? []).map((m) => ({
+      name: m.name,
+      command: m.command,
+      args: m.args,
+      env: Object.entries(m.env).map(([name, value]) => ({ name, value })),
+    }));
     const cmd = commandFor(this.provider);
     if (!cmd) {
       throw new ProviderError("provider_unavailable", `${this.provider} is not supported yet`);
@@ -328,7 +336,7 @@ export class AcpDriver implements ProviderDriver {
         const lr = (await conn.agent.request("session/load", {
           sessionId: resumeSessionId,
           cwd,
-          mcpServers: [],
+          mcpServers,
         } as never)) as { configOptions?: unknown };
         rawConfig = normalizeConfigOptions(lr ?? {});
         sessionId = resumeSessionId;
@@ -336,7 +344,7 @@ export class AcpDriver implements ProviderDriver {
       } catch {
         const res = (await conn.agent.request("session/new", {
           cwd,
-          mcpServers: [],
+          mcpServers,
         } as never)) as { sessionId: string; configOptions?: unknown };
         sessionId = res.sessionId;
         rawConfig = normalizeConfigOptions(res);
@@ -346,7 +354,7 @@ export class AcpDriver implements ProviderDriver {
     } else {
       const res = (await conn.agent.request("session/new", {
         cwd,
-        mcpServers: [],
+        mcpServers,
       } as never)) as { sessionId: string; configOptions?: unknown };
       sessionId = res.sessionId;
       rawConfig = normalizeConfigOptions(res);

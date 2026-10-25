@@ -121,7 +121,12 @@ export function MessageList({
           case "user_message":
             return (
               <div key={item.id} className="flex justify-end">
-                <div className="max-w-[75%] rounded-lg bg-sky-700/80 px-3 py-2 text-sm whitespace-pre-wrap">
+                <div
+                  className={`max-w-[75%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${item.from ? "bg-violet-800/70" : "bg-sky-700/80"}`}
+                >
+                  {item.from && (
+                    <div className="mb-1 text-xs text-violet-200">From agent {item.from.name}</div>
+                  )}
                   {item.text}
                 </div>
               </div>

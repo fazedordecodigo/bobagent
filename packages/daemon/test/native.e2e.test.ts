@@ -116,6 +116,17 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
     const thoughts = h.items.filter((i) => i.kind === "agent_thought" && i.turnId === t2.id);
     expect(thoughts.map((i) => ("text" in i ? i.text : ""))).toEqual(["pondering"]);
     expect(await lastAgentText(a.id)).toBe("deep");
+    const log = readLog(stateDir);
+    if (cs.provider === "claude") {
+      const argv = log.find((l) => l.method === "argv")!.params as string[];
+      const cfg = JSON.parse(argv[argv.indexOf("--mcp-config") + 1]!);
+      expect(cfg.mcpServers.bobagent.env.BOBAGENT_BRIDGE_TOKEN).toBeTruthy();
+    } else {
+      const start = log.find((l) => l.method === "thread/start")!.params as {
+        params: { config: Record<string, { env: Record<string, string> }> };
+      };
+      expect(start.params.config["mcp_servers.bobagent"]!.env.BOBAGENT_BRIDGE_TOKEN).toBeTruthy();
+    }
   });
 
   for (const [label, pick, reply] of [

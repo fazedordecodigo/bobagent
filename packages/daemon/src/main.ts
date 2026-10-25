@@ -1,11 +1,13 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { AgentStore } from "./agents";
+import { Bridge } from "./bridge";
 import { ChatStore, QueueStore } from "./chat-store";
 import { openDatabase } from "./db";
 import { mergedPath } from "./env/login-path";
+import { runMcpBridge } from "./mcp-bridge";
 import { Rpc } from "./rpc";
 import { RuntimeManager } from "./runtime/runtime-manager";
 
@@ -89,6 +91,10 @@ function shutdown(code: number) {
 }
 
 async function main() {
+  if (process.argv[2] === "mcp-bridge") {
+    await runMcpBridge();
+    process.exit(0);
+  }
   const { dataDir, agentsRoot } = parseArgs(process.argv.slice(2));
   const token = await readTokenFromStdin();
   if (!token) {
@@ -113,7 +119,9 @@ async function main() {
     }
   }
 
-  const runtimes = new RuntimeManager(store, chat, queue, broadcast);
+  const sharedRoot = process.env.BOBAGENT_SHARED_ROOT || join(dirname(agentsRoot), "Shared");
+  const bridge = new Bridge(store, () => runtimes, sharedRoot);
+  const runtimes = new RuntimeManager(store, chat, queue, broadcast, (id) => bridge.serversFor(id));
   runtimesRef = runtimes;
   const rpc = new Rpc(store, chat, queue, runtimes, broadcast);
 
@@ -143,6 +151,22 @@ async function main() {
         }
         if (srv.upgrade(req)) return undefined;
         return new Response("upgrade failed", { status: 400 });
+      }
+      if (url.pathname === "/bridge") {
+        // called only by our mcp-bridge child processes, never by a browser
+        if (req.method !== "POST" || req.headers.get("origin") !== null) {
+          return new Response("forbidden", { status: 403 });
+        }
+        const auth = req.headers.get("authorization") ?? "";
+        const agentId = bridge.agentForToken(auth.startsWith("Bearer ") ? auth.slice(7) : "");
+        if (!agentId) return new Response("unauthorized", { status: 401 });
+        return req
+          .json()
+          .then((body) => bridge.handle(agentId, body as Record<string, unknown>))
+          .then(
+            (r) => Response.json(r),
+            (e) => new Response((e as Error).message, { status: 400 }),
+          );
       }
       if (url.pathname === "/health") {
         const denied = checkOrigin(req);
@@ -175,6 +199,7 @@ async function main() {
   });
 
   serverRef = server;
+  bridge.port = server.port ?? 0;
   runtimes.resumeAllQueues();
   console.log(`BOBAGENT_READY {"port":${server.port}}`);
   log(`listening on 127.0.0.1:${server.port}, data dir ${dataDir}`);

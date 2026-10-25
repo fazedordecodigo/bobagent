@@ -152,7 +152,11 @@ const ChatItemBase = z.object({
 });
 
 export const ChatItem = z.discriminatedUnion("kind", [
-  ChatItemBase.extend({ kind: z.literal("user_message"), text: z.string() }),
+  ChatItemBase.extend({
+    kind: z.literal("user_message"),
+    text: z.string(),
+    from: z.object({ agentId: z.string(), name: z.string() }).nullable().optional(),
+  }),
   ChatItemBase.extend({ kind: z.literal("agent_message"), text: z.string() }),
   ChatItemBase.extend({ kind: z.literal("agent_thought"), text: z.string() }),
   ChatItemBase.extend({
@@ -224,6 +228,7 @@ export const QueueItem = z.object({
   agentId: z.string(),
   text: z.string(),
   createdAt: z.number(),
+  fromAgentId: z.string().nullable().optional(),
 });
 export type QueueItem = z.infer<typeof QueueItem>;
 

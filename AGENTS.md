@@ -62,7 +62,7 @@ drains oldest-first while idle and unpaused. User `chat.cancel` pauses the queue
 items remain; a `failed` turn auto-pauses. `queue.get/remove/pause/resume` +
 `queue.updated` events. `Agent.config` (configId->value) is applied to every new
 provider session before its first prompt via `session/set_config_option`;
-`DEFAULT_MODE` in `src/providers/acp.ts` picks the safe per-provider mode
+`DEFAULT_MODE` in `src/providers/index.ts` picks the safe per-provider mode
 (devin=accept-edits, cursor=agent, opencode=build — measured by `spikes/mode-probe.ts`;
 never a bypass/auto-approve value). `agents.configOptions` starts a session to read
 options; `agents.setConfig` validates against live options (busy while a turn runs).
@@ -95,6 +95,26 @@ stderr tail, JSONL and auth helpers live in `process.ts`.
   (`BOBAGENT_ACP_COMMAND_<PROVIDER>` still works). Tests use
   `test/fixtures/fake-claude.ts` / `fake-codex.ts` (`$FAKE_CLAUDE_STATE_DIR`,
   `$FAKE_CODEX_STATE_DIR`, `FAKE_CODEX_NO_AUTH=1`) from `test/native.e2e.test.ts`.
+
+## Agent-to-agent bridge (Phase 5)
+
+Every provider session gets a `bobagent` stdio MCP server: the daemon binary run as
+`bobagentd mcp-bridge` (dev: `bun src/main.ts mcp-bridge`), with
+`BOBAGENT_BRIDGE_URL`/`BOBAGENT_BRIDGE_TOKEN` in its env. The token is per agent,
+regenerated each daemon start, and never the daemon's main token. The bridge forwards
+`tools/list`/`tools/call` to `POST /bridge` (Bearer bridge token; any Origin header ->
+403). Passed via ACP `mcpServers`, Claude `--mcp-config`, Codex `thread/start.config`
+(`mcp_servers.bobagent`). Tools (`src/bridge.ts`):
+- `list_agents`, `send_message {to, text}`: enqueues on the recipient with
+  `queue.from_agent_id` + `hops` (migration 5). The recipient's prompt is framed by
+  `<agent_message_context>` (`wrapAgentMessage`); its `user_message` item has `from`.
+  Chains stop at `MAX_HOPS` (6).
+- `share_file {to, path, note?}`: only regular files inside the sender workspace, max 100 MB.
+  It copies the file to `<shared>/Transfers/<id>/` with `manifest.json` (sha256), delivers it
+  to `<recipient ws>/transfers/<id>/<name>`, and notifies the recipient. Shared root is
+  `BOBAGENT_SHARED_ROOT` or `dirname(agentsRoot)/Shared` (default `~/BobAgent/Shared`).
+Tests: `test/bridge.e2e.test.ts` (the fake ACP agent's `mcp:<tool> <json>` prompt
+spawns the real bridge and calls the tool).
 
 ## Permissions
 

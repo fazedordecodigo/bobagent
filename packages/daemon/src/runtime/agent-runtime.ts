@@ -9,10 +9,28 @@ import type {
   QueueState,
 } from "@bobagent/protocol";
 import type { AgentStore } from "../agents";
-import type { ChatStore, QueueStore } from "../chat-store";
+import type { ChatStore, QueueSource, QueueStore } from "../chat-store";
 import { checkProviderAvailable, DEFAULT_MODE, getDriver } from "../providers";
-import { ProviderError, type ProviderHooks, type ProviderSession } from "../providers/types";
+import {
+  type McpServerSpec,
+  ProviderError,
+  type ProviderHooks,
+  type ProviderSession,
+} from "../providers/types";
 import { buildHandoff } from "./handoff";
+
+function xmlAttr(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+/** Prompt framing for a message that another agent sent via the bobagent MCP bridge. */
+export function wrapAgentMessage(from: { agentId: string; name: string }, text: string): string {
+  return `<agent_message_context from="${xmlAttr(from.name)}" agent_id="${from.agentId}">
+This message comes from another BobAgent agent, not from the user. To answer it, call the
+bobagent send_message tool with to="${xmlAttr(from.name)}". Do not reply to pure acknowledgements.
+</agent_message_context>
+${text}`;
+}
 
 export type Broadcast = (event: string, data: unknown) => void;
 export class RpcError extends Error {
@@ -52,6 +70,7 @@ export class AgentRuntime {
   private pending = new Map<string, PendingEntry>();
   private cancelTimer: ReturnType<typeof setTimeout> | null = null;
   private draining = false;
+  private turnHops = 0;
   private disposing = false;
 
   constructor(
@@ -60,7 +79,13 @@ export class AgentRuntime {
     private store: ChatStore,
     private queue: QueueStore,
     private broadcast: Broadcast,
+    private mcpServers: (agentId: string) => McpServerSpec[] = () => [],
   ) {}
+
+  /** Agent-to-agent hop count of the running turn (0 when idle or user-initiated). */
+  currentHops(): number {
+    return this.turn ? this.turnHops : 0;
+  }
 
   updateAgent(agent: Agent) {
     this.agent = agent;
@@ -97,9 +122,9 @@ export class AgentRuntime {
 
   // ---- Queue API ----
 
-  send(text: string): { queueId: string } {
+  send(text: string, from: QueueSource | null = null): { queueId: string } {
     checkProviderAvailable(this.agent.provider); // up-front provider_unavailable
-    const item = this.queue.enqueue(this.agent.id, text);
+    const item = this.queue.enqueue(this.agent.id, text, from);
     this.emitQueue();
     this.drain();
     return { queueId: item.id };
@@ -142,14 +167,23 @@ export class AgentRuntime {
       this.queue.markStarted(next.id, turnRow.id);
       this.turn = { id: turnRow.id, cancelled: false, byUser: false };
       this.openTextItem = null;
+      this.turnHops = next.hops ?? 0;
+      const sender = next.from_agent_id
+        ? {
+            agentId: next.from_agent_id,
+            name: this.agents.get(next.from_agent_id)?.name ?? "deleted agent",
+          }
+        : null;
       const userItem = this.store.createItem(this.agent.id, turnRow.id, "user_message", {
         text: next.text,
+        ...(sender ? { from: sender } : {}),
       });
       this.setStatus("starting");
       this.broadcast("turn.started", turnRow);
       this.broadcast("item.created", userItem);
       this.emitQueue();
-      this.runTurn(next.text, turnRow.id).catch(() => {});
+      const promptText = sender ? wrapAgentMessage(sender, next.text) : next.text;
+      this.runTurn(promptText, turnRow.id).catch(() => {});
     } finally {
       this.draining = false;
     }
@@ -169,6 +203,7 @@ export class AgentRuntime {
         cwd: this.agent.workspacePath,
         resumeSessionId,
         hooks: this.hooks(tag),
+        mcpServers: this.mcpServers(this.agent.id),
       });
       this.sessionTag = tag;
       this.store.upsertAgentSession(this.agent.id, this.agent.provider, session.sessionId);

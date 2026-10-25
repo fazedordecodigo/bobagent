@@ -11,6 +11,7 @@ import {
   writeJsonLine,
 } from "./process";
 import {
+  type McpServerSpec,
   type NormalizedUpdate,
   type ProviderDriver,
   ProviderError,
@@ -358,23 +359,40 @@ export class ClaudeDriver implements ProviderDriver {
     cwd: string;
     resumeSessionId: string | null;
     hooks: ProviderHooks;
+    mcpServers?: McpServerSpec[];
   }): Promise<ProviderSession> {
+    const mcp = opts.mcpServers ?? [];
     if (opts.resumeSessionId) {
       try {
-        return await this.launch(opts.cwd, opts.resumeSessionId, opts.hooks);
+        return await this.launch(opts.cwd, opts.resumeSessionId, opts.hooks, mcp);
       } catch (e) {
         if (e instanceof ProviderError && e.code !== "internal") throw e;
         // stale/unknown session: fall back to a fresh one
       }
     }
-    return this.launch(opts.cwd, null, opts.hooks);
+    return this.launch(opts.cwd, null, opts.hooks, mcp);
   }
 
   private async launch(
     cwd: string,
     resumeSessionId: string | null,
     hooks: ProviderHooks,
+    mcp: McpServerSpec[],
   ): Promise<ProviderSession> {
+    const mcpArgs =
+      mcp.length > 0
+        ? [
+            "--mcp-config",
+            JSON.stringify({
+              mcpServers: Object.fromEntries(
+                mcp.map((m) => [
+                  m.name,
+                  { type: "stdio", command: m.command, args: m.args, env: m.env },
+                ]),
+              ),
+            }),
+          ]
+        : [];
     const { bin, args } = resolveProviderCommand("claude");
     const sessionId = resumeSessionId ?? crypto.randomUUID();
     const proc = spawnProvider(
@@ -392,6 +410,7 @@ export class ClaudeDriver implements ProviderDriver {
         "--permission-mode",
         "default",
         ...(resumeSessionId ? ["--resume", resumeSessionId] : ["--session-id", sessionId]),
+        ...mcpArgs,
       ],
       cwd,
     );

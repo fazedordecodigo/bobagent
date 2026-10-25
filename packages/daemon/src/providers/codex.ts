@@ -11,6 +11,7 @@ import {
   writeJsonLine,
 } from "./process";
 import {
+  type McpServerSpec,
   type ProviderDriver,
   ProviderError,
   type ProviderHooks,
@@ -461,8 +462,10 @@ export class CodexDriver implements ProviderDriver {
     cwd: string;
     resumeSessionId: string | null;
     hooks: ProviderHooks;
+    mcpServers?: McpServerSpec[];
   }): Promise<ProviderSession> {
     const { cwd, resumeSessionId, hooks } = opts;
+    const mcp = opts.mcpServers ?? [];
     const { bin, args } = resolveProviderCommand("codex");
     const proc = spawnProvider(bin, args, cwd);
     const session = new CodexSession(proc, hooks, cwd);
@@ -484,6 +487,16 @@ export class CodexDriver implements ProviderDriver {
         cwd,
         approvalPolicy: MODE_POLICY.auto!.approvalPolicy,
         sandbox: MODE_POLICY.auto!.sandbox,
+        ...(mcp.length > 0
+          ? {
+              config: Object.fromEntries(
+                mcp.map((m) => [
+                  `mcp_servers.${m.name}`,
+                  { command: m.command, args: m.args, env: m.env },
+                ]),
+              ),
+            }
+          : {}),
       };
       let res: Json | null = null;
       if (resumeSessionId) {

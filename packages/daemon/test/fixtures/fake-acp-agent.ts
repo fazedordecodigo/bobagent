@@ -13,6 +13,7 @@
 //   ignorecancel   -> streams forever, ignores session/cancel
 //   crash          -> one chunk then process.exit(1)
 
+import { spawn } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
@@ -81,6 +82,53 @@ function saveSessions(s: Record<string, { prompts: string[] }>) {
 }
 
 const cancelledSessions = new Set<string>();
+type McpSpec = {
+  name: string;
+  command: string;
+  args: string[];
+  env: { name: string; value: string }[];
+};
+const sessionMcp = new Map<string, McpSpec[]>();
+
+/** Minimal MCP stdio client: initialize + one tools/call, returns the text content. */
+async function callMcp(spec: McpSpec, tool: string, args: unknown): Promise<string> {
+  const env = { ...process.env };
+  for (const e of spec.env) env[e.name] = e.value;
+  const child = spawn(spec.command, spec.args, { env, stdio: ["pipe", "pipe", "inherit"] });
+  let buf = "";
+  const waiters = new Map<number, (m: { result?: unknown; error?: { message: string } }) => void>();
+  child.stdout.on("data", (d: Buffer) => {
+    buf += d.toString("utf8");
+    let i = buf.indexOf("\n");
+    while (i >= 0) {
+      const m = JSON.parse(buf.slice(0, i));
+      buf = buf.slice(i + 1);
+      i = buf.indexOf("\n");
+      waiters.get(m.id)?.(m);
+    }
+  });
+  const req = (id: number, method: string, params: unknown) =>
+    new Promise<{ result?: unknown; error?: { message: string } }>((resolve) => {
+      waiters.set(id, resolve);
+      child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+    });
+  try {
+    await req(1, "initialize", {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "fake", version: "0" },
+    });
+    child.stdin.write(
+      `${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`,
+    );
+    const r = await req(2, "tools/call", { name: tool, arguments: args });
+    if (r.error) return `mcp-error:${r.error.message}`;
+    const res = r.result as { content: { text: string }[]; isError?: boolean };
+    return `${res.isError ? "tool-error:" : "tool-ok:"}${res.content.map((c) => c.text).join("")}`;
+  } finally {
+    child.kill();
+  }
+}
 let sessionCounter = 0;
 
 process.stdin.on("end", () => process.exit(0));
@@ -108,7 +156,7 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
     sessionId: string;
     prompt: { type: string; text?: string }[];
   };
-  const text = prompt?.[0]?.text ?? "";
+  const text = (prompt?.[0]?.text ?? "").replace(/^[\s\S]*<\/agent_message_context>\n/, "");
   const sessions = loadSessions();
   sessions[sessionId] ??= { prompts: [] };
   sessions[sessionId].prompts.push(text);
@@ -119,6 +167,17 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
   const say = async (kind: string, t: string) => {
     await ctx.client.notify("session/update", chunk(sessionId, kind, t));
   };
+
+  if (text.startsWith("mcp:")) {
+    const m = /^mcp:(\w+)\s*([\s\S]*)$/.exec(text);
+    const spec = sessionMcp.get(sessionId)?.find((x) => x.name === "bobagent");
+    if (!m || !spec) {
+      await say("agent_message_chunk", "no-bobagent-mcp");
+      return { stopReason: "end_turn" };
+    }
+    await say("agent_message_chunk", await callMcp(spec, m[1]!, JSON.parse(m[2] || "{}")));
+    return { stopReason: "end_turn" };
+  }
 
   if (text.startsWith("echo:")) {
     const t = text.slice(5);
@@ -242,11 +301,13 @@ acp
     const sessionId = `fake-${Date.now()}-${sessionCounter++}`;
     sessions[sessionId] = { prompts: [] };
     saveSessions(sessions);
+    sessionMcp.set(sessionId, (ctx.params as { mcpServers?: McpSpec[] }).mcpServers ?? []);
     return { sessionId, configOptions: configOptions() } as never;
   })
   .onRequest("session/load", async (ctx) => {
-    const params = ctx.params as { sessionId: string; cwd?: string };
+    const params = ctx.params as { sessionId: string; cwd?: string; mcpServers?: McpSpec[] };
     logRequest("session/load", params);
+    sessionMcp.set(params.sessionId, params.mcpServers ?? []);
     const sessions = loadSessions();
     if (!sessions[params.sessionId]) {
       throw new Error(`unknown session ${params.sessionId}`);

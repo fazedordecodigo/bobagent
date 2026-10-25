@@ -56,4 +56,7 @@ export const migrations: string[] = [
   CREATE INDEX queue_agent_status ON queue(agent_id, status, created_at)`,
   // 4: link turns to the queue item that started them
   `ALTER TABLE turns ADD COLUMN queue_id TEXT`,
+  // 5: agent-to-agent messages (sender + hop count for loop limits)
+  `ALTER TABLE queue ADD COLUMN from_agent_id TEXT;
+  ALTER TABLE queue ADD COLUMN hops INTEGER NOT NULL DEFAULT 0`,
 ];

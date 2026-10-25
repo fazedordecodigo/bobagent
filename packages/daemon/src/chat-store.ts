@@ -189,25 +189,42 @@ export type QueueRow = {
   turn_id: string | null;
   created_at: number;
   started_at: number | null;
+  from_agent_id: string | null;
+  hops: number;
 };
 
-export type QueueItemLite = { id: string; agentId: string; text: string; createdAt: number };
+export type QueueItemLite = {
+  id: string;
+  agentId: string;
+  text: string;
+  createdAt: number;
+  fromAgentId: string | null;
+};
+
+export type QueueSource = { agentId: string; hops: number };
 
 function rowToQueueItem(r: QueueRow): QueueItemLite {
-  return { id: r.id, agentId: r.agent_id, text: r.text, createdAt: r.created_at };
+  return {
+    id: r.id,
+    agentId: r.agent_id,
+    text: r.text,
+    createdAt: r.created_at,
+    fromAgentId: r.from_agent_id,
+  };
 }
 
 export class QueueStore {
   constructor(private db: Database) {}
 
-  enqueue(agentId: string, text: string): QueueItemLite {
+  enqueue(agentId: string, text: string, from: QueueSource | null = null): QueueItemLite {
     const id = crypto.randomUUID();
+    const now = Date.now();
     this.db
       .query(
-        "INSERT INTO queue (id, agent_id, text, status, created_at) VALUES (?, ?, ?, 'queued', ?)",
+        "INSERT INTO queue (id, agent_id, text, status, created_at, from_agent_id, hops) VALUES (?, ?, ?, 'queued', ?, ?, ?)",
       )
-      .run(id, agentId, text, Date.now());
-    return { id, agentId, text, createdAt: Date.now() };
+      .run(id, agentId, text, now, from?.agentId ?? null, from?.hops ?? 0);
+    return { id, agentId, text, createdAt: now, fromAgentId: from?.agentId ?? null };
   }
 
   queued(agentId: string): QueueItemLite[] {
