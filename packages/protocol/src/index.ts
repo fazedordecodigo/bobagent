@@ -445,7 +445,7 @@ const IdentityFile = z
   .regex(/^(?:\/|~\/)[^\n\r]*$/, "absolute path to a private key file")
   .nullable();
 /** Provider logins injected into Firecracker microVM sessions (values never leave the daemon). */
-export const VmCredentialProvider = z.enum(["claude", "codex"]);
+export const VmCredentialProvider = z.enum(["claude", "codex", "gemini", "cursor"]);
 export type VmCredentialProvider = z.infer<typeof VmCredentialProvider>;
 export const VmCredentialKind = z.enum(["oauth_token", "api_key"]);
 export type VmCredentialKind = z.infer<typeof VmCredentialKind>;
@@ -863,7 +863,7 @@ export const methodMap = {
       })
       .strict()
       .refine((p) => p.provider === "claude" || p.kind === "api_key", {
-        message: "codex microVM sessions accept an OpenAI API key only",
+        message: "only claude accepts an OAuth token; other providers take an API key",
       }),
     result: VmCredential,
   },

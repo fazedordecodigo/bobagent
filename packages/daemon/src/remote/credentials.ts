@@ -14,6 +14,8 @@ export const VM_CREDENTIAL_ENV: Record<
 > = {
   claude: { oauth_token: ["CLAUDE_CODE_OAUTH_TOKEN"], api_key: ["ANTHROPIC_API_KEY"] },
   codex: { api_key: ["OPENAI_API_KEY", "CODEX_API_KEY"] },
+  gemini: { api_key: ["GEMINI_API_KEY"] },
+  cursor: { api_key: ["CURSOR_API_KEY"] },
 };
 
 const isProvider = (p: string): p is VmCredentialProvider => p in VM_CREDENTIAL_ENV;

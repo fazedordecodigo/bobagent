@@ -240,7 +240,7 @@ export class AcpDriver implements ProviderDriver {
 
     const stderrLines: string[] = [];
     const child = opts.remote
-      ? opts.remote.spawn([bin, ...cmd.slice(1)], { NO_COLOR: "1" })
+      ? opts.remote.spawn([bin, ...cmd.slice(1)], { NO_COLOR: "1", ...opts.remote.credentials })
       : spawn(bin, cmd.slice(1), {
           cwd,
           stdio: ["pipe", "pipe", "pipe"],

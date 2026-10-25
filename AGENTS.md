@@ -75,6 +75,15 @@ forwarded to the owner only for bot-originated work (`queue.from_agent_id`). Mig
 `channel_messages.reply_to`. UI: `CommandPalette` (⌘K all, ⌘⇧F bots) and shortcuts in
 `App.tsx` (⌘N new bot, ⌘1–9 switch bot, ⌘, settings, ⌘P pages).
 
+## ACP providers in microVMs
+
+ACP providers run in Firecracker like Claude/Codex (`AcpDriver` spawns via `RemoteLaunch` and
+passes `remote.credentials` as env). MicroVM sign-in (`vmCredentials`, Settings → Hosts):
+claude (OAuth token or API key), codex (`OPENAI_API_KEY`), gemini (`GEMINI_API_KEY`), cursor
+(`CURSOR_API_KEY`). Image: `build-rootfs.sh --providers "claude codex gemini opencode cursor"`
+(cursor via its install script, unverified in a real build). devin/grok need a custom image
+plus `UPBOT_PROVIDER_COMMAND_<PROVIDER>`; opencode signs in with its own config.
+
 ## Layout
 
 - `packages/protocol` — `@upbot/protocol`: zod 4 schemas + the typed method map

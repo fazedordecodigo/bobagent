@@ -57,6 +57,13 @@ describe("microVM credentials", () => {
       OPENAI_API_KEY: "sk-proj-test",
       CODEX_API_KEY: "sk-proj-test",
     });
+    creds.set("gemini", "api_key", "gm-test-key");
+    creds.set("cursor", "api_key", "cur-test-key");
+    expect(creds.env("gemini")).toEqual({ GEMINI_API_KEY: "gm-test-key" });
+    expect(creds.env("cursor")).toEqual({ CURSOR_API_KEY: "cur-test-key" });
+    expect(() => creds.set("gemini", "oauth_token", "x-token-123")).toThrow();
+    creds.delete("gemini");
+    creds.delete("cursor");
     expect(creds.env("devin")).toEqual({});
     expect(() => creds.set("codex", "oauth_token", "x".repeat(10))).toThrow();
     creds.delete("codex");
