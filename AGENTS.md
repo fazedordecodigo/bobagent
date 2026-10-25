@@ -297,10 +297,17 @@ and `/root` bind-mounted from it. It connects vsock 1024 for provider stdio, ser
 per-run root disk on session end. With `setpriv` installed, Firecracker runs with
 `--pdeathsig KILL`. On the Linux x86_64/KVM test host, boot to first guest output measured 1.7
 seconds. The proxy resolves DNS once, rejects a hostname if any IPv4 answer is non-public, and
-connects to the approved address.
+connects to the approved address. CONNECT requests are audited at `vms/<agentId>/proxy.log`
+(rotated to `.1` above 1 MiB); provider processes drop inherited `BOBAGENT_*` variables while
+retaining explicit RunSpec env.
 Guest image: `packages/host/rootfs/` (`bobagent-init`, `build-rootfs.sh`); run the real host and
-SSH integration tests with `bun run test:firecracker` on a Linux Firecracker host. Re-run the
-build after updating or reinstalling the helper; preflight reports `guestHelperCurrent`.
+SSH integration tests with `bun run test:firecracker` on a Linux Firecracker host; signed-out
+real Claude/Codex flows use `bun run test:firecracker:providers`. `--base <image>` overrides
+`BOBAGENT_ROOTFS_BASE`; defaults try Debian Hub, mirror.gcr.io, then public ECR, selecting the
+first cached or pullable image. This host's default-provider build selected Debian Hub and took
+1m 0s: rootfs 4.0 GiB apparent / 1.6 GiB allocated, 1643 MiB ext4 used; Docker image 2.35 GB
+disk usage / 775 MB content size. Re-run the build after updating or reinstalling the helper;
+preflight reports `guestHelperCurrent`.
 Subagents (`src/subagents.ts`): bridge `spawn_subagents {tasks:[{task,name?}], provider?,
 keep?}` (max 8 per call, `BOBAGENT_MAX_SUBAGENTS` running per parent, default 8, depth 2)
 creates child agents that inherit the parent's placement, sends each its task, and when the

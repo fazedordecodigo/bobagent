@@ -48,6 +48,14 @@ From a BobAgent checkout on the host, build the default guest image (Claude and 
 bash packages/host/rootfs/build-rootfs.sh
 ```
 
+`--base <image>` overrides `BOBAGENT_ROOTFS_BASE`; otherwise the builder tries
+`debian:bookworm-slim`, `mirror.gcr.io/library/debian:bookworm-slim`, then
+`public.ecr.aws/docker/library/debian:bookworm-slim`, selecting the first cached or pullable
+image. The guest uses Node.js 22.23.4 from the official tarball with its SHA-256 checked against
+the published checksum file. This default-provider build selected Debian Hub and took 1m 0s;
+the 4096 MiB rootfs used 1643 MiB in ext4 (1.6 GiB allocated, 4.0 GiB apparent), and the
+`bobagent-guest` image reported 2.35 GB disk usage / 775 MB content size.
+
 The build downloads a checksummed Firecracker release and guest kernel and creates
 `~/.bobagent/firecracker/` with the rootfs. For a custom host root, set
 `BOBAGENT_HOST_ROOT` in the remote SSH environment; install and check use that same root.
@@ -60,6 +68,10 @@ set `BOBAGENT_VM_WORKSPACE_MIB` in the remote host environment to change its siz
 available, `setpriv --pdeathsig KILL` ensures Firecracker dies if its host helper is killed.
 The guest syncs storage when a provider exits. On the Linux x86_64/KVM test host, boot to the
 first guest output measured 1.7 seconds.
+Provider subprocesses drop inherited `BOBAGENT_*` variables (explicit RunSpec env is retained).
+CONNECT requests are audited at `vms/<agentId>/proxy.log`, rotated to `.1` above 1 MiB.
+Run the opt-in signed-out Claude/Codex SSH + Firecracker test with
+`bun run test:firecracker:providers`.
 
 VMs have no network device: provider stdio, the agent-to-agent bridge, and an HTTPS proxy all
 use vsock. The proxy resolves hostnames once and rejects requests if any IPv4 result is not
