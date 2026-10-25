@@ -156,9 +156,14 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
     sessionId: string;
     prompt: { type: string; text?: string }[];
   };
-  const text = (prompt?.[0]?.text ?? "")
+  const full = (prompt?.[0]?.text ?? "")
     .replace(/^[\s\S]*<\/agent_message_context>\n/, "")
     .replace(/^[\s\S]*<\/channel_context>\n[^\n]*\n/, "");
+  // session context blocks prepended by the daemon are not part of the command
+  const text = full.replace(
+    /^(?:<(agent_instructions|agent_memories|skills_library|conversation_summary|conversation_history|attachments)>[\s\S]*?<\/\1>\s*)+/,
+    "",
+  );
   const sessions = loadSessions();
   sessions[sessionId] ??= { prompts: [] };
   sessions[sessionId].prompts.push(text);
@@ -288,7 +293,7 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
   }
 
   if (text === "history") {
-    await say("agent_message_chunk", text);
+    await say("agent_message_chunk", full);
     return { stopReason: "end_turn" };
   }
 
