@@ -300,6 +300,13 @@ seconds. The proxy resolves DNS once, rejects a hostname if any IPv4 answer is n
 connects to the approved address. CONNECT requests are audited at `vms/<agentId>/proxy.log`
 (rotated to `.1` above 1 MiB); provider processes drop inherited `BOBAGENT_*` variables while
 retaining explicit RunSpec env.
+MicroVM sign-in (`src/remote/credentials.ts`): `vmCredentials.list/set/delete` store
+`vmcred.<provider>` in the vault (hidden from `vault.list`, never on an allowlist):
+claude `oauth_token` -> `CLAUDE_CODE_OAUTH_TOKEN`, `api_key` -> `ANTHROPIC_API_KEY`; codex
+`api_key` -> `OPENAI_API_KEY` + `CODEX_API_KEY`. `HostStore.launchFor` adds them to
+`RemoteLaunch.credentials` and the RunSpec env only for `firecracker` placements; when Codex
+reports signed out and a key is present the driver calls `account/login/start {type:"apiKey"}`.
+Tests: `test/vm-credentials.test.ts`.
 Guest image: `packages/host/rootfs/` (`bobagent-init`, `build-rootfs.sh`); run the real host and
 SSH integration tests with `bun run test:firecracker` on a Linux Firecracker host; signed-out
 real Claude/Codex flows use `bun run test:firecracker:providers`. `--base <image>` overrides

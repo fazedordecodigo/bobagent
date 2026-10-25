@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- MicroVM sign-in: save a Claude token/API key or an OpenAI API key (encrypted in the vault)
+  and BobAgent passes it to Claude/Codex inside Firecracker sessions only.
+
 - Settings & tools: Skills, Marketplace, Browser, Vault, Gateways, Mobile, Team and Hosts in
   one tabbed view.
 - Remote hosts: run agents on a Linux VPS over SSH (`bobagent-host` helper, preflight, bridge

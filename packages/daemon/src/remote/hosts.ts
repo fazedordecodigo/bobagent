@@ -92,6 +92,9 @@ async function sshExec(
 }
 
 export class HostStore {
+  /** Provider login env for microVM sessions (wired to VmCredentials in main.ts). */
+  credentialEnv: (provider: string) => Record<string, string> = () => ({});
+
   constructor(private db: Database) {}
 
   private toHost(r: HostRow): RemoteHost {
@@ -277,7 +280,12 @@ export class HostStore {
         "the agent's remote host is missing or not installed (Settings → Hosts)",
       );
     }
-    return remoteLaunch(h, p, bridgePort);
+    const agent = this.db.query("SELECT provider FROM agents WHERE id = ?").get(agentId) as {
+      provider: string;
+    } | null;
+    const credentials =
+      p.isolation === "firecracker" && agent ? this.credentialEnv(agent.provider) : {};
+    return remoteLaunch(h, p, bridgePort, credentials);
   }
 }
 
@@ -290,6 +298,7 @@ export function remoteLaunch(
   host: RemoteHost,
   placement: AgentPlacement,
   bridgePort: number,
+  credentials: Record<string, string> = {},
 ): RemoteLaunch {
   const root = host.root!;
   const helper = `${root}/${HELPER}`;
@@ -298,6 +307,7 @@ export function remoteLaunch(
   return {
     cwd: vm ? "/workspace" : `${root}/agents/${placement.agentId}`,
     describe: `${host.name}${vm ? " (microVM)" : ""}`,
+    credentials: vm ? credentials : {},
     mcp(spec: McpServerSpec): McpServerSpec {
       if (spec.name !== "bobagent") return spec;
       const token = spec.env.BOBAGENT_BRIDGE_TOKEN ?? "";
@@ -329,7 +339,7 @@ export function remoteLaunch(
           agentId: placement.agentId,
           isolation: placement.isolation,
           cmd,
-          env,
+          env: vm ? { ...env, ...credentials } : env,
           bridgeSocket: bridgePort ? socket : undefined,
           vcpus: placement.vcpus,
           memMib: placement.memMib,

@@ -11,6 +11,7 @@ import type { Marketplace } from "./marketplace";
 import type { MemoryStore } from "./memories";
 import type { MobileServer } from "./mobile";
 import { ProviderError } from "./providers/types";
+import type { VmCredentials } from "./remote/credentials";
 import type { HostStore } from "./remote/hosts";
 import type { RoutineService } from "./routines";
 import { RpcError } from "./runtime/agent-runtime";
@@ -37,6 +38,7 @@ export class Rpc {
     private browser: BrowserService,
     private extras: {
       vault: Vault;
+      vmCredentials: VmCredentials;
       computer: ComputerUse;
       voice: Voice;
       gateways: GatewayService;
@@ -244,6 +246,22 @@ export class Rpc {
           throw new RpcError("bad_request", (e as Error).message);
         }
       }
+      case "vmCredentials.list":
+        return this.extras.vmCredentials.list();
+      case "vmCredentials.set": {
+        const p = params as {
+          provider: "claude" | "codex";
+          kind: "oauth_token" | "api_key";
+          value: string;
+        };
+        const cred = this.extras.vmCredentials.set(p.provider, p.kind, p.value);
+        queueMicrotask(() => this.broadcast("hosts.changed", {}));
+        return cred;
+      }
+      case "vmCredentials.delete":
+        this.extras.vmCredentials.delete((params as { provider: "claude" | "codex" }).provider);
+        queueMicrotask(() => this.broadcast("hosts.changed", {}));
+        return { ok: true };
       case "placements.list":
         return this.extras.hosts.placements();
       case "placements.set": {

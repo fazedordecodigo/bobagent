@@ -64,7 +64,7 @@ export class Vault {
   list(): VaultEntry[] {
     const rows = this.db
       .query(
-        "SELECT * FROM vault WHERE name NOT LIKE 'gateway.%' AND name NOT LIKE 'team.%' ORDER BY name ASC",
+        "SELECT * FROM vault WHERE name NOT LIKE 'gateway.%' AND name NOT LIKE 'team.%' AND name NOT LIKE 'vmcred.%' ORDER BY name ASC",
       )
       .all() as Row[];
     return rows.map((r) => ({
@@ -107,6 +107,15 @@ export class Vault {
     return this.list()
       .filter((e) => e.agentIds.includes(agentId))
       .map((e) => e.name);
+  }
+
+  /** Daemon-internal secrets under `prefix` (names and timestamps only). */
+  internalEntries(prefix: string): { name: string; updatedAt: number }[] {
+    return (
+      this.db
+        .query("SELECT name, updated_at FROM vault WHERE substr(name, 1, ?) = ? ORDER BY name")
+        .all(prefix.length, prefix) as { name: string; updated_at: number }[]
+    ).map((r) => ({ name: r.name, updatedAt: r.updated_at }));
   }
 
   /** Decrypted value for daemon-internal use (gateway tokens); throws when missing. */

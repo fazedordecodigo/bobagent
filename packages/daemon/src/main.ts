@@ -16,6 +16,7 @@ import { Marketplace } from "./marketplace";
 import { runMcpBridge } from "./mcp-bridge";
 import { MemoryStore } from "./memories";
 import { MobileServer } from "./mobile";
+import { VmCredentials } from "./remote/credentials";
 import { HostStore } from "./remote/hosts";
 import { RoutineService } from "./routines";
 import { Rpc } from "./rpc";
@@ -173,6 +174,8 @@ async function main() {
   const browser = new BrowserService(join(dataDir, "browser-profile"), broadcast);
   bridge.browser = browser;
   const vault = new Vault(db, dataDir);
+  const vmCredentials = new VmCredentials(vault);
+  hosts.credentialEnv = (provider) => vmCredentials.env(provider);
   const computer = new ComputerUse(db);
   const voice = new Voice(join(dataDir, "voice"), mergedPath);
   bridge.vault = vault;
@@ -194,6 +197,7 @@ async function main() {
     browser,
     {
       vault,
+      vmCredentials,
       computer,
       voice,
       gateways,

@@ -64,6 +64,8 @@ export type RemoteLaunch = {
   cwd: string;
   describe: string;
   mcp(spec: McpServerSpec): McpServerSpec;
+  /** Provider credentials injected into the session (microVMs only; see remote/credentials.ts). */
+  credentials: Record<string, string>;
   spawn(cmd: string[], env: Record<string, string>): import("node:child_process").ChildProcess;
 };
 

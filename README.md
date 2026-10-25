@@ -70,6 +70,11 @@ The guest syncs storage when a provider exits. On the Linux x86_64/KVM test host
 first guest output measured 1.7 seconds.
 Provider subprocesses drop inherited `BOBAGENT_*` variables (explicit RunSpec env is retained).
 CONNECT requests are audited at `vms/<agentId>/proxy.log`, rotated to `.1` above 1 MiB.
+MicroVMs start signed out. Under **Settings → Hosts → MicroVM sign-in** save a Claude
+subscription token (`claude setup-token`) or Anthropic API key, and/or an OpenAI API key for
+Codex. They are encrypted in the vault, hidden from agents, and sent only inside the run spec
+(SSH stdin, then vsock) as the provider's environment in Firecracker sessions; Codex logs in
+with `account/login/start` (`apiKey`) inside the VM. Process placements keep the host's login.
 Run the opt-in signed-out Claude/Codex SSH + Firecracker test with
 `bun run test:firecracker:providers`.
 

@@ -1,4 +1,12 @@
-import type { Agent, AgentPlacement, RemoteHost, Subagent } from "@bobagent/protocol";
+import type {
+  Agent,
+  AgentPlacement,
+  RemoteHost,
+  Subagent,
+  VmCredential,
+  VmCredentialKind,
+  VmCredentialProvider,
+} from "@bobagent/protocol";
 import { useCallback, useEffect, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
 import { btnCls, inputCls } from "./AgentSettings";
@@ -27,6 +35,118 @@ function Preflight({ h }: { h: RemoteHost }) {
         microVMs {p.firecrackerReady ? "ready" : "not available"}
       </span>
     </div>
+  );
+}
+
+const CRED_HINT: Record<VmCredentialProvider, Partial<Record<VmCredentialKind, string>>> = {
+  claude: {
+    oauth_token: "Token from `claude setup-token` (uses your Claude subscription)",
+    api_key: "Anthropic API key",
+  },
+  codex: { api_key: "OpenAI API key" },
+};
+
+function VmCredentials({
+  client,
+  onError,
+}: {
+  client: DaemonClient;
+  onError: (e: unknown) => void;
+}) {
+  const [creds, setCreds] = useState<VmCredential[]>([]);
+  const [form, setForm] = useState<{
+    provider: VmCredentialProvider;
+    kind: VmCredentialKind;
+    value: string;
+  }>({ provider: "claude", kind: "oauth_token", value: "" });
+  const reload = useCallback(() => {
+    client.request("vmCredentials.list", {}).then(setCreds).catch(onError);
+  }, [client, onError]);
+  useEffect(() => {
+    reload();
+    return client.on("hosts.changed", reload);
+  }, [client, reload]);
+  const kinds = Object.keys(CRED_HINT[form.provider]) as VmCredentialKind[];
+  return (
+    <section className="space-y-2">
+      <h3 className="text-sm font-semibold text-zinc-300">MicroVM sign-in</h3>
+      <p className="text-xs text-zinc-500">
+        Each microVM starts signed out. Saved logins are encrypted in the vault, never shown to
+        agents, and only passed to the provider inside its microVM for the length of the session.
+        Process placements keep using the host's own CLI login.
+      </p>
+      {creds.map((c) => (
+        <div key={c.provider} className="flex items-center gap-2 text-sm">
+          <span className="w-20">{c.provider}</span>
+          <span className="text-xs text-zinc-500">
+            {c.kind === "oauth_token" ? "subscription token" : "API key"} · saved{" "}
+            {new Date(c.updatedAt).toLocaleString()}
+          </span>
+          <span className="flex-1" />
+          <button
+            type="button"
+            className="text-xs text-red-400 hover:text-red-300"
+            onClick={() =>
+              client
+                .request("vmCredentials.delete", { provider: c.provider })
+                .then(reload)
+                .catch(onError)
+            }
+          >
+            Remove
+          </button>
+        </div>
+      ))}
+      <form
+        className="flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          client
+            .request("vmCredentials.set", form)
+            .then(() => {
+              setForm({ ...form, value: "" });
+              reload();
+            })
+            .catch(onError);
+        }}
+      >
+        <select
+          className={`${inputCls} w-28`}
+          value={form.provider}
+          onChange={(e) => {
+            const provider = e.target.value as VmCredentialProvider;
+            const kind = Object.keys(CRED_HINT[provider])[0] as VmCredentialKind;
+            setForm({ provider, kind, value: "" });
+          }}
+        >
+          <option value="claude">claude</option>
+          <option value="codex">codex</option>
+        </select>
+        <select
+          className={`${inputCls} w-44`}
+          value={form.kind}
+          onChange={(e) => setForm({ ...form, kind: e.target.value as VmCredentialKind })}
+        >
+          {kinds.map((k) => (
+            <option key={k} value={k}>
+              {k === "oauth_token" ? "Subscription token" : "API key"}
+            </option>
+          ))}
+        </select>
+        <input
+          className={`${inputCls} flex-1`}
+          type="password"
+          autoComplete="off"
+          placeholder={CRED_HINT[form.provider][form.kind]}
+          value={form.value}
+          onChange={(e) => setForm({ ...form, value: e.target.value })}
+          required
+        />
+        <button type="submit" className={btnCls}>
+          Save
+        </button>
+      </form>
+    </section>
   );
 }
 
@@ -248,6 +368,8 @@ export function HostsView({ client, agents }: { client: DaemonClient; agents: Ag
           );
         })}
       </section>
+
+      <VmCredentials client={client} onError={fail} />
 
       {subs.length > 0 && (
         <section className="space-y-1">

@@ -444,6 +444,18 @@ const IdentityFile = z
   .max(1000)
   .regex(/^(?:\/|~\/)[^\n\r]*$/, "absolute path to a private key file")
   .nullable();
+/** Provider logins injected into Firecracker microVM sessions (values never leave the daemon). */
+export const VmCredentialProvider = z.enum(["claude", "codex"]);
+export type VmCredentialProvider = z.infer<typeof VmCredentialProvider>;
+export const VmCredentialKind = z.enum(["oauth_token", "api_key"]);
+export type VmCredentialKind = z.infer<typeof VmCredentialKind>;
+export const VmCredential = z.object({
+  provider: VmCredentialProvider,
+  kind: VmCredentialKind,
+  updatedAt: z.number(),
+});
+export type VmCredential = z.infer<typeof VmCredential>;
+
 export const AgentPlacement = z.object({
   agentId: z.string(),
   hostId: z.string().nullable(),
@@ -716,6 +728,29 @@ export const methodMap = {
   },
   "hosts.install": { params: z.object({ id: z.string() }).strict(), result: RemoteHost },
   "hosts.check": { params: z.object({ id: z.string() }).strict(), result: RemoteHost },
+  "vmCredentials.list": { params: z.object({}).strict(), result: z.array(VmCredential) },
+  "vmCredentials.set": {
+    params: z
+      .object({
+        provider: VmCredentialProvider,
+        kind: VmCredentialKind,
+        value: z
+          .string()
+          .trim()
+          .min(8)
+          .max(8192)
+          .regex(/^[\x21-\x7e]+$/, "credential must be a single token without spaces"),
+      })
+      .strict()
+      .refine((p) => p.provider === "claude" || p.kind === "api_key", {
+        message: "codex microVM sessions accept an OpenAI API key only",
+      }),
+    result: VmCredential,
+  },
+  "vmCredentials.delete": {
+    params: z.object({ provider: VmCredentialProvider }).strict(),
+    result: z.object({ ok: z.literal(true) }),
+  },
   "placements.list": { params: z.object({}).strict(), result: z.array(AgentPlacement) },
   "placements.set": {
     params: z

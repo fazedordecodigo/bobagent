@@ -492,7 +492,12 @@ export class CodexDriver implements ProviderDriver {
         capabilities: null,
       });
       session.notify("initialized");
-      const account = await session.request("account/read", { refreshToken: false });
+      let account = await session.request("account/read", { refreshToken: false });
+      const vmKey = opts.remote?.credentials.OPENAI_API_KEY;
+      if (account.account == null && account.requiresOpenaiAuth === true && vmKey) {
+        await session.request("account/login/start", { type: "apiKey", apiKey: vmKey });
+        account = await session.request("account/read", { refreshToken: false });
+      }
       if (
         account.account == null &&
         account.requiresOpenaiAuth === true &&
