@@ -16,10 +16,12 @@ import { Marketplace } from "./marketplace";
 import { runMcpBridge } from "./mcp-bridge";
 import { MemoryStore } from "./memories";
 import { MobileServer } from "./mobile";
+import { HostStore } from "./remote/hosts";
 import { RoutineService } from "./routines";
 import { Rpc } from "./rpc";
 import { RuntimeManager } from "./runtime/runtime-manager";
 import { SkillLibrary } from "./skills";
+import { SubagentService } from "./subagents";
 import { TeamClient } from "./team";
 import { Vault } from "./vault";
 import { Voice } from "./voice";
@@ -121,6 +123,7 @@ async function main() {
   chat.interruptRunningTurns();
   const store = new AgentStore(db, agentsRoot);
   const queue = new QueueStore(db);
+  const hosts = new HostStore(db);
   const sockets = new Set<import("bun").ServerWebSocket<unknown>>();
 
   function broadcast(event: string, data: unknown) {
@@ -139,6 +142,7 @@ async function main() {
           channels.onTurnEnded(turn, row);
           gateways.onTurnEnded(turn, row);
           team.onTurnEnded(turn, row);
+          subagents.onTurnEnded(turn, row);
         } catch (e) {
           log("channel turn hook failed", e);
         }
@@ -157,7 +161,10 @@ async function main() {
     broadcast,
     (id) => bridge.serversFor(id),
     (id) => memories.promptBlock(id) + skills.promptBlock(),
+    (id) => hosts.launchFor(id, bridge.port),
   );
+  const subagents = new SubagentService(db, store, chat, queue, () => runtimes, hosts, broadcast);
+  bridge.subagents = subagents;
   runtimesRef = runtimes;
   const channels = new ChannelService(db, store, chat, () => runtimes, broadcast);
   bridge.channels = channels;
@@ -195,6 +202,8 @@ async function main() {
       marketplace: new Marketplace(db, skills, store),
       mobile,
       team,
+      hosts,
+      subagents,
     },
   );
 

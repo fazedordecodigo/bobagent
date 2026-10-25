@@ -58,13 +58,25 @@ export type McpServerSpec = {
   env: Record<string, string>;
 };
 
+/** Runs a provider command on a remote host (see `src/remote/hosts.ts`). */
+export type RemoteLaunch = {
+  /** Working directory as seen by the provider on the host. */
+  cwd: string;
+  describe: string;
+  mcp(spec: McpServerSpec): McpServerSpec;
+  spawn(cmd: string[], env: Record<string, string>): import("node:child_process").ChildProcess;
+};
+
+export type StartOpts = {
+  cwd: string;
+  resumeSessionId: string | null;
+  hooks: ProviderHooks;
+  mcpServers?: McpServerSpec[];
+  remote?: RemoteLaunch;
+};
+
 export interface ProviderDriver {
-  start(opts: {
-    cwd: string;
-    resumeSessionId: string | null;
-    hooks: ProviderHooks;
-    mcpServers?: McpServerSpec[];
-  }): Promise<ProviderSession>;
+  start(opts: StartOpts): Promise<ProviderSession>;
 }
 
 export class ProviderError extends Error {

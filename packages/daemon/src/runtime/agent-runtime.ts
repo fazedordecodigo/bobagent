@@ -18,6 +18,7 @@ import {
   ProviderError,
   type ProviderHooks,
   type ProviderSession,
+  type RemoteLaunch,
 } from "../providers/types";
 import { buildHandoff } from "./handoff";
 
@@ -105,6 +106,7 @@ export class AgentRuntime {
     private broadcast: Broadcast,
     private mcpServers: (agentId: string) => McpServerSpec[] = () => [],
     private sessionContext: (agentId: string) => string = () => "",
+    private remoteFor: (agentId: string) => RemoteLaunch | null = () => null,
   ) {}
 
   /** Agent-to-agent hop count of the running turn (0 when idle or user-initiated). */
@@ -152,7 +154,7 @@ export class AgentRuntime {
   // ---- Queue API ----
 
   send(text: string, from: QueueSource | null = null): { queueId: string } {
-    checkProviderAvailable(this.agent.provider); // up-front provider_unavailable
+    if (!this.remoteFor(this.agent.id)) checkProviderAvailable(this.agent.provider); // up-front provider_unavailable
     const item = this.queue.enqueue(this.agent.id, text, from);
     this.emitQueue();
     this.drain();
@@ -232,11 +234,14 @@ export class AgentRuntime {
         stored && stored.provider === this.agent.provider ? stored.sessionId : null;
       const driver = getDriver(this.agent.provider);
       const tag = {};
+      const remote = this.remoteFor(this.agent.id);
+      const servers = this.mcpServers(this.agent.id);
       const session = await driver.start({
-        cwd: this.agent.workspacePath,
+        cwd: remote?.cwd ?? this.agent.workspacePath,
         resumeSessionId,
         hooks: this.hooks(tag),
-        mcpServers: this.mcpServers(this.agent.id),
+        mcpServers: remote ? servers.map((s) => remote.mcp(s)) : servers,
+        ...(remote ? { remote } : {}),
       });
       this.sessionTag = tag;
       this.store.upsertAgentSession(this.agent.id, this.agent.provider, session.sessionId);

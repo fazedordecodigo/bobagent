@@ -7,7 +7,7 @@ import type {
 } from "@bobagent/protocol";
 import type { AgentStore } from "../agents";
 import type { ChatStore, QueueSource, QueueStore } from "../chat-store";
-import type { McpServerSpec } from "../providers/types";
+import type { McpServerSpec, RemoteLaunch } from "../providers/types";
 import { AgentRuntime, type Broadcast, RpcError } from "./agent-runtime";
 
 export class RuntimeManager {
@@ -20,6 +20,7 @@ export class RuntimeManager {
     private broadcast: Broadcast,
     private mcpServers: (agentId: string) => McpServerSpec[] = () => [],
     private sessionContext: (agentId: string) => string = () => "",
+    private remoteFor: (agentId: string) => RemoteLaunch | null = () => null,
   ) {}
 
   private runtimeFor(agentId: string): AgentRuntime {
@@ -35,6 +36,7 @@ export class RuntimeManager {
         this.broadcast,
         this.mcpServers,
         this.sessionContext,
+        this.remoteFor,
       );
       this.runtimes.set(agentId, rt);
     }
@@ -158,6 +160,12 @@ export class RuntimeManager {
     if (!rt) return;
     rt.updateAgent(agent);
     if (providerChanged) await rt.dispose(true);
+  }
+
+  /** Drops the provider session (e.g. placement changed); the queue resumes on a new one. */
+  async restartSession(agentId: string): Promise<void> {
+    this.chat.clearAgentSession(agentId);
+    await this.runtimes.get(agentId)?.dispose(true);
   }
 
   async agentDeleted(agentId: string): Promise<void> {

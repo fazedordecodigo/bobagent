@@ -11,10 +11,12 @@ import type { Marketplace } from "./marketplace";
 import type { MemoryStore } from "./memories";
 import type { MobileServer } from "./mobile";
 import { ProviderError } from "./providers/types";
+import type { HostStore } from "./remote/hosts";
 import type { RoutineService } from "./routines";
 import { RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
 import type { SkillLibrary } from "./skills";
+import type { SubagentService } from "./subagents";
 import type { TeamClient } from "./team";
 import type { Vault } from "./vault";
 import type { Voice } from "./voice";
@@ -41,6 +43,8 @@ export class Rpc {
       marketplace: Marketplace;
       mobile: MobileServer;
       team: TeamClient;
+      hosts: HostStore;
+      subagents: SubagentService;
     },
   ) {}
 
@@ -196,6 +200,73 @@ export class Rpc {
         const p = params as { memberId: string; agentId: string; text: string };
         return this.extras.team.send(p.memberId, p.agentId, p.text);
       }
+      case "hosts.list":
+        return this.extras.hosts.list();
+      case "hosts.create": {
+        const h = this.extras.hosts.create(
+          params as { name: string; target: string; port?: number; identityFile?: string | null },
+        );
+        queueMicrotask(() => this.broadcast("hosts.changed", {}));
+        return h;
+      }
+      case "hosts.update": {
+        const h = this.extras.hosts.update(
+          params as {
+            id: string;
+            name?: string;
+            target?: string;
+            port?: number;
+            identityFile?: string | null;
+          },
+        );
+        if (!h) throw new RpcError("not_found", "host not found");
+        queueMicrotask(() => this.broadcast("hosts.changed", {}));
+        return h;
+      }
+      case "hosts.delete": {
+        if (!this.extras.hosts.delete((params as { id: string }).id))
+          throw new RpcError("not_found", "host not found");
+        queueMicrotask(() => this.broadcast("hosts.changed", {}));
+        return { ok: true };
+      }
+      case "hosts.install":
+      case "hosts.check": {
+        const id = (params as { id: string }).id;
+        if (!this.extras.hosts.get(id)) throw new RpcError("not_found", "host not found");
+        try {
+          const h =
+            method === "hosts.install"
+              ? await this.extras.hosts.install(id)
+              : await this.extras.hosts.check(id);
+          queueMicrotask(() => this.broadcast("hosts.changed", {}));
+          return h;
+        } catch (e) {
+          throw new RpcError("bad_request", (e as Error).message);
+        }
+      }
+      case "placements.list":
+        return this.extras.hosts.placements();
+      case "placements.set": {
+        const p = params as {
+          agentId: string;
+          hostId: string | null;
+          isolation: "none" | "firecracker";
+          vcpus?: number;
+          memMib?: number;
+        };
+        if (!this.agents.get(p.agentId)) throw new RpcError("not_found", "agent not found");
+        let placed: ReturnType<HostStore["setPlacement"]>;
+        try {
+          placed = this.extras.hosts.setPlacement(p);
+        } catch (e) {
+          throw new RpcError("bad_request", (e as Error).message);
+        }
+        await this.runtimes.restartSession(p.agentId);
+        queueMicrotask(() => this.broadcast("placement.updated", placed));
+        return placed;
+      }
+      case "subagents.list":
+        return this.extras.subagents.list((params as { parentId?: string }).parentId);
       case "team.messages":
         return this.extras.team.messages();
       case "mobile.status":

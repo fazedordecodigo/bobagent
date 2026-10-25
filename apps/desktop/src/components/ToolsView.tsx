@@ -1,5 +1,6 @@
 import type { Agent } from "@bobagent/protocol";
 import type { DaemonClient } from "../lib/daemon";
+import { HostsView } from "./HostsView";
 import {
   BrowserView,
   GatewaysView,
@@ -17,7 +18,8 @@ export type ToolTab =
   | "vault"
   | "gateways"
   | "mobile"
-  | "team";
+  | "team"
+  | "hosts";
 
 const TABS: { id: ToolTab; label: string; hint: string }[] = [
   { id: "skills", label: "Skills", hint: "Shared skills library" },
@@ -27,6 +29,7 @@ const TABS: { id: ToolTab; label: string; hint: string }[] = [
   { id: "gateways", label: "Gateways", hint: "Telegram, Slack and Discord" },
   { id: "mobile", label: "Mobile", hint: "Pair your phone on this network" },
   { id: "team", label: "Team", hint: "Share agents through a relay" },
+  { id: "hosts", label: "Hosts", hint: "Run agents on a VPS, in Firecracker microVMs" },
 ];
 
 export function ToolsView({
@@ -72,6 +75,7 @@ export function ToolsView({
         {tab === "gateways" && <GatewaysView client={client} agents={agents} />}
         {tab === "mobile" && <MobileView client={client} />}
         {tab === "team" && <TeamView client={client} agents={agents} />}
+        {tab === "hosts" && <HostsView client={client} agents={agents} />}
       </div>
     </div>
   );

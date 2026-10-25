@@ -21,6 +21,7 @@ import type { McpServerSpec } from "./providers/types";
 import type { Broadcast } from "./rpc";
 import type { RuntimeManager } from "./runtime/runtime-manager";
 import type { SkillLibrary } from "./skills";
+import type { SubagentService } from "./subagents";
 import type { Vault } from "./vault";
 
 // Local MCP bridge: each provider session gets a `bobagent` stdio MCP server
@@ -160,6 +161,47 @@ export const BRIDGE_TOOLS = [
     },
   },
   {
+    name: "spawn_subagents",
+    description:
+      "Launch up to 8 subagents that work on independent tasks in parallel (each in its own session; on a Firecracker host each gets its own microVM). Returns immediately; when all of them finish you receive one <subagent_results> message. Subagents are deleted afterwards unless keep=true.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tasks: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              task: { type: "string", description: "Self-contained instructions" },
+              name: { type: "string", description: "Short label" },
+            },
+            required: ["task"],
+            additionalProperties: false,
+          },
+        },
+        provider: { type: "string", description: "Provider id; defaults to your own" },
+        keep: { type: "boolean", description: "Keep the subagents after they report" },
+      },
+      required: ["tasks"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "list_subagents",
+    description: "List your subagents with their status and results.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "stop_subagent",
+    description: "Stop one of your running subagents.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string" } },
+      required: ["id"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "create_agent",
     description: "Create a new BobAgent agent with its own workspace.",
     inputSchema: {
@@ -291,6 +333,7 @@ export class Bridge {
   computer: ComputerUse | null = null;
   skills: SkillLibrary | null = null;
   broadcast: Broadcast | null = null;
+  subagents: SubagentService | null = null;
 
   constructor(
     private agents: AgentStore,
@@ -382,6 +425,7 @@ export class Bridge {
           provider: a.provider,
           status: statuses[a.id]?.status ?? "idle",
           you: a.id === me.id,
+          parent: this.subagents?.parentOf(a.id) ?? undefined,
         }));
         return { text: JSON.stringify(list, null, 2) };
       }
@@ -449,6 +493,31 @@ export class Bridge {
         this.broadcast?.("skills.changed", {});
         return { text: `${name === "create_skill" ? "created" : "revised"} skill ${s.name}` };
       }
+      case "spawn_subagents": {
+        const provider =
+          typeof args.provider === "string" && args.provider ? args.provider : me.provider;
+        if (!ProviderId.safeParse(provider).success)
+          throw new Error(`unknown provider "${provider}"`);
+        const tasks = Array.isArray(args.tasks)
+          ? (args.tasks as Json[]).map((t) => ({
+              task: typeof t?.task === "string" ? t.task : "",
+              ...(typeof t?.name === "string" ? { name: t.name } : {}),
+            }))
+          : [];
+        const r = this.subagents!.spawn(me, tasks, {
+          provider: provider as Agent["provider"],
+          keep: args.keep === true,
+          hops: this.nextHops(me.id),
+        });
+        return {
+          text: `launched ${r.agents.length} subagent(s), batch ${r.batchId}:\n${r.agents.map((a) => `- ${a.name} (${a.id})`).join("\n")}\nResults arrive as one <subagent_results> message.`,
+        };
+      }
+      case "list_subagents":
+        return { text: JSON.stringify(this.subagents!.list(me.id), null, 2) };
+      case "stop_subagent":
+        this.subagents!.stop(me.id, String(args.id ?? ""));
+        return { text: `stopped ${String(args.id ?? "")}` };
       case "create_agent": {
         const agentName = typeof args.name === "string" ? args.name.trim() : "";
         if (!agentName || agentName.length > 80) throw new Error("`name` must be 1-80 characters");

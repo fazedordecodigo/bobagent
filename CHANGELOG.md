@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Settings & tools: Skills, Marketplace, Browser, Vault, Gateways, Mobile, Team and Hosts in
+  one tabbed view.
+- Remote hosts: run agents on a Linux VPS over SSH (`bobagent-host` helper, preflight, bridge
+  over an `ssh -R` unix socket).
+- Firecracker microVM per agent session on KVM hosts, with vsock bridge and a proxy restricted
+  to public destinations; `packages/host/rootfs/build-rootfs.sh` builds the guest image.
+- Subagents: `spawn_subagents`, `list_subagents`, `stop_subagent` bridge tools; parallel
+  children with depth, fan-out and concurrency limits and automatic cleanup.
+
 ## 0.1.0
 
 First public release.

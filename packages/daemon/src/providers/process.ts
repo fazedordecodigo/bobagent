@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import type { ProviderId } from "@bobagent/protocol";
 import { resolveCommand, spawnEnv } from "../env/login-path";
-import { ProviderError } from "./types";
+import { ProviderError, type RemoteLaunch } from "./types";
 
 export const STDERR_TAIL_LINES = 50;
 
@@ -91,18 +91,32 @@ export type ProviderProcess = {
   kill(): void;
 };
 
+/** Local command or, with `remote`, the raw command (resolved on the host's PATH). */
+export function providerCommand(
+  provider: ProviderId,
+  remote?: RemoteLaunch,
+): { bin: string; args: string[] } {
+  if (!remote) return resolveProviderCommand(provider);
+  const cmd = commandFor(provider);
+  if (!cmd) throw new ProviderError("provider_unavailable", `${provider} is not supported yet`);
+  return { bin: cmd[0]!, args: cmd.slice(1) };
+}
+
 export function spawnProvider(
   bin: string,
   args: string[],
   cwd: string,
   extraEnv?: Record<string, string>,
+  remote?: RemoteLaunch,
 ): ProviderProcess {
   const stderrLines: string[] = [];
-  const child = spawn(bin, args, {
-    cwd,
-    stdio: ["pipe", "pipe", "pipe"],
-    env: spawnEnv({ NO_COLOR: "1", ...extraEnv }),
-  });
+  const child = remote
+    ? remote.spawn([bin, ...args], { NO_COLOR: "1", ...extraEnv })
+    : spawn(bin, args, {
+        cwd,
+        stdio: ["pipe", "pipe", "pipe"],
+        env: spawnEnv({ NO_COLOR: "1", ...extraEnv }),
+      });
   child.stderr?.on("data", (d: Buffer) => {
     for (const line of d.toString("utf8").split("\n")) stderrLines.push(line);
     if (stderrLines.length > STDERR_TAIL_LINES * 2) {

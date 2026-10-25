@@ -3,8 +3,8 @@ import {
   AUTH_RE,
   authMessage,
   type ProviderProcess,
+  providerCommand,
   readJsonLines,
-  resolveProviderCommand,
   spawnProvider,
   truncate,
   withTimeout,
@@ -17,6 +17,8 @@ import {
   ProviderError,
   type ProviderHooks,
   type ProviderSession,
+  type RemoteLaunch,
+  type StartOpts,
 } from "./types";
 
 // Claude Code driven directly over its stream-json stdio protocol: user turns go in
@@ -392,22 +394,17 @@ function modelOptions(models: unknown): ConfigOption | null {
 }
 
 export class ClaudeDriver implements ProviderDriver {
-  async start(opts: {
-    cwd: string;
-    resumeSessionId: string | null;
-    hooks: ProviderHooks;
-    mcpServers?: McpServerSpec[];
-  }): Promise<ProviderSession> {
+  async start(opts: StartOpts): Promise<ProviderSession> {
     const mcp = opts.mcpServers ?? [];
     if (opts.resumeSessionId) {
       try {
-        return await this.launch(opts.cwd, opts.resumeSessionId, opts.hooks, mcp);
+        return await this.launch(opts.cwd, opts.resumeSessionId, opts.hooks, mcp, opts.remote);
       } catch (e) {
         if (e instanceof ProviderError && e.code !== "internal") throw e;
         // stale/unknown session: fall back to a fresh one
       }
     }
-    return this.launch(opts.cwd, null, opts.hooks, mcp);
+    return this.launch(opts.cwd, null, opts.hooks, mcp, opts.remote);
   }
 
   private async launch(
@@ -415,6 +412,7 @@ export class ClaudeDriver implements ProviderDriver {
     resumeSessionId: string | null,
     hooks: ProviderHooks,
     mcp: McpServerSpec[],
+    remote?: RemoteLaunch,
   ): Promise<ProviderSession> {
     const mcpArgs =
       mcp.length > 0
@@ -430,7 +428,7 @@ export class ClaudeDriver implements ProviderDriver {
             }),
           ]
         : [];
-    const { bin, args } = resolveProviderCommand("claude");
+    const { bin, args } = providerCommand("claude", remote);
     const sessionId = resumeSessionId ?? crypto.randomUUID();
     const proc = spawnProvider(
       bin,
@@ -450,6 +448,8 @@ export class ClaudeDriver implements ProviderDriver {
         ...mcpArgs,
       ],
       cwd,
+      undefined,
+      remote,
     );
     const session = new ClaudeSession(proc, hooks, sessionId, resumeSessionId !== null);
     let init: Json;

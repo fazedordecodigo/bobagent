@@ -177,4 +177,35 @@ export const migrations: string[] = [
     created_at INTEGER NOT NULL
   );
   CREATE INDEX team_messages_request ON team_messages(request_id, direction)`,
+  // 14: remote hosts (SSH), per-agent placement/isolation, subagents
+  `CREATE TABLE hosts (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    target TEXT NOT NULL,
+    port INTEGER NOT NULL DEFAULT 22,
+    identity_file TEXT,
+    root TEXT,
+    preflight_json TEXT,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE agent_placement (
+    agent_id TEXT PRIMARY KEY,
+    host_id TEXT,
+    isolation TEXT NOT NULL DEFAULT 'none',
+    vcpus INTEGER NOT NULL DEFAULT 2,
+    mem_mib INTEGER NOT NULL DEFAULT 2048
+  );
+  CREATE TABLE subagents (
+    agent_id TEXT PRIMARY KEY,
+    parent_id TEXT NOT NULL,
+    batch_id TEXT NOT NULL,
+    task TEXT NOT NULL,
+    status TEXT NOT NULL,
+    result TEXT,
+    keep INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    finished_at INTEGER
+  );
+  CREATE INDEX subagents_parent ON subagents(parent_id, status);
+  CREATE INDEX subagents_batch ON subagents(batch_id)`,
 ];

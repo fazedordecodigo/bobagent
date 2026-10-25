@@ -3,8 +3,8 @@ import {
   AUTH_RE,
   authMessage,
   type ProviderProcess,
+  providerCommand,
   readJsonLines,
-  resolveProviderCommand,
   spawnProvider,
   truncate,
   withTimeout,
@@ -16,6 +16,7 @@ import {
   ProviderError,
   type ProviderHooks,
   type ProviderSession,
+  type StartOpts,
 } from "./types";
 
 // Codex App Server (`codex app-server --listen stdio://`): JSON-RPC without the
@@ -479,16 +480,11 @@ function buildConfigOptions(
 }
 
 export class CodexDriver implements ProviderDriver {
-  async start(opts: {
-    cwd: string;
-    resumeSessionId: string | null;
-    hooks: ProviderHooks;
-    mcpServers?: McpServerSpec[];
-  }): Promise<ProviderSession> {
+  async start(opts: StartOpts): Promise<ProviderSession> {
     const { cwd, resumeSessionId, hooks } = opts;
     const mcp = opts.mcpServers ?? [];
-    const { bin, args } = resolveProviderCommand("codex");
-    const proc = spawnProvider(bin, args, cwd);
+    const { bin, args } = providerCommand("codex", opts.remote);
+    const proc = spawnProvider(bin, args, cwd, undefined, opts.remote);
     const session = new CodexSession(proc, hooks, cwd);
     try {
       await session.request("initialize", {

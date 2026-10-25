@@ -265,6 +265,35 @@ UI `TeamView`. Tests: `test/team.e2e.test.ts` (spawns the relay).
 - Icon source: `apps/desktop/branding/icon.svg` -> `icon.png` (Chrome headless render) ->
   `bunx tauri icon branding/icon.png` (from `apps/desktop`).
 
+## Remote hosts, Firecracker, subagents
+
+`src/remote/hosts.ts` (`HostStore`, migration 14: `hosts`, `agent_placement`, `subagents`).
+RPC `hosts.list/create/update/delete/install/check`, `placements.list/set`, `subagents.list`;
+events `hosts.changed`, `placement.updated`, `subagent.updated`; UI `components/HostsView.tsx`
+(Settings → Hosts). SSH runs the system `ssh` with `BatchMode=yes`,
+`StrictHostKeyChecking=accept-new`, keepalives, `-p`, optional `-i`, then `--` and the target
+(validated by `SshTarget`, so it cannot be an option); remote commands are single-quoted.
+`BOBAGENT_SSH_COMMAND` (JSON array) replaces `ssh` (tests: `test/fixtures/fake-ssh.ts`,
+`$FAKE_SSH_HOME`, `$FAKE_SSH_LOG`, targets `unreachable*` fail). Install uploads
+`packages/host/src/main.ts` (embedded as text) to `~/.bobagent/bin/bobagent-host.ts` and runs
+`preflight`. When an agent's placement has a host, `AgentRuntime` passes a `RemoteLaunch` to
+the driver: the provider command is spawned as `ssh -R <sock>:127.0.0.1:<daemon port> ...
+bobagent-host run` (first stdin line = RunSpec JSON), and the `bobagent` MCP server becomes
+`bobagent-host bridge` on the host (POSTs `/bridge` through the forwarded socket). Changing a
+placement drops the provider session. Firecracker placement requires a host whose preflight
+says `firecrackerReady` (Linux + /dev/kvm + firecracker + vmlinux + rootfs.ext4); there is no
+fallback. `packages/host` (`bobagent-host run` with `isolation: "firecracker"`) boots one VM per
+session (`firecracker --no-api --config-file`, disk copied from the base rootfs, vCPU 1-32,
+memory 256-65536 MiB), connects vsock 1024 for provider stdio, serves guest vsock 5000 (bridge)
+and 3128 (CONNECT proxy, public destinations only), and kills the VM when the session ends.
+Guest image: `packages/host/rootfs/` (`bobagent-init`, `build-rootfs.sh`).
+Subagents (`src/subagents.ts`): bridge `spawn_subagents {tasks:[{task,name?}], provider?,
+keep?}` (max 8 per call, `BOBAGENT_MAX_SUBAGENTS` running per parent, default 8, depth 2)
+creates child agents that inherit the parent's placement, sends each its task, and when the
+whole batch has ended delivers one `<subagent_results>` message to the parent; non-kept
+children are then deleted (stopping their process/VM). `list_subagents`, `stop_subagent`.
+Tests: `test/remote.e2e.test.ts`, `packages/host/test/host.test.ts`.
+
 ## Permissions
 
 Provider agents ask for approval only when THEIR OWN config says so
@@ -281,9 +310,9 @@ configs, so it does not reflect stock defaults. Gemini's config path is unverifi
 - `bun run dev` — build the sidecar, then `tauri dev` (Vite on :1420).
 - `bun run build:app` — `tauri build --debug --bundles app` ->
   `apps/desktop/src-tauri/target/debug/bundle/macos/BobAgent.app`.
-- `bun run test` — `bun test packages/daemon` (daemon e2e: spawns the real daemon).
+- `bun run test` — `bun test packages/daemon packages/host` (daemon e2e: spawns the real daemon).
 - `bun run lint` — `biome check .`
-- `bun run typecheck` — `tsc -p` for protocol, daemon, relay, desktop (sequential).
+- `bun run typecheck` — `tsc -p` for protocol, daemon, relay, host, desktop (sequential).
 - `cd apps/desktop/src-tauri && cargo check` — Rust side.
 
 ## Conventions

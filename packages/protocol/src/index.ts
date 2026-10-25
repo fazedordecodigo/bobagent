@@ -401,6 +401,67 @@ export const TeamMessage = z.object({
 });
 export type TeamMessage = z.infer<typeof TeamMessage>;
 
+// ---- Remote hosts, microVM isolation, subagents ----
+
+export const Isolation = z.enum(["none", "firecracker"]);
+export type Isolation = z.infer<typeof Isolation>;
+export const HostPreflight = z
+  .object({
+    root: z.string(),
+    os: z.string(),
+    arch: z.string(),
+    kernelRelease: z.string(),
+    bun: z.string(),
+    kvm: z.boolean(),
+    firecracker: z.object({ path: z.string(), version: z.string().nullable() }).nullable(),
+    kernelImage: z.string().nullable(),
+    rootfs: z.string().nullable(),
+    providers: z.record(z.string(), z.string().nullable()),
+    firecrackerReady: z.boolean(),
+  })
+  .loose();
+export type HostPreflight = z.infer<typeof HostPreflight>;
+/** `user@host` or `host`; never starts with "-" so it cannot be read as an ssh option. */
+export const SshTarget = z
+  .string()
+  .max(255)
+  .regex(/^(?:[A-Za-z0-9._][A-Za-z0-9._-]*@)?[A-Za-z0-9][A-Za-z0-9.-]*$/, "expected user@host");
+export const RemoteHost = z.object({
+  id: z.string(),
+  name: z.string(),
+  target: SshTarget,
+  port: z.number().int(),
+  identityFile: z.string().nullable(),
+  root: z.string().nullable(),
+  preflight: HostPreflight.nullable(),
+  createdAt: z.number(),
+});
+export type RemoteHost = z.infer<typeof RemoteHost>;
+const IdentityFile = z
+  .string()
+  .max(1000)
+  .regex(/^(?:\/|~\/)[^\n\r]*$/, "absolute path to a private key file")
+  .nullable();
+export const AgentPlacement = z.object({
+  agentId: z.string(),
+  hostId: z.string().nullable(),
+  isolation: Isolation,
+  vcpus: z.number().int().min(1).max(32),
+  memMib: z.number().int().min(256).max(65536),
+});
+export type AgentPlacement = z.infer<typeof AgentPlacement>;
+export const Subagent = z.object({
+  agentId: z.string(),
+  parentId: z.string(),
+  batchId: z.string(),
+  task: z.string(),
+  status: z.enum(["running", "done", "failed", "stopped"]),
+  result: z.string().nullable(),
+  createdAt: z.number(),
+  finishedAt: z.number().nullable(),
+});
+export type Subagent = z.infer<typeof Subagent>;
+
 // ---- Mobile companion ----
 
 export const MobileDevice = z.object({
@@ -623,6 +684,53 @@ export const methodMap = {
     result: TeamMessage,
   },
   "team.messages": { params: z.object({}).strict(), result: z.array(TeamMessage) },
+  "hosts.list": { params: z.object({}).strict(), result: z.array(RemoteHost) },
+  "hosts.create": {
+    params: z
+      .object({
+        name: z.string().trim().min(1).max(80),
+        target: SshTarget,
+        port: z.number().int().min(1).max(65535).optional(),
+        identityFile: IdentityFile.optional(),
+      })
+      .strict(),
+    result: RemoteHost,
+  },
+  "hosts.update": {
+    params: z
+      .object({
+        id: z.string(),
+        name: z.string().trim().min(1).max(80).optional(),
+        target: SshTarget.optional(),
+        port: z.number().int().min(1).max(65535).optional(),
+        identityFile: IdentityFile.optional(),
+      })
+      .strict(),
+    result: RemoteHost,
+  },
+  "hosts.delete": {
+    params: z.object({ id: z.string() }).strict(),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  "hosts.install": { params: z.object({ id: z.string() }).strict(), result: RemoteHost },
+  "hosts.check": { params: z.object({ id: z.string() }).strict(), result: RemoteHost },
+  "placements.list": { params: z.object({}).strict(), result: z.array(AgentPlacement) },
+  "placements.set": {
+    params: z
+      .object({
+        agentId: z.string(),
+        hostId: z.string().nullable(),
+        isolation: Isolation,
+        vcpus: z.number().int().min(1).max(32).optional(),
+        memMib: z.number().int().min(256).max(65536).optional(),
+      })
+      .strict(),
+    result: AgentPlacement,
+  },
+  "subagents.list": {
+    params: z.object({ parentId: z.string().optional() }).strict(),
+    result: z.array(Subagent),
+  },
   "mobile.status": { params: z.object({}).strict(), result: MobileStatus },
   "mobile.enable": { params: z.object({ enabled: z.boolean() }).strict(), result: MobileStatus },
   "mobile.pair": {
@@ -820,6 +928,9 @@ export type DaemonEventMap = {
   "gateway.updated": Gateway;
   "team.updated": TeamStatus;
   "team.message": TeamMessage;
+  "hosts.changed": Record<string, never>;
+  "placement.updated": AgentPlacement;
+  "subagent.updated": Subagent;
   "gateway.deleted": { id: string };
   "vault.changed": Record<string, never>;
   "computer.changed": { agentIds: string[] };

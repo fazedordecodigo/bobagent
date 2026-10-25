@@ -11,6 +11,7 @@ import {
   ProviderError,
   type ProviderHooks,
   type ProviderSession,
+  type StartOpts,
 } from "./types";
 
 function isAuthError(e: unknown): boolean {
@@ -214,12 +215,7 @@ class AcpSession implements ProviderSession {
 export class AcpDriver implements ProviderDriver {
   constructor(private provider: ProviderId) {}
 
-  async start(opts: {
-    cwd: string;
-    resumeSessionId: string | null;
-    hooks: ProviderHooks;
-    mcpServers?: McpServerSpec[];
-  }): Promise<ProviderSession> {
+  async start(opts: StartOpts): Promise<ProviderSession> {
     const { cwd, resumeSessionId, hooks } = opts;
     const mcpServers = (opts.mcpServers ?? []).map((m) => ({
       name: m.name,
@@ -231,7 +227,7 @@ export class AcpDriver implements ProviderDriver {
     if (!cmd) {
       throw new ProviderError("provider_unavailable", `${this.provider} is not supported yet`);
     }
-    const bin = resolveCommand(cmd[0]!);
+    const bin = opts.remote ? cmd[0]! : resolveCommand(cmd[0]!);
     if (!bin) {
       throw new ProviderError(
         "provider_unavailable",
@@ -240,11 +236,13 @@ export class AcpDriver implements ProviderDriver {
     }
 
     const stderrLines: string[] = [];
-    const child = spawn(bin, cmd.slice(1), {
-      cwd,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: spawnEnv({ NO_COLOR: "1" }),
-    });
+    const child = opts.remote
+      ? opts.remote.spawn([bin, ...cmd.slice(1)], { NO_COLOR: "1" })
+      : spawn(bin, cmd.slice(1), {
+          cwd,
+          stdio: ["pipe", "pipe", "pipe"],
+          env: spawnEnv({ NO_COLOR: "1" }),
+        });
     child.stderr?.on("data", (d: Buffer) => {
       for (const line of d.toString("utf8").split("\n")) stderrLines.push(line);
       if (stderrLines.length > STDERR_TAIL_LINES * 2) {

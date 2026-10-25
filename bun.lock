@@ -42,6 +42,13 @@
         "@types/bun": "1.4.3",
       },
     },
+    "packages/host": {
+      "name": "@bobagent/host",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/bun": "1.4.3",
+      },
+    },
     "packages/protocol": {
       "name": "@bobagent/protocol",
       "version": "0.0.0",
@@ -81,6 +88,8 @@
     "@bobagent/daemon": ["@bobagent/daemon@workspace:packages/daemon"],
 
     "@bobagent/desktop": ["@bobagent/desktop@workspace:apps/desktop"],
+
+    "@bobagent/host": ["@bobagent/host@workspace:packages/host"],
 
     "@bobagent/protocol": ["@bobagent/protocol@workspace:packages/protocol"],
 
