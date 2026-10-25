@@ -1,4 +1,4 @@
-import type { Agent, AgentAvatar, Memory, Routine, Skill } from "@bobagent/protocol";
+import type { Agent, AgentAvatar, BrowserState, Memory, Routine, Skill } from "@bobagent/protocol";
 import { useCallback, useEffect, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
 import { btnCls, inputCls } from "./AgentSettings";
@@ -361,5 +361,66 @@ export function RoutinesPanel({ client, agentId }: { client: DaemonClient; agent
         {error && <p className="text-xs text-red-400">{error}</p>}
       </form>
     </section>
+  );
+}
+
+export function BrowserView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
+  const [state, setState] = useState<BrowserState | null>(null);
+  const load = useCallback(() => {
+    client
+      .request("browser.status", {})
+      .then(setState)
+      .catch(() => {});
+  }, [client]);
+  useEffect(() => {
+    load();
+    return client.on("browser.updated", load);
+  }, [client, load]);
+  if (!state) return null;
+  const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? "deleted agent";
+  return (
+    <div className="mx-auto max-w-2xl space-y-3 p-6">
+      <div className="flex items-center">
+        <h2 className="text-lg font-semibold">Agent browser</h2>
+        {state.running && (
+          <button
+            type="button"
+            className={`${btnCls} ml-auto bg-zinc-700 hover:bg-zinc-600`}
+            onClick={() => client.request("browser.close", {}).catch(() => {})}
+          >
+            Close browser
+          </button>
+        )}
+      </div>
+      <p className="text-xs text-zinc-500">
+        {state.available
+          ? "Agents drive a separate Chromium window (own profile) with the browser_* tools; each agent gets its own tab. You can watch and use that window directly."
+          : "No Chromium-based browser found. Install Google Chrome or set BOBAGENT_BROWSER_PATH."}
+      </p>
+      <ul className="space-y-2">
+        {state.tabs.map((t) => (
+          <li
+            key={t.agentId}
+            className="flex items-center gap-2 rounded border border-zinc-800 p-3 text-sm"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">{nameOf(t.agentId)}</div>
+              <div className="truncate text-xs text-zinc-400">{t.title || t.url}</div>
+              <div className="truncate text-xs text-zinc-500">{t.url}</div>
+            </div>
+            <button
+              type="button"
+              className="text-xs text-zinc-500 hover:text-red-400"
+              onClick={() =>
+                client.request("browser.closeTab", { agentId: t.agentId }).catch(() => {})
+              }
+            >
+              Close tab
+            </button>
+          </li>
+        ))}
+        {state.tabs.length === 0 && <li className="text-sm text-zinc-500">No open tabs.</li>}
+      </ul>
+    </div>
   );
 }

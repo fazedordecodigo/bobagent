@@ -347,6 +347,17 @@ export const SkillSaveParams = z
   })
   .strict();
 
+// ---- Agent browser ----
+
+export const BrowserTab = z.object({ agentId: z.string(), url: z.string(), title: z.string() });
+export type BrowserTab = z.infer<typeof BrowserTab>;
+export const BrowserState = z.object({
+  available: z.boolean(),
+  running: z.boolean(),
+  tabs: z.array(BrowserTab),
+});
+export type BrowserState = z.infer<typeof BrowserState>;
+
 // ---- Routines ----
 
 export const Routine = z.object({
@@ -479,6 +490,12 @@ export const methodMap = {
   "permissions.list": { params: PermissionsListParams, result: PermissionsListResult },
   "permissions.respond": { params: PermissionsRespondParams, result: PermissionsRespondResult },
   "agents.usage": { params: AgentsUsageParams, result: AgentUsage },
+  "browser.status": { params: z.object({}).strict(), result: BrowserState },
+  "browser.closeTab": {
+    params: z.object({ agentId: z.string() }).strict(),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  "browser.close": { params: z.object({}).strict(), result: z.object({ ok: z.literal(true) }) },
   "routines.list": {
     params: z.object({ agentId: z.string().optional() }).strict(),
     result: z.array(Routine),
@@ -572,6 +589,7 @@ export type DaemonEventMap = {
   "agent.config": { agentId: string; configOptions: ConfigOption[] };
   "agent.usage": AgentUsage;
   "routine.updated": Routine;
+  "browser.updated": { running: boolean; tabs: BrowserTab[] };
   "routine.deleted": { id: string };
   "memories.changed": { agentId: string };
   "skills.changed": Record<string, never>;

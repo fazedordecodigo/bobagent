@@ -11,6 +11,7 @@ import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Agent } from "@bobagent/protocol";
 import { ProviderId } from "@bobagent/protocol";
 import type { AgentStore } from "./agents";
+import type { BrowserService } from "./browser";
 import type { ChannelService } from "./channels";
 import { avatarFor } from "./draft";
 import type { MemoryStore } from "./memories";
@@ -170,6 +171,52 @@ export const BRIDGE_TOOLS = [
       additionalProperties: false,
     },
   },
+  ...(
+    [
+      [
+        "browser_open",
+        "Open an http(s) URL in your own tab of the BobAgent browser.",
+        { url: { type: "string" } },
+        ["url"],
+      ],
+      [
+        "browser_snapshot",
+        "Read the current page: URL, title, numbered interactive elements and text.",
+        {},
+        [],
+      ],
+      [
+        "browser_click",
+        "Click an element by its [ref] number from browser_snapshot.",
+        { ref: { type: "number" } },
+        ["ref"],
+      ],
+      [
+        "browser_type",
+        "Type text into an input by [ref] (replaces its content); submit=true presses Enter.",
+        { ref: { type: "number" }, text: { type: "string" }, submit: { type: "boolean" } },
+        ["ref", "text"],
+      ],
+      [
+        "browser_press",
+        "Press a key in the page (Enter, Tab, Escape, Backspace, ArrowDown, ArrowUp, PageDown, PageUp).",
+        { key: { type: "string" } },
+        ["key"],
+      ],
+      ["browser_back", "Go back in your tab's history.", {}, []],
+      [
+        "browser_screenshot",
+        "Save a PNG screenshot of your tab into your workspace and return its path.",
+        {},
+        [],
+      ],
+      ["browser_close", "Close your browser tab.", {}, []],
+    ] as const
+  ).map(([name, description, properties, required]) => ({
+    name,
+    description,
+    inputSchema: { type: "object", properties, required, additionalProperties: false },
+  })),
 ] as const;
 
 /** Command that runs this daemon build in `mcp-bridge` mode. */
@@ -186,6 +233,7 @@ export class Bridge {
   port = 0;
   channels: ChannelService | null = null;
   memories: MemoryStore | null = null;
+  browser: BrowserService | null = null;
   skills: SkillLibrary | null = null;
   broadcast: Broadcast | null = null;
 
@@ -366,6 +414,31 @@ export class Bridge {
         this.broadcast?.("agent.created", created);
         return { text: `created agent ${created.name} (${created.id}, ${created.provider})` };
       }
+      case "browser_open":
+        return { text: await this.browser!.open(me, String(args.url ?? "")) };
+      case "browser_snapshot":
+        return { text: await this.browser!.snapshot(me) };
+      case "browser_click":
+        return { text: await this.browser!.click(me, args.ref) };
+      case "browser_type":
+        return {
+          text: await this.browser!.type(
+            me,
+            args.ref,
+            String(args.text ?? ""),
+            args.submit === true,
+          ),
+        };
+      case "browser_press":
+        return { text: await this.browser!.press(me, String(args.key ?? "")) };
+      case "browser_back":
+        return { text: await this.browser!.back(me) };
+      case "browser_screenshot":
+        return { text: await this.browser!.screenshot(me) };
+      case "browser_close":
+        return {
+          text: (await this.browser!.closeTab(me.id)) ? "closed your tab" : "you had no open tab",
+        };
       case "list_channels": {
         const chans = (this.channels?.forAgent(me.id) ?? []).map((c) => ({
           id: c.id,

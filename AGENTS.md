@@ -172,6 +172,19 @@ Attachments: `chat.send {attachments:[{name,mime,dataBase64}]}` (max 10, 25 MB t
 written to `<workspace>/attachments/<id>/` (`src/attachments.ts`, basename-sanitized, ZIPs
 extracted with `unzip`) and listed in an `<attachments>` block. Tests: `test/phase9.e2e.test.ts`.
 
+## Agent browser (Phase 10)
+
+`src/browser.ts`: one Chromium-family browser (Chrome/Chromium/Edge/Brave, or
+`BOBAGENT_BROWSER_PATH`) launched lazily with `--remote-debugging-port=0` and its own profile
+(`<data-dir>/browser-profile`, port read from `DevToolsActivePort`), driven over CDP (flattened
+`Target.attachToTarget` sessions). Each agent gets one tab. Bridge tools: `browser_open`
+(http/https only), `browser_snapshot` (numbered interactive elements via `data-bob-ref` + page
+text), `browser_click`, `browser_type`, `browser_press`, `browser_back`, `browser_screenshot`
+(PNG into `<workspace>/browser/`), `browser_close`. RPC `browser.status/closeTab/close`, event
+`browser.updated`; UI `BrowserView`. `BOBAGENT_BROWSER=off` disables it,
+`BOBAGENT_BROWSER_HEADLESS=1` for tests. Tests: `test/browser.e2e.test.ts` (skipped when no
+browser is installed).
+
 ## Permissions
 
 Provider agents ask for approval only when THEIR OWN config says so

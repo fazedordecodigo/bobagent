@@ -1,6 +1,7 @@
 import { type MethodName, methodMap } from "@bobagent/protocol";
 import type { AgentStore } from "./agents";
 import { attachmentsBlock, saveAttachments } from "./attachments";
+import { type BrowserService, findBrowser } from "./browser";
 import type { ChannelService } from "./channels";
 import type { ChatStore, QueueStore } from "./chat-store";
 import { draftAgent } from "./draft";
@@ -24,6 +25,7 @@ export class Rpc {
     private memories: MemoryStore,
     private skills: SkillLibrary,
     private routines: RoutineService,
+    private browser: BrowserService,
   ) {}
 
   /** Returns the response payload string for one raw incoming message. */
@@ -162,6 +164,20 @@ export class Rpc {
         return this.runtimes.usage((params as { agentId: string }).agentId);
       case "agents.compact":
         await this.runtimes.compact((params as { agentId: string }).agentId);
+        return { ok: true };
+      case "browser.status":
+        return {
+          available: findBrowser() !== null && process.env.BOBAGENT_BROWSER !== "off",
+          running: this.browser.running(),
+          tabs: this.browser.list(),
+        };
+      case "browser.closeTab":
+        if (!(await this.browser.closeTab((params as { agentId: string }).agentId))) {
+          throw new RpcError("not_found", "that agent has no browser tab");
+        }
+        return { ok: true };
+      case "browser.close":
+        await this.browser.close();
         return { ok: true };
       case "routines.list":
         return this.routines.list((params as { agentId?: string }).agentId);

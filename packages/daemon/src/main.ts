@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { AgentStore } from "./agents";
 import { Bridge } from "./bridge";
+import { BrowserService } from "./browser";
 import { ChannelService } from "./channels";
 import { ChatStore, QueueStore } from "./chat-store";
 import { openDatabase } from "./db";
@@ -152,6 +153,8 @@ async function main() {
   bridge.skills = skills;
   bridge.broadcast = broadcast;
   const routines = new RoutineService(db, store, () => runtimes, broadcast);
+  const browser = new BrowserService(join(dataDir, "browser-profile"), broadcast);
+  bridge.browser = browser;
   const rpc = new Rpc(
     store,
     chat,
@@ -162,6 +165,7 @@ async function main() {
     memories,
     skills,
     routines,
+    browser,
   );
 
   // warm the login-shell PATH cache so provider CLIs resolve like in a terminal
