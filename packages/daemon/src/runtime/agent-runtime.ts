@@ -736,8 +736,11 @@ export class AgentRuntime {
       this.finishTurn(turn, "cancelled", "cancelled", null);
     }
     const starting = this.sessionStarting;
-    this.dropSession();
+    const session = this.session;
+    this.session = null;
+    this.sessionStarting = null;
     this.sessionTag = null;
+    if (session) await session.close().catch(() => {});
     if (starting) {
       try {
         const s = await starting;

@@ -516,7 +516,7 @@ export class Bridge {
       case "list_subagents":
         return { text: JSON.stringify(this.subagents!.list(me.id), null, 2) };
       case "stop_subagent":
-        this.subagents!.stop(me.id, String(args.id ?? ""));
+        await this.subagents!.stop(me.id, String(args.id ?? ""));
         return { text: `stopped ${String(args.id ?? "")}` };
       case "create_agent": {
         const agentName = typeof args.name === "string" ? args.name.trim() : "";

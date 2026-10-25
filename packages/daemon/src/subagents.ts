@@ -130,7 +130,7 @@ export class SubagentService {
     return { batchId, agents: out };
   }
 
-  onTurnEnded(turn: Turn, queueRow: QueueRow | null) {
+  async onTurnEnded(turn: Turn, queueRow: QueueRow | null): Promise<void> {
     const r = this.row(turn.agentId);
     if (!r || r.status !== "running" || !queueRow || queueRow.from_agent_id !== r.parent_id) return;
     if (turn.status === "completed") {
@@ -140,21 +140,21 @@ export class SubagentService {
         .map((i) => ("text" in i ? i.text : ""))
         .join("\n\n")
         .trim();
-      this.finish(r, "done", text || "(no reply)");
+      await this.finish(r, "done", text || "(no reply)");
     } else {
-      this.finish(r, "failed", `${turn.status}: ${turn.error ?? "no result"}`);
+      await this.finish(r, "failed", `${turn.status}: ${turn.error ?? "no result"}`);
     }
   }
 
-  stop(parentId: string, agentId: string): void {
+  async stop(parentId: string, agentId: string): Promise<void> {
     const r = this.row(agentId);
     if (!r || r.parent_id !== parentId) throw new Error(`no subagent "${agentId}" of yours`);
     if (r.status !== "running") return;
     this.runtimes().cancel(agentId);
-    this.finish(r, "stopped", "stopped by parent");
+    await this.finish(r, "stopped", "stopped by parent");
   }
 
-  private finish(r: Row, status: Subagent["status"], result: string) {
+  private async finish(r: Row, status: Subagent["status"], result: string): Promise<void> {
     this.db
       .query("UPDATE subagents SET status = ?, result = ?, finished_at = ? WHERE agent_id = ?")
       .run(status, result.slice(0, 100_000), Date.now(), r.agent_id);
@@ -163,11 +163,22 @@ export class SubagentService {
       .query("SELECT * FROM subagents WHERE batch_id = ? ORDER BY created_at")
       .all(r.batch_id) as Row[];
     if (batch.some((b) => b.status === "running")) return;
+    const names = new Map(
+      batch.map((b) => [b.agent_id, this.agents.get(b.agent_id)?.name ?? b.agent_id]),
+    );
+    for (const b of batch) {
+      if (b.keep) continue;
+      if (this.agents.softDelete(b.agent_id)) {
+        this.queue.removeAllForAgent(b.agent_id);
+        await this.runtimes().agentDeleted(b.agent_id);
+        this.broadcast("agent.deleted", { id: b.agent_id });
+      }
+    }
     const parent = this.agents.get(r.parent_id);
     if (parent) {
       const body = batch
         .map((b) => {
-          const name = this.agents.get(b.agent_id)?.name ?? b.agent_id;
+          const name = names.get(b.agent_id) ?? b.agent_id;
           return `## ${name} [${b.status}]\nTask: ${b.task.slice(0, 500)}\n\n${b.result ?? ""}`;
         })
         .join("\n\n");
@@ -176,14 +187,6 @@ export class SubagentService {
         `<subagent_results batch="${r.batch_id}">\n${body}\n</subagent_results>`,
         { agentId: r.agent_id, hops: 0 },
       );
-    }
-    for (const b of batch) {
-      if (b.keep) continue;
-      if (this.agents.softDelete(b.agent_id)) {
-        this.queue.removeAllForAgent(b.agent_id);
-        void this.runtimes().agentDeleted(b.agent_id);
-        this.broadcast("agent.deleted", { id: b.agent_id });
-      }
     }
   }
 }

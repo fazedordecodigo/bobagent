@@ -209,6 +209,9 @@ class AcpSession implements ProviderSession {
     try {
       this.child.kill("SIGKILL");
     } catch {}
+    if (this.child.exitCode === null && this.child.signalCode === null) {
+      await new Promise<void>((resolve) => this.child.once("close", () => resolve()));
+    }
   }
 }
 

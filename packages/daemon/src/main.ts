@@ -137,15 +137,13 @@ async function main() {
     if (event === "turn.ended") {
       const turn = data as import("@bobagent/protocol").Turn;
       queueMicrotask(() => {
-        try {
+        void (async () => {
           const row = turn.queueId ? queue.row(turn.queueId) : null;
           channels.onTurnEnded(turn, row);
           gateways.onTurnEnded(turn, row);
           team.onTurnEnded(turn, row);
-          subagents.onTurnEnded(turn, row);
-        } catch (e) {
-          log("channel turn hook failed", e);
-        }
+          await subagents.onTurnEnded(turn, row);
+        })().catch((e) => log("turn-ended hook failed", e));
       });
     }
   }
