@@ -16,7 +16,7 @@ export function ChannelView({
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
-  const name = (id: string | null) => agents.find((a) => a.id === id)?.name ?? "deleted agent";
+  const name = (id: string | null) => agents.find((a) => a.id === id)?.name ?? "deleted bot";
 
   useEffect(() => {
     let alive = true;

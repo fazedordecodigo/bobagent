@@ -136,7 +136,7 @@ export function Composer({
         )}
         <textarea
           className="max-h-40 min-h-10 flex-1 resize-y rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-zinc-500 focus:outline-none"
-          placeholder="Message the agent…"
+          placeholder="Message the bot…"
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {

@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
@@ -17,6 +18,7 @@ import { Marketplace } from "./marketplace";
 import { runMcpBridge } from "./mcp-bridge";
 import { MemoryStore } from "./memories";
 import { MobileServer } from "./mobile";
+import { seedDefaultBot, upbotContext } from "./persona";
 import { VmCredentials } from "./remote/credentials";
 import { HostStore } from "./remote/hosts";
 import { RoutineService } from "./routines";
@@ -125,6 +127,9 @@ async function main() {
   chat.interruptRunningTurns();
   migrateLegacyHome(db, agentsRoot, log);
   const store = new AgentStore(db, agentsRoot);
+  seedDefaultBot(db, store);
+  const workspaceRoot = process.env.UPBOT_WORKSPACE_ROOT || join(dirname(agentsRoot), "Workspace");
+  mkdirSync(workspaceRoot, { recursive: true });
   const queue = new QueueStore(db);
   const hosts = new HostStore(db);
   const sockets = new Set<import("bun").ServerWebSocket<unknown>>();
@@ -161,8 +166,9 @@ async function main() {
     queue,
     broadcast,
     (id) => bridge.serversFor(id),
-    (id) => memories.promptBlock(id) + skills.promptBlock(),
+    (id) => upbotContext(workspaceRoot) + memories.promptBlock(id) + skills.promptBlock(),
     (id) => hosts.launchFor(id, bridge.port),
+    () => [workspaceRoot],
   );
   const subagents = new SubagentService(db, store, chat, queue, () => runtimes, hosts, broadcast);
   bridge.subagents = subagents;

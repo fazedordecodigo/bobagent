@@ -226,10 +226,10 @@ export function HostsView({ client, agents }: { client: DaemonClient; agents: Ag
       <div>
         <h2 className="text-lg font-semibold">Remote hosts</h2>
         <p className="text-xs text-zinc-500">
-          Run agents on a Linux VPS over SSH instead of this Mac. UpBot uses your system{" "}
+          Run bots on a Linux VPS over SSH instead of this Mac. UpBot uses your system{" "}
           <code>ssh</code> (keys from <code>~/.ssh</code> or the agent; nothing is stored here) and
           uploads a small helper to <code>~/.upbot</code> on the host. With KVM and the guest image
-          installed, each agent and subagent runs in its own Firecracker microVM.
+          installed, each bot and subagent runs in its own Firecracker microVM.
         </p>
       </div>
       {error && <p className="rounded bg-red-950/60 px-3 py-2 text-xs text-red-300">{error}</p>}
@@ -327,7 +327,7 @@ export function HostsView({ client, agents }: { client: DaemonClient; agents: Ag
       </section>
 
       <section className="space-y-2">
-        <h3 className="text-sm font-semibold text-zinc-300">Where agents run</h3>
+        <h3 className="text-sm font-semibold text-zinc-300">Where bots run</h3>
         {topLevel.map((a) => {
           const p = placements.find((x) => x.agentId === a.id);
           const host = hosts.find((h) => h.id === p?.hostId);

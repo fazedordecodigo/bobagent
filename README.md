@@ -1,15 +1,19 @@
 # UpBot
 
-Local-first macOS desktop workspace for running many persistent AI coding agents side by side
-(Claude Code, Codex, Devin, Cursor, Grok, OpenCode, Gemini and other ACP agents).
+Local-first macOS desktop hub for a team of AI bots that work together on everyday tasks:
+research and browse the web, read and organize files, draft emails and documents, and use your
+connected apps. Each bot has its own name, role, memory and chat; they message each other,
+delegate, hand off files through a shared `~/UpBot/Workspace`, and ask before anything
+consequential. Claude Code, Codex and other ACP agents (Devin, Cursor, Grok, OpenCode, Gemini)
+are the bots' brains.
 
-- Chat with each agent in its own workspace; queues, permissions, resume and context compaction
-- Agents message each other, share files and work together in channels with an owner
-- Memories, a shared skills library and a marketplace of skills and agent templates
-- Scheduled and webhook routines, attachments, an agent-controlled browser, Computer Use
+- Chat with each bot in its own workspace (a general-purpose "UpBot" bot is created on first launch); queues, permissions, resume and context compaction
+- Bots message each other, share files and work together in group chats with an owner
+- Memories, a shared skills library and a marketplace of skills and bot templates
+- Scheduled and webhook routines, attachments, a bot-controlled browser, Computer Use
 - Encrypted vault with GitHub, 1Password and Bitwarden connectors; voice
-- Reach your agents from Telegram, Slack, Discord, your phone (LAN), or share them with a team relay
-- Run agents on your own Linux VPS over SSH, each in its own Firecracker microVM, and let them
+- Reach your bots from Telegram, Slack, Discord, your phone (LAN), or share them with a team relay
+- Run bots on your own Linux VPS over SSH, each in its own Firecracker microVM, and let them
   fan out to parallel subagents
 
 Built with Bun (daemon, relay), SQLite, Tauri 2 (Rust) and React.

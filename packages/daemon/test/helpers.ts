@@ -144,7 +144,7 @@ export async function startDaemon(
   env: Record<string, string> = {},
 ): Promise<DaemonHandle> {
   const proc = Bun.spawn(["bun", DAEMON, "--data-dir", dataDir, "--agents-root", agentsRoot], {
-    env: { ...process.env, ...env },
+    env: { ...process.env, UPBOT_DEFAULT_BOT: "off", ...env },
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",

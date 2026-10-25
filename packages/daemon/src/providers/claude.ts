@@ -425,13 +425,20 @@ export class ClaudeDriver implements ProviderDriver {
     const mcp = opts.mcpServers ?? [];
     if (opts.resumeSessionId) {
       try {
-        return await this.launch(opts.cwd, opts.resumeSessionId, opts.hooks, mcp, opts.remote);
+        return await this.launch(
+          opts.cwd,
+          opts.resumeSessionId,
+          opts.hooks,
+          mcp,
+          opts.remote,
+          opts.extraDirs,
+        );
       } catch (e) {
         if (e instanceof ProviderError && e.code !== "internal") throw e;
         // stale/unknown session: fall back to a fresh one
       }
     }
-    return this.launch(opts.cwd, null, opts.hooks, mcp, opts.remote);
+    return this.launch(opts.cwd, null, opts.hooks, mcp, opts.remote, opts.extraDirs);
   }
 
   private async launch(
@@ -440,6 +447,7 @@ export class ClaudeDriver implements ProviderDriver {
     hooks: ProviderHooks,
     mcp: McpServerSpec[],
     remote?: RemoteLaunch,
+    extraDirs: string[] = [],
   ): Promise<ProviderSession> {
     const mcpArgs =
       mcp.length > 0
@@ -474,6 +482,7 @@ export class ClaudeDriver implements ProviderDriver {
         "--permission-mode",
         "default",
         ...(resumeSessionId ? ["--resume", resumeSessionId] : ["--session-id", sessionId]),
+        ...extraDirs.flatMap((dir) => ["--add-dir", dir]),
         ...mcpArgs,
       ],
       cwd,

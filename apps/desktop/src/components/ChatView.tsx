@@ -70,7 +70,7 @@ export function ChatView({
           type="button"
           onClick={onOpenSettings}
           className="rounded p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
-          title="Agent settings"
+          title="Bot settings"
         >
           <svg
             role="img"

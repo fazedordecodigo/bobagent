@@ -21,6 +21,7 @@ export class RuntimeManager {
     private mcpServers: (agentId: string) => McpServerSpec[] = () => [],
     private sessionContext: (agentId: string) => string = () => "",
     private remoteFor: (agentId: string) => RemoteLaunch | null = () => null,
+    private sharedDirs: () => string[] = () => [],
   ) {}
 
   private runtimeFor(agentId: string): AgentRuntime {
@@ -37,6 +38,7 @@ export class RuntimeManager {
         this.mcpServers,
         this.sessionContext,
         this.remoteFor,
+        this.sharedDirs,
       );
       this.runtimes.set(agentId, rt);
     }

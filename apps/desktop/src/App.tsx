@@ -189,7 +189,7 @@ export default function App() {
               setCreating(true);
             }}
           >
-            New agent
+            New bot
           </button>
         </div>
         <ul className="flex-1 overflow-y-auto">
@@ -220,12 +220,10 @@ export default function App() {
               </li>
             );
           })}
-          {agents.length === 0 && (
-            <li className="px-4 py-6 text-sm text-zinc-500">No agents yet.</li>
-          )}
+          {agents.length === 0 && <li className="px-4 py-6 text-sm text-zinc-500">No bots yet.</li>}
           <li className="mt-2 flex items-center justify-between border-t border-zinc-800 px-4 pt-3 pb-1">
             <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">
-              Channels
+              Group chats
             </span>
             <button
               type="button"
@@ -313,7 +311,7 @@ export default function App() {
             onOpenSettings={() => setSettingsOpen(true)}
           />
         ) : (
-          <p className="p-6 text-sm text-zinc-500">Select an agent or create a new one.</p>
+          <p className="p-6 text-sm text-zinc-500">Select a bot or create a new one.</p>
         )}
       </main>
     </div>
@@ -366,11 +364,11 @@ function CreateForm({
         }
       }}
     >
-      <h2 className="text-lg font-semibold">New agent</h2>
+      <h2 className="text-lg font-semibold">New bot</h2>
       <div className="flex gap-2">
         <input
           className={inputCls}
-          placeholder="Describe the agent you want…"
+          placeholder="Describe the bot you want, e.g. researches competitors and drafts a weekly email…"
           value={describe}
           onChange={(e) => setDescribe(e.target.value)}
         />

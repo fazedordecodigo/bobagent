@@ -102,7 +102,7 @@ export function AgentSettings({
       }}
     >
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Agent settings</h2>
+        <h2 className="text-lg font-semibold">Bot settings</h2>
         <button
           type="button"
           onClick={() => setConfirming(true)}
@@ -179,7 +179,7 @@ export function AgentSettings({
       </div>
       {confirming && (
         <ConfirmDialog
-          title="Delete agent"
+          title="Delete bot"
           body={`Delete "${agent.name}"? Its workspace folder and chat history are kept.`}
           confirmLabel="Delete"
           onCancel={() => setConfirming(false)}

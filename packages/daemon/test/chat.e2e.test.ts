@@ -126,7 +126,9 @@ describe("chat e2e (fake acp agent)", () => {
     const prompts = log
       .filter((l) => l.method === "session/prompt")
       .map((l) => (l.params as { prompt: { text: string }[] }).prompt[0]?.text ?? "");
-    expect(prompts[prompts.length - 1]).toMatch(/^<agent_instructions>\n/);
+    expect(prompts[prompts.length - 1]).toMatch(/^<upbot_context>\n/);
+    expect(prompts[prompts.length - 1]).toMatch(/Shared workspace for all bots: .*Workspace/);
+    expect(prompts[prompts.length - 1]).toContain("<agent_instructions>\n");
     expect(prompts[prompts.length - 1]).toContain("Always answer in lowercase.");
 
     const h = await history(agent.id);

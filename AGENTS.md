@@ -1,9 +1,22 @@
 # UpBot
 
-Local-first macOS desktop workspace for multiple persistent AI coding agents.
+Local-first macOS desktop hub for a team of collaborating general-purpose AI bots
+(web, files, email, connected apps). Code and RPC names still say "agent"; the UI says "bot".
+Renamed from BobAgent: `src/legacy.ts` moves `~/BobAgent` -> `~/UpBot` and repoints
+workspace paths; Rust moves the `com.bobagent.desktop` data dir; the vault key falls back to
+the old Keychain service `BobAgent`.
 Bun workspaces monorepo: a Bun sidecar daemon (`upbotd`) owns SQLite state and
 serves a token-authenticated WebSocket API; a Tauri 2 + React desktop app spawns and
 talks to it.
+
+## Bots (general purpose)
+
+`src/persona.ts`: every fresh session starts with `<upbot_context>` (shared workspace path,
+collaboration tools, approval and secret rules). `seedDefaultBot` creates one "UpBot" bot
+(claude) on a fresh install (`settings.default_bot_seeded`; `UPBOT_DEFAULT_BOT=off` skips it,
+set by the test helper). Shared workspace: `UPBOT_WORKSPACE_ROOT` or
+`dirname(agentsRoot)/Workspace` (`~/UpBot/Workspace`), passed to local sessions as
+`StartOpts.extraDirs` (Claude `--add-dir`, Codex `writableRoots`).
 
 ## Layout
 

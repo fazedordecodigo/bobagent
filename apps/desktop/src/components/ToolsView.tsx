@@ -23,13 +23,13 @@ export type ToolTab =
 
 const TABS: { id: ToolTab; label: string; hint: string }[] = [
   { id: "skills", label: "Skills", hint: "Shared skills library" },
-  { id: "marketplace", label: "Marketplace", hint: "Install skills and agent templates" },
-  { id: "browser", label: "Browser", hint: "Agent-controlled Chrome tabs" },
+  { id: "marketplace", label: "Marketplace", hint: "Install skills and bot templates" },
+  { id: "browser", label: "Browser", hint: "Bot-controlled Chrome tabs" },
   { id: "vault", label: "Vault", hint: "Encrypted secrets and connectors" },
   { id: "gateways", label: "Gateways", hint: "Telegram, Slack and Discord" },
   { id: "mobile", label: "Mobile", hint: "Pair your phone on this network" },
-  { id: "team", label: "Team", hint: "Share agents through a relay" },
-  { id: "hosts", label: "Hosts", hint: "Run agents on a VPS, in Firecracker microVMs" },
+  { id: "team", label: "Team", hint: "Share bots through a relay" },
+  { id: "hosts", label: "Hosts", hint: "Run bots on a VPS, in Firecracker microVMs" },
 ];
 
 export function ToolsView({

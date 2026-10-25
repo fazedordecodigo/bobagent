@@ -93,7 +93,7 @@ export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agent
   return (
     <section className="mx-auto max-w-lg space-y-2 px-6 pb-6">
       <h3 className="text-sm font-semibold text-zinc-300">Memories</h3>
-      <p className="text-xs text-zinc-500">Shown to the agent at the start of every new session.</p>
+      <p className="text-xs text-zinc-500">Shown to the bot at the start of every new session.</p>
       <ul className="space-y-1">
         {items.map((m) => (
           <li key={m.id} className="flex items-start gap-2 rounded bg-zinc-900 px-2 py-1 text-sm">
@@ -213,7 +213,7 @@ export function SkillsView({ client }: { client: DaemonClient }) {
         </button>
       </div>
       <p className="text-xs text-zinc-500">
-        Shared by all agents. Agents can also create and revise skills themselves.
+        Shared by all bots. Bots can also create and revise skills themselves.
       </p>
       <ul className="space-y-2">
         {skills.map((s) => (
@@ -392,11 +392,11 @@ export function BrowserView({ client, agents }: { client: DaemonClient; agents: 
     return client.on("browser.updated", load);
   }, [client, load]);
   if (!state) return null;
-  const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? "deleted agent";
+  const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? "deleted bot";
   return (
     <div className="mx-auto max-w-2xl space-y-3 p-6">
       <div className="flex items-center">
-        <h2 className="text-lg font-semibold">Agent browser</h2>
+        <h2 className="text-lg font-semibold">Bot browser</h2>
         {state.running && (
           <button
             type="button"
@@ -409,7 +409,7 @@ export function BrowserView({ client, agents }: { client: DaemonClient; agents: 
       </div>
       <p className="text-xs text-zinc-500">
         {state.available
-          ? "Agents drive a separate Chromium window (own profile) with the browser_* tools; each agent gets its own tab. You can watch and use that window directly."
+          ? "Bots drive a separate Chromium window (own profile) with the browser_* tools; each bot gets its own tab. You can watch and use that window directly."
           : "No Chromium-based browser found. Install Google Chrome or set UPBOT_BROWSER_PATH."}
       </p>
       <ul className="space-y-2">
@@ -470,7 +470,7 @@ export function VaultView({ client, agents }: { client: DaemonClient; agents: Ag
     <div className="mx-auto max-w-2xl space-y-4 p-6">
       <h2 className="text-lg font-semibold">Vault</h2>
       <p className="text-xs text-zinc-500">
-        Secrets are encrypted with a key kept in the macOS Keychain. Agents only see the secrets you
+        Secrets are encrypted with a key kept in the macOS Keychain. Bots only see the secrets you
         share with them (vault_get); connectors use their secret without revealing it.
       </p>
       <ul className="space-y-2">
@@ -605,7 +605,7 @@ export function ComputerUsePanel({ client, agentId }: { client: DaemonClient; ag
               .catch(() => {})
           }
         />
-        Let this agent see the screen and control the mouse and keyboard
+        Let this bot see the screen and control the mouse and keyboard
       </label>
       <p className="text-xs text-zinc-500">
         macOS asks for Screen Recording and Accessibility permission the first time.
@@ -675,8 +675,8 @@ export function GatewaysView({ client, agents }: { client: DaemonClient; agents:
     <div className="mx-auto max-w-2xl space-y-4 p-6">
       <h2 className="text-lg font-semibold">Gateways</h2>
       <p className="text-xs text-zinc-500">
-        Talk to your agents from Telegram, Slack or Discord. Only allowlisted user ids get through;
-        start a message with @AgentName to reach another agent. Tokens are kept in the vault.
+        Talk to your bots from Telegram, Slack or Discord. Only allowlisted user ids get through;
+        start a message with @BotName to reach another bot. Tokens are kept in the vault.
       </p>
       <ul className="space-y-2">
         {items.map((g) => (
@@ -962,7 +962,7 @@ export function MobileView({ client }: { client: DaemonClient }) {
     <div className="mx-auto max-w-lg space-y-4 p-6">
       <h2 className="text-lg font-semibold">Mobile</h2>
       <p className="text-xs text-zinc-500">
-        Chat with your agents and answer permission requests from your phone on the same Wi-Fi. Open
+        Chat with your bots and answer permission requests from your phone on the same Wi-Fi. Open
         the address in Safari and use "Add to Home Screen". Traffic is plain HTTP on your local
         network; only paired devices get in.
       </p>
@@ -1074,7 +1074,7 @@ export function TeamView({ client, agents }: { client: DaemonClient; agents: Age
       >
         <h2 className="text-lg font-semibold">Team</h2>
         <p className="text-xs text-zinc-500">
-          Join a UpBot team relay to share agents with teammates and message theirs. Host one with{" "}
+          Join a UpBot team relay to share bots with teammates and message theirs. Host one with{" "}
           <code>bun run relay -- --data ./relay-data</code> and invite members with its admin token.
         </p>
         <input
@@ -1123,7 +1123,7 @@ export function TeamView({ client, agents }: { client: DaemonClient; agents: Age
         </button>
       </div>
       <section className="space-y-1">
-        <h3 className="text-sm font-semibold text-zinc-300">Agents you share</h3>
+        <h3 className="text-sm font-semibold text-zinc-300">Bots you share</h3>
         <div className="flex flex-wrap gap-3">
           {agents.map((a) => (
             <label key={a.id} className="flex items-center gap-1 text-xs text-zinc-400">
@@ -1153,9 +1153,7 @@ export function TeamView({ client, agents }: { client: DaemonClient; agents: Age
             <li key={m.id}>
               <span className={m.online ? "text-zinc-200" : "text-zinc-600"}>{m.name}</span>
               <span className="ml-2 text-xs text-zinc-500">
-                {m.online
-                  ? m.agents.map((a) => a.name).join(", ") || "no shared agents"
-                  : "offline"}
+                {m.online ? m.agents.map((a) => a.name).join(", ") || "no shared bots" : "offline"}
               </span>
             </li>
           ))}
@@ -1202,7 +1200,7 @@ export function TeamView({ client, agents }: { client: DaemonClient; agents: Age
         </select>
         <input
           className={inputCls}
-          placeholder="Message a teammate's agent"
+          placeholder="Message a teammate's bot"
           value={text}
           onChange={(e) => setText(e.target.value)}
         />

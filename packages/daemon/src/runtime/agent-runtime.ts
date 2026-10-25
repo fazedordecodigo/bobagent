@@ -107,6 +107,7 @@ export class AgentRuntime {
     private mcpServers: (agentId: string) => McpServerSpec[] = () => [],
     private sessionContext: (agentId: string) => string = () => "",
     private remoteFor: (agentId: string) => RemoteLaunch | null = () => null,
+    private sharedDirs: () => string[] = () => [],
   ) {}
 
   /** Agent-to-agent hop count of the running turn (0 when idle or user-initiated). */
@@ -241,7 +242,7 @@ export class AgentRuntime {
         resumeSessionId,
         hooks: this.hooks(tag),
         mcpServers: remote ? servers.map((s) => remote.mcp(s)) : servers,
-        ...(remote ? { remote } : {}),
+        ...(remote ? { remote } : { extraDirs: this.sharedDirs() }),
       });
       this.sessionTag = tag;
       this.store.upsertAgentSession(this.agent.id, this.agent.provider, session.sessionId);

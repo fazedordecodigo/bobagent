@@ -75,6 +75,8 @@ export type StartOpts = {
   hooks: ProviderHooks;
   mcpServers?: McpServerSpec[];
   remote?: RemoteLaunch;
+  /** Extra writable directories (local sessions only), e.g. the shared bot workspace. */
+  extraDirs?: string[];
 };
 
 export interface ProviderDriver {

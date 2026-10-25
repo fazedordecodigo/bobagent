@@ -39,12 +39,12 @@ const MODE_POLICY: Record<string, { approvalPolicy: string; sandbox: string }> =
   "read-only": { approvalPolicy: "on-request", sandbox: "read-only" },
 };
 
-function sandboxPolicy(mode: string, cwd: string): Json {
+function sandboxPolicy(mode: string, roots: string[]): Json {
   return mode === "read-only"
     ? { type: "readOnly", networkAccess: false }
     : {
         type: "workspaceWrite",
-        writableRoots: [cwd],
+        writableRoots: roots,
         networkAccess: false,
         excludeTmpdirEnvVar: false,
         excludeSlashTmp: false,
@@ -147,7 +147,7 @@ class CodexSession implements ProviderSession {
   constructor(
     private proc: ProviderProcess,
     private hooks: ProviderHooks,
-    private cwd: string,
+    private roots: string[],
     private vmCredential: string | null,
   ) {
     readJsonLines(proc.child.stdout!, (m) => this.onMessage(m));
@@ -411,7 +411,7 @@ class CodexSession implements ProviderSession {
         threadId: this.sessionId,
         input: [{ type: "text", text, text_elements: [] }],
         approvalPolicy: (MODE_POLICY[mode] ?? MODE_POLICY.auto!).approvalPolicy,
-        sandboxPolicy: sandboxPolicy(mode, this.cwd),
+        sandboxPolicy: sandboxPolicy(mode, this.roots),
         ...(model ? { model } : {}),
         ...(effort ? { effort } : {}),
       });
@@ -510,7 +510,7 @@ export class CodexDriver implements ProviderDriver {
       vmKey ? { CODEX_HOME: "/run/upbot/codex-home" } : undefined,
       opts.remote,
     );
-    const session = new CodexSession(proc, hooks, cwd, vmKey);
+    const session = new CodexSession(proc, hooks, [cwd, ...(opts.extraDirs ?? [])], vmKey);
     try {
       await session.request("initialize", {
         clientInfo: { name: "upbot", title: "UpBot", version: "0.2.1" },
