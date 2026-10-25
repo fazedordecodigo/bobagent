@@ -11,10 +11,10 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Agent, ChatItem, PendingPermission, Turn } from "@openagent/protocol";
+import type { Agent, ChatItem, PendingPermission, Turn } from "@bobagent/protocol";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const BINARY = join(ROOT, "apps/desktop/src-tauri/binaries/openagentd-aarch64-apple-darwin");
+const BINARY = join(ROOT, "apps/desktop/src-tauri/binaries/bobagentd-aarch64-apple-darwin");
 const TOKEN = `smoke-${crypto.randomUUID()}`;
 const TURN_TIMEOUT_MS = 180_000;
 const PROVIDERS = ["devin", "cursor", "grok", "opencode"] as const;
@@ -109,7 +109,7 @@ async function startDaemon(
       HOME: process.env.HOME ?? "",
       SHELL: process.env.SHELL ?? "/bin/zsh",
       TMPDIR: process.env.TMPDIR ?? "/tmp",
-      OPENAGENT_DEBUG_PROMPTS_DIR: DBG_DIR,
+      BOBAGENT_DEBUG_PROMPTS_DIR: DBG_DIR,
     },
     stdin: "pipe",
     stdout: "pipe",
@@ -131,7 +131,7 @@ async function startDaemon(
         if (i >= 0) {
           const line = buf.slice(0, i);
           buf = buf.slice(i + 1);
-          if (line.startsWith("OPENAGENT_READY ")) {
+          if (line.startsWith("BOBAGENT_READY ")) {
             clearTimeout(t);
             resolve(JSON.parse(line.slice(16)).port);
             return;
@@ -224,7 +224,7 @@ async function main() {
       daemon = await startDaemon(dataDir, agentsRoot);
       c = await Ws.connect(daemon.port);
 
-      const db = new Database(join(dataDir, "openagent.db"), { readonly: true });
+      const db = new Database(join(dataDir, "bobagent.db"), { readonly: true });
       const sessBefore = db
         .query("SELECT session_id FROM agent_sessions WHERE agent_id = ?")
         .get(agent.id) as { session_id: string } | null;
@@ -251,7 +251,7 @@ async function main() {
       const msgs = h2.items.filter((i) => i.kind === "agent_message") as { text: string }[];
       rec.reply2 = msgs[msgs.length - 1]?.text ?? null;
 
-      const db2 = new Database(join(dataDir, "openagent.db"), { readonly: true });
+      const db2 = new Database(join(dataDir, "bobagent.db"), { readonly: true });
       const sessAfter = db2
         .query("SELECT session_id, updated_at FROM agent_sessions WHERE agent_id = ?")
         .get(agent.id) as { session_id: string; updated_at: number } | null;

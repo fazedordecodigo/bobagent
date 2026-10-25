@@ -1,4 +1,4 @@
-import type { Agent, AgentStatusInfo, PendingPermission, ProviderId } from "@openagent/protocol";
+import type { Agent, AgentStatusInfo, PendingPermission, ProviderId } from "@bobagent/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AgentSettings, btnCls, inputCls, PROVIDERS } from "./components/AgentSettings";
 import { ChatView } from "./components/ChatView";
@@ -15,7 +15,7 @@ export default function App() {
   const clientRef = useRef<DaemonClient | null>(null);
   const [clientReady, setClientReady] = useState(false);
 
-  const refreshAll = useCallback(async (client: DaemonClient, openAgentId: string | null) => {
+  const refreshAll = useCallback(async (client: DaemonClient) => {
     const [list, st, perms] = await Promise.all([
       client.request("agents.list", {}),
       client.request("agents.statuses", {}),
@@ -28,7 +28,6 @@ export default function App() {
       counts[p.agentId] = (counts[p.agentId] ?? 0) + 1;
     }
     setPendingCounts(counts);
-    void openAgentId;
   }, []);
 
   useEffect(() => {
@@ -37,7 +36,7 @@ export default function App() {
     let alive = true;
     client
       .connect()
-      .then(() => refreshAll(client, null))
+      .then(() => refreshAll(client))
       .then(() => {
         if (alive) setClientReady(true);
       })
@@ -66,7 +65,7 @@ export default function App() {
       client.on("permission.requested", (p) => bump(p.agentId, +1)),
       client.on("permission.resolved", (p) => bump(p.agentId, -1)),
       client.onReconnect(() => {
-        refreshAll(client, selectedIdRef.current).catch(() => {});
+        refreshAll(client).catch(() => {});
       }),
     ];
     return () => {
@@ -75,9 +74,6 @@ export default function App() {
       client.close();
     };
   }, [refreshAll]);
-
-  const selectedIdRef = useRef(selectedId);
-  selectedIdRef.current = selectedId;
 
   const selected = agents.find((a) => a.id === selectedId) ?? null;
 
@@ -131,7 +127,7 @@ export default function App() {
     <div className="flex h-screen">
       <aside className="flex w-64 flex-col border-r border-zinc-800">
         <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
-          <h1 className="text-sm font-semibold">OpenAgent</h1>
+          <h1 className="text-sm font-semibold">BobAgent</h1>
           <button
             type="button"
             className={`${btnCls} bg-zinc-800 hover:bg-zinc-700`}

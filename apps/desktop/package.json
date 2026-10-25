@@ -1,5 +1,5 @@
 {
-  "name": "@openagent/desktop",
+  "name": "@bobagent/desktop",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -9,7 +9,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@openagent/protocol": "workspace:*",
+    "@bobagent/protocol": "workspace:*",
     "@tauri-apps/api": "2.12.4",
     "react": "19.1.10",
     "react-dom": "19.1.10"

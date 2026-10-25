@@ -53,7 +53,7 @@ export function mergedPath(): string {
 export function spawnEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(process.env)) {
-    if (!k.startsWith("OPENAGENT_")) env[k] = v;
+    if (!k.startsWith("BOBAGENT_")) env[k] = v;
   }
   return { ...env, ...extra, PATH: mergedPath() };
 }

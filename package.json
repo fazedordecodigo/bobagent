@@ -1,5 +1,5 @@
 {
-  "name": "openagent",
+  "name": "bobagent",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "dev": "bun run build:daemon && bun run --cwd apps/desktop tauri dev",
-    "build:daemon": "bun build --compile --minify --target=bun-darwin-arm64 packages/daemon/src/main.ts --outfile apps/desktop/src-tauri/binaries/openagentd-aarch64-apple-darwin",
+    "build:daemon": "bun build --compile --minify --target=bun-darwin-arm64 packages/daemon/src/main.ts --outfile apps/desktop/src-tauri/binaries/bobagentd-aarch64-apple-darwin",
     "build:app": "bun run build:daemon && bun run --cwd apps/desktop tauri build --debug --bundles app",
     "test": "bun test packages/daemon",
     "lint": "biome check .",

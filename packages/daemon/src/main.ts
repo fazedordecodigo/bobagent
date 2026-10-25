@@ -18,7 +18,7 @@ const ORIGIN_ALLOWLIST = new Set([
 
 function parseArgs(argv: string[]): { dataDir: string; agentsRoot: string } {
   let dataDir: string | undefined;
-  let agentsRoot = join(homedir(), "OpenAgent", "agents");
+  let agentsRoot = join(homedir(), "BobAgent", "agents");
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg === "--data-dir") {
@@ -28,7 +28,7 @@ function parseArgs(argv: string[]): { dataDir: string; agentsRoot: string } {
     }
   }
   if (!dataDir) {
-    console.error("openagentd: --data-dir <path> is required");
+    console.error("bobagentd: --data-dir <path> is required");
     process.exit(2);
   }
   return { dataDir, agentsRoot };
@@ -41,7 +41,7 @@ function tokenEqual(a: string, b: string): boolean {
 }
 
 function log(...args: unknown[]) {
-  console.error("[openagentd]", ...args);
+  console.error("[bobagentd]", ...args);
 }
 
 /** Reads the auth token from the first stdin line; refuses to start without one. */
@@ -92,7 +92,7 @@ async function main() {
   const { dataDir, agentsRoot } = parseArgs(process.argv.slice(2));
   const token = await readTokenFromStdin();
   if (!token) {
-    console.error("openagentd: no auth token on stdin (first line required)");
+    console.error("bobagentd: no auth token on stdin (first line required)");
     process.exit(2);
   }
 
@@ -176,7 +176,7 @@ async function main() {
 
   serverRef = server;
   runtimes.resumeAllQueues();
-  console.log(`OPENAGENT_READY {"port":${server.port}}`);
+  console.log(`BOBAGENT_READY {"port":${server.port}}`);
   log(`listening on 127.0.0.1:${server.port}, data dir ${dataDir}`);
 
   process.on("SIGTERM", () => shutdown(0));
@@ -184,6 +184,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error("[openagentd] fatal", e);
+  console.error("[bobagentd] fatal", e);
   process.exit(1);
 });

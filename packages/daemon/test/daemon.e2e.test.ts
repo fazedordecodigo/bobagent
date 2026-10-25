@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Agent } from "@openagent/protocol";
+import type { Agent } from "@bobagent/protocol";
 
 const ROOT = join(import.meta.dir, "../../..");
 const DAEMON = join(ROOT, "packages/daemon/src/main.ts");
@@ -134,9 +134,9 @@ async function startDaemon(dataDir: string, agentsRoot: string): Promise<DaemonH
         if (idx >= 0) {
           const line = buf.slice(0, idx);
           buf = buf.slice(idx + 1);
-          if (line.startsWith("OPENAGENT_READY ")) {
+          if (line.startsWith("BOBAGENT_READY ")) {
             clearTimeout(timer);
-            resolve(JSON.parse(line.slice("OPENAGENT_READY ".length)).port);
+            resolve(JSON.parse(line.slice("BOBAGENT_READY ".length)).port);
             return;
           }
         }
@@ -164,8 +164,8 @@ describe("daemon e2e", () => {
   let createdAgentId = "";
 
   beforeAll(async () => {
-    dataDir = mkdtempSync(join(tmpdir(), "openagentd-data-"));
-    agentsRoot = mkdtempSync(join(tmpdir(), "openagentd-agents-"));
+    dataDir = mkdtempSync(join(tmpdir(), "bobagentd-data-"));
+    agentsRoot = mkdtempSync(join(tmpdir(), "bobagentd-agents-"));
     daemon = await startDaemon(dataDir, agentsRoot);
   });
 
@@ -293,14 +293,14 @@ describe("daemon e2e", () => {
       await daemon2.proc.exited;
     }
 
-    const db = new Database(join(dataDir, "openagent.db"), { readonly: true });
+    const db = new Database(join(dataDir, "bobagent.db"), { readonly: true });
     const rows = db.query("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number };
     expect(rows.n).toBe(4);
     db.close();
   });
 
   test("daemon without a stdin token exits non-zero", async () => {
-    const d = mkdtempSync(join(tmpdir(), "openagentd-notok-"));
+    const d = mkdtempSync(join(tmpdir(), "bobagentd-notok-"));
     const proc = Bun.spawn(
       ["bun", DAEMON, "--data-dir", d, "--agents-root", mkdtempSync(join(tmpdir(), "oa-nt-"))],
       { env: { ...process.env }, stdin: "pipe", stdout: "pipe", stderr: "pipe", cwd: ROOT },
@@ -312,8 +312,8 @@ describe("daemon e2e", () => {
 
   test("closing stdin makes the daemon exit", async () => {
     const d = await startDaemon(
-      mkdtempSync(join(tmpdir(), "openagentd-data2-")),
-      mkdtempSync(join(tmpdir(), "openagentd-agents2-")),
+      mkdtempSync(join(tmpdir(), "bobagentd-data2-")),
+      mkdtempSync(join(tmpdir(), "bobagentd-agents2-")),
     );
     (d.proc.stdin as { end: () => void }).end();
     await waitForExit(d.proc, 5000);

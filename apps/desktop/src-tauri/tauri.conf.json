@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "OpenAgent",
+  "productName": "BobAgent",
   "version": "0.1.0",
-  "identifier": "com.openagent.desktop",
+  "identifier": "com.bobagent.desktop",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "OpenAgent",
+        "title": "BobAgent",
         "width": 1100,
         "height": 720
       }
@@ -24,7 +24,7 @@
   "bundle": {
     "active": true,
     "targets": "app",
-    "externalBin": ["binaries/openagentd"],
+    "externalBin": ["binaries/bobagentd"],
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns"],
     "macOS": {
       "minimumSystemVersion": "13.0"

@@ -1,4 +1,4 @@
-import { type MethodName, methodMap } from "@openagent/protocol";
+import { type MethodName, methodMap } from "@bobagent/protocol";
 import type { AgentStore } from "./agents";
 import type { ChatStore, QueueStore } from "./chat-store";
 import { ProviderError } from "./providers/types";
@@ -53,7 +53,7 @@ export class Rpc {
       if (e instanceof ProviderError) {
         return JSON.stringify({ id, error: { code: e.code, message: e.message } });
       }
-      console.error("[openagentd] handler error", e);
+      console.error("[bobagentd] handler error", e);
       return JSON.stringify({ id, error: { code: "internal", message: "internal error" } });
     }
   }

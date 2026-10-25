@@ -7,7 +7,7 @@ import type {
   PendingPermission,
   PermissionOption,
   QueueState,
-} from "@openagent/protocol";
+} from "@bobagent/protocol";
 import type { AgentStore } from "../agents";
 import type { ChatStore, QueueStore } from "../chat-store";
 import { checkProviderAvailable, DEFAULT_MODE, getDriver } from "../providers/acp";
@@ -36,7 +36,7 @@ type PendingEntry = {
 };
 
 const cancelGraceMs = () =>
-  Math.max(0, Number.parseInt(process.env.OPENAGENT_CANCEL_GRACE_MS ?? "", 10) || 10_000);
+  Math.max(0, Number.parseInt(process.env.BOBAGENT_CANCEL_GRACE_MS ?? "", 10) || 10_000);
 
 export class AgentRuntime {
   status: AgentStatus = "idle";
@@ -209,7 +209,7 @@ export class AgentRuntime {
       if (desired === undefined) continue;
       if (!o.options.some((v) => v.value === desired)) {
         console.error(
-          `[openagentd] skipping invalid config ${o.id}=${desired} for ${this.agent.provider}`,
+          `[bobagentd] skipping invalid config ${o.id}=${desired} for ${this.agent.provider}`,
         );
         continue;
       }
@@ -219,7 +219,7 @@ export class AgentRuntime {
         o.currentValue = desired;
         changed = true;
       } catch (e) {
-        console.error(`[openagentd] set_config_option ${o.id} failed:`, (e as Error).message);
+        console.error(`[bobagentd] set_config_option ${o.id} failed:`, (e as Error).message);
       }
     }
     // default mode when the user hasn't chosen one
@@ -232,7 +232,7 @@ export class AgentRuntime {
           modeOpt.currentValue = def;
           changed = true;
         } catch (e) {
-          console.error(`[openagentd] default mode ${def} failed:`, (e as Error).message);
+          console.error(`[bobagentd] default mode ${def} failed:`, (e as Error).message);
         }
       }
     }
@@ -268,7 +268,7 @@ export class AgentRuntime {
         if (handoff) promptText = handoff + promptText;
       }
       this.sessionPromptCount += 1;
-      const dbgDir = process.env.OPENAGENT_DEBUG_PROMPTS_DIR;
+      const dbgDir = process.env.BOBAGENT_DEBUG_PROMPTS_DIR;
       if (dbgDir) {
         try {
           const { writeFileSync, mkdirSync } = await import("node:fs");

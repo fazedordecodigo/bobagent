@@ -4,7 +4,7 @@ import type {
   ConfigOption,
   PendingPermission,
   QueueState,
-} from "@openagent/protocol";
+} from "@bobagent/protocol";
 import type { AgentStore } from "../agents";
 import type { ChatStore, QueueStore } from "../chat-store";
 import { AgentRuntime, type Broadcast, RpcError } from "./agent-runtime";
@@ -80,7 +80,7 @@ export class RuntimeManager {
       try {
         this.runtimeFor(agentId).drain();
       } catch (e) {
-        console.error(`[openagentd] drain failed for ${agentId}:`, (e as Error).message);
+        console.error(`[bobagentd] drain failed for ${agentId}:`, (e as Error).message);
       }
     }
   }

@@ -1,18 +1,18 @@
-# OpenAgent
+# BobAgent
 
 Local-first macOS desktop workspace for multiple persistent AI coding agents.
-Bun workspaces monorepo: a Bun sidecar daemon (`openagentd`) owns SQLite state and
+Bun workspaces monorepo: a Bun sidecar daemon (`bobagentd`) owns SQLite state and
 serves a token-authenticated WebSocket API; a Tauri 2 + React desktop app spawns and
 talks to it.
 
 ## Layout
 
-- `packages/protocol` — `@openagent/protocol`: zod 4 schemas + the typed method map
+- `packages/protocol` — `@bobagent/protocol`: zod 4 schemas + the typed method map
   (`methodMap`) shared by daemon and UI. Single source of truth for the wire contract.
-- `packages/daemon` — `@openagent/daemon`: `src/main.ts` is the sidecar entry.
-  Args: `--data-dir <path>` (required), `--agents-root <path>` (default `~/OpenAgent/agents`).
+- `packages/daemon` — `@bobagent/daemon`: `src/main.ts` is the sidecar entry.
+  Args: `--data-dir <path>` (required), `--agents-root <path>` (default `~/BobAgent/agents`).
   The auth token is the first line on stdin (required; never via env, so agent CLIs can't
-  read it). Prints `OPENAGENT_READY {"port":N}` on
+  read it). Prints `BOBAGENT_READY {"port":N}` on
   stdout when listening on 127.0.0.1; all other logs go to stderr.
   Exits on SIGTERM/SIGINT and on stdin EOF. Migrations live in `src/db/migrations.ts`
   (ordered SQL array, tracked in `schema_migrations`). Agent delete is a soft delete;
@@ -31,19 +31,19 @@ talks to it.
 Each agent gets a lazy `AgentRuntime` (`packages/daemon/src/runtime/`) that owns one
 provider session at a time. Turns stream ACP updates into `items` rows; permission
 requests pause in `awaiting_permission` until `permissions.respond`. Cancel sends
-`session/cancel` and hard-kills after `OPENAGENT_CANCEL_GRACE_MS` (default 10000).
+`session/cancel` and hard-kills after `BOBAGENT_CANCEL_GRACE_MS` (default 10000).
 On daemon start, turns left `running` are marked `interrupted`. Provider CLIs are
 found via a login-shell PATH merge (`src/env/login-path.ts`) — spawned agents get
 `NO_COLOR=1` and a resolved absolute binary path.
 
 Daemon auth: the token is delivered on the FIRST STDIN LINE (never env — provider
 children must not see it). Missing/empty token or no line within 10 s -> exit 2.
-stdin EOF afterwards = shutdown. `spawnEnv` strips all `OPENAGENT_*` vars.
+stdin EOF afterwards = shutdown. `spawnEnv` strips all `BOBAGENT_*` vars.
 
 Env vars (daemon):
-- `OPENAGENT_ACP_COMMAND_<PROVIDER>` — JSON array overriding the spawn command per
-  provider (e.g. `OPENAGENT_ACP_COMMAND_DEVIN='["bun","path/to/agent.ts"]'`).
-- `OPENAGENT_CANCEL_GRACE_MS` — ms after `chat.cancel` before the process is killed.
+- `BOBAGENT_ACP_COMMAND_<PROVIDER>` — JSON array overriding the spawn command per
+  provider (e.g. `BOBAGENT_ACP_COMMAND_DEVIN='["bun","path/to/agent.ts"]'`).
+- `BOBAGENT_CANCEL_GRACE_MS` — ms after `chat.cancel` before the process is killed.
 
 Sign-in commands surfaced on auth errors: `devin auth login`, `agent login`,
 `grok login`, `opencode auth login` (all verified via --help). Gemini: `gemini`
@@ -70,7 +70,7 @@ New (non-resumed) sessions with prior history get a `<conversation_history>` blo
 (`src/runtime/handoff.ts`, pure fn) before the first prompt.
 
 `spikes/mode-probe.ts` — per provider x mode permission probe -> `spikes/out/mode-probe.json`.
-- `OPENAGENT_DEBUG_PROMPTS_DIR` — when set, the daemon writes every outgoing prompt to
+- `BOBAGENT_DEBUG_PROMPTS_DIR` — when set, the daemon writes every outgoing prompt to
   `<dir>/<agentId>-<turnId>.txt` (debugging only).
 
 ## Permissions
@@ -84,11 +84,11 @@ configs, so it does not reflect stock defaults. Gemini's config path is unverifi
 ## Verified commands (run from repo root)
 
 - `bun install` — install workspace deps.
-- `bun run build:daemon` — compile `openagentd-aarch64-apple-darwin` into
+- `bun run build:daemon` — compile `bobagentd-aarch64-apple-darwin` into
   `apps/desktop/src-tauri/binaries/` (Tauri externalBin naming).
 - `bun run dev` — build the sidecar, then `tauri dev` (Vite on :1420).
 - `bun run build:app` — `tauri build --debug --bundles app` ->
-  `apps/desktop/src-tauri/target/debug/bundle/macos/OpenAgent.app`.
+  `apps/desktop/src-tauri/target/debug/bundle/macos/BobAgent.app`.
 - `bun run test` — `bun test packages/daemon` (daemon e2e: spawns the real daemon).
 - `bun run lint` — `biome check .`
 - `bun run typecheck` — `tsc -p` for protocol, daemon, desktop (sequential).

@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "openagent",
+      "name": "bobagent",
       "devDependencies": {
         "@agentclientprotocol/sdk": "1.9.0",
         "@biomejs/biome": "2.5.15",
@@ -12,10 +12,10 @@
       },
     },
     "apps/desktop": {
-      "name": "@openagent/desktop",
+      "name": "@bobagent/desktop",
       "version": "0.1.0",
       "dependencies": {
-        "@openagent/protocol": "workspace:*",
+        "@bobagent/protocol": "workspace:*",
         "@tauri-apps/api": "2.12.4",
         "react": "19.1.10",
         "react-dom": "19.1.10",
@@ -31,18 +31,18 @@
       },
     },
     "packages/daemon": {
-      "name": "@openagent/daemon",
+      "name": "@bobagent/daemon",
       "version": "0.1.0",
       "dependencies": {
         "@agentclientprotocol/sdk": "1.9.0",
-        "@openagent/protocol": "workspace:*",
+        "@bobagent/protocol": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "1.4.3",
       },
     },
     "packages/protocol": {
-      "name": "@openagent/protocol",
+      "name": "@bobagent/protocol",
       "version": "0.0.0",
       "dependencies": {
         "zod": "4.6.7",
@@ -80,11 +80,11 @@
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
-    "@openagent/daemon": ["@openagent/daemon@workspace:packages/daemon"],
+    "@bobagent/daemon": ["@bobagent/daemon@workspace:packages/daemon"],
 
-    "@openagent/desktop": ["@openagent/desktop@workspace:apps/desktop"],
+    "@bobagent/desktop": ["@bobagent/desktop@workspace:apps/desktop"],
 
-    "@openagent/protocol": ["@openagent/protocol@workspace:packages/protocol"],
+    "@bobagent/protocol": ["@bobagent/protocol@workspace:packages/protocol"],
 
     "@oxc-project/types": ["@oxc-project/types@0.155.0", "", {}, "sha512-SeE8JPwW1xs1tHeNycjUtUBdhorRa8o4jlvjwk49R7/Z291i+4DQa7JJIgOm/TaYQZx+QrPQbVJ/9c8dMIZN8Q=="],
 

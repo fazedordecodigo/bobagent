@@ -5,7 +5,7 @@ import { migrations } from "./migrations";
 
 export function openDatabase(dataDir: string): Database {
   mkdirSync(dataDir, { recursive: true });
-  const db = new Database(join(dataDir, "openagent.db"));
+  const db = new Database(join(dataDir, "bobagent.db"));
   db.exec("PRAGMA journal_mode=WAL");
   db.exec("PRAGMA foreign_keys=ON");
   db.exec(

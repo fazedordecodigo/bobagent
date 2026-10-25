@@ -1,11 +1,11 @@
 {
-  "name": "@openagent/daemon",
+  "name": "@bobagent/daemon",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "./src/main.ts",
   "dependencies": {
-    "@openagent/protocol": "workspace:*",
+    "@bobagent/protocol": "workspace:*",
     "@agentclientprotocol/sdk": "1.9.0"
   },
   "devDependencies": {

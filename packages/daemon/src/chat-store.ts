@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { ChatItem, Turn, TurnStatus } from "@openagent/protocol";
+import type { ChatItem, Turn, TurnStatus } from "@bobagent/protocol";
 
 type TurnRow = {
   id: string;

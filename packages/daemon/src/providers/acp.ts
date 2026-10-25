@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
-import type { ConfigOption, ProviderId } from "@openagent/protocol";
+import type { ConfigOption, ProviderId } from "@bobagent/protocol";
 import { resolveCommand, spawnEnv } from "../env/login-path";
 import {
   type NormalizedUpdate,
@@ -39,8 +39,7 @@ function redactSecrets(s: string): string {
 }
 
 function commandFor(provider: ProviderId): string[] | null {
-  const override =
-    process.env[`OPENAGENT_ACP_COMMAND_${provider.toUpperCase().replace(/-/g, "_")}`];
+  const override = process.env[`BOBAGENT_ACP_COMMAND_${provider.toUpperCase().replace(/-/g, "_")}`];
   if (override) {
     try {
       const parsed = JSON.parse(override);
@@ -301,7 +300,7 @@ export class AcpDriver implements ProviderDriver {
 
     let loading = false;
     const app = acp
-      .client({ name: "openagent" })
+      .client({ name: "bobagent" })
       .onRequest("session/request_permission", async (ctx) => {
         const p = ctx.params as {
           toolCall?: { title?: string; kind?: string };
@@ -340,7 +339,7 @@ export class AcpDriver implements ProviderDriver {
             fs: { readTextFile: false, writeTextFile: false },
             terminal: false,
           },
-          clientInfo: { name: "openagent", version: "0.1.0" },
+          clientInfo: { name: "bobagent", version: "0.1.0" },
         } as never)) as {
           agentCapabilities?: { loadSession?: boolean };
         };

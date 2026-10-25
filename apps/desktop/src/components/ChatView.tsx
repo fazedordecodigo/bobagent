@@ -1,4 +1,4 @@
-import type { Agent } from "@openagent/protocol";
+import type { Agent } from "@bobagent/protocol";
 import { useState } from "react";
 import { useChat } from "../hooks/useChat";
 import type { DaemonClient } from "../lib/daemon";
