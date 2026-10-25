@@ -102,6 +102,16 @@ resumed, UpBot starts a fresh Codex thread while retaining its chat history. `bu
 test:firecracker:providers` exercises fake Claude API/OAuth and Codex credentials, rejection
 handling, persistence, and credential leak boundaries.
 
+The five-provider guest image was verified in Firecracker with Claude Code 2.1.310,
+Codex 0.164.0, Gemini 0.65.0, OpenCode 1.19.4, and Cursor Agent 2026.10.22-27dcf5f.
+Cursor is installed under `/opt/cursor-agent-home` because guest startup bind-mounts the
+persistent workspace over `/root`. Gemini and Cursor vault credentials reach only Firecracker
+provider processes; invalid keys produce the same redacted saved-credential rejection as
+Claude/Codex. Signed-out Gemini and Cursor surface `gemini` and `agent login`; OpenCode's ACP
+prompt can wait for sign-in, so it is bounded at 20 seconds and surfaces `opencode auth login`.
+The provider suite also checks signed-out chats, credential delivery, `isolation: "none"`, and
+plaintext leaks.
+
 VMs have no network device: provider stdio, the agent-to-agent bridge, and an HTTPS proxy all
 use vsock. The proxy resolves hostnames once and rejects requests if any IPv4 result is not
 public. Agents can call `spawn_subagents` to run up to 8 tasks in parallel (each subagent

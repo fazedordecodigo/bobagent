@@ -80,9 +80,15 @@ forwarded to the owner only for bot-originated work (`queue.from_agent_id`). Mig
 ACP providers run in Firecracker like Claude/Codex (`AcpDriver` spawns via `RemoteLaunch` and
 passes `remote.credentials` as env). MicroVM sign-in (`vmCredentials`, Settings → Hosts):
 claude (OAuth token or API key), codex (`OPENAI_API_KEY`), gemini (`GEMINI_API_KEY`), cursor
-(`CURSOR_API_KEY`). Image: `build-rootfs.sh --providers "claude codex gemini opencode cursor"`
-(cursor via its install script, unverified in a real build). devin/grok need a custom image
-plus `UPBOT_PROVIDER_COMMAND_<PROVIDER>`; opencode signs in with its own config.
+(`CURSOR_API_KEY`). The verified five-provider image contains Claude Code 2.1.310, Codex
+0.164.0, Gemini 0.65.0, OpenCode 1.19.4, and Cursor Agent 2026.10.22-27dcf5f. Cursor installs
+under `/opt/cursor-agent-home` because `/root` is bind-mounted from persistent storage.
+Signed-out behavior: Gemini reports `gemini`, OpenCode `opencode auth login`, and Cursor
+`agent login`. OpenCode ACP prompt waits are bounded at 20 seconds and mapped to its sign-in
+guidance. Fake Gemini/Cursor credentials reach only Firecracker provider env and rejected
+credentials produce the redacted Settings → Hosts message. `bun run test:firecracker:providers`
+checks these real ACP flows, credential delivery, placement isolation, and plaintext leaks.
+devin/grok need a custom image plus `UPBOT_PROVIDER_COMMAND_<PROVIDER>`.
 
 ## Layout
 
