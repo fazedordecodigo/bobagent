@@ -233,4 +233,14 @@ export const migrations: string[] = [
     enabled INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL
   )`,
+  // 17: pages (bot-published HTML in <workspace>/Pages/<id>/index.html)
+  `CREATE TABLE pages (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`,
 ];

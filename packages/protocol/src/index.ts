@@ -549,6 +549,21 @@ export const EmailDraft = z.object({
 export type EmailDraft = z.infer<typeof EmailDraft>;
 const EmailAddressList = z.array(z.string().trim().email().max(320)).max(50);
 
+export const Page = z.object({
+  id: z.string(),
+  agentId: z.string(),
+  title: z.string(),
+  description: z.string(),
+  version: z.number().int(),
+  /** index.html on disk */
+  path: z.string(),
+  /** Local view URL (token-protected) */
+  url: z.string(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+export type Page = z.infer<typeof Page>;
+
 export const ApprovalRule = z.object({
   id: z.string(),
   pattern: z.string().trim().min(1).max(200),
@@ -927,6 +942,11 @@ export const methodMap = {
     params: z.object({ id: z.string() }).strict(),
     result: z.object({ ok: z.literal(true) }),
   },
+  "pages.list": { params: z.object({}).strict(), result: z.array(Page) },
+  "pages.delete": {
+    params: z.object({ id: z.string() }).strict(),
+    result: z.object({ ok: z.literal(true) }),
+  },
   "approvals.list": {
     params: z.object({ agentId: z.string().optional() }).strict(),
     result: z.array(Approval),
@@ -1165,6 +1185,7 @@ export type DaemonEventMap = {
   "email.accounts.changed": Record<string, never>;
   "apps.changed": Record<string, never>;
   "approval.updated": Approval;
+  "pages.changed": Record<string, never>;
   "approvals.rulesChanged": Record<string, never>;
   "email.draft.updated": EmailDraft;
   "team.updated": TeamStatus;

@@ -17,6 +17,7 @@ import {
   MemoriesPanel,
   RoutinesPanel,
 } from "./components/Library";
+import { PagesView } from "./components/PagesView";
 import { ToolsView, type ToolTab } from "./components/ToolsView";
 import { UpdateButton } from "./components/UpdateButton";
 import { DaemonClient } from "./lib/daemon";
@@ -32,6 +33,7 @@ export default function App() {
   const [creatingChannel, setCreatingChannel] = useState(false);
   const [tool, setTool] = useState<ToolTab | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [pagesOpen, setPagesOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const clientRef = useRef<DaemonClient | null>(null);
   const [clientReady, setClientReady] = useState(false);
@@ -106,6 +108,7 @@ export default function App() {
   const selectedChannel = channels.find((ch) => ch.id === channelId) ?? null;
   const openAgent = (id: string | null) => {
     setTool(null);
+    setPagesOpen(false);
     setSelectedId(id);
     setChannelId(null);
     setCreating(false);
@@ -236,7 +239,17 @@ export default function App() {
               + New
             </button>
           </li>
-          <li className="mt-2 border-t border-zinc-800 px-4 pt-3">
+          <li className="mt-2 flex gap-4 border-t border-zinc-800 px-4 pt-3">
+            <button
+              type="button"
+              className={`text-xs font-semibold tracking-wide uppercase ${pagesOpen ? "text-sky-400" : "text-zinc-400"} hover:text-zinc-200`}
+              onClick={() => {
+                openAgent(null);
+                setPagesOpen(true);
+              }}
+            >
+              Pages
+            </button>
             <button
               type="button"
               className={`text-xs font-semibold tracking-wide uppercase ${tool ? "text-sky-400" : "text-zinc-400"} hover:text-zinc-200`}
@@ -271,7 +284,13 @@ export default function App() {
         <UpdateButton />
       </aside>
       <main className="flex-1 overflow-hidden">
-        {tool && clientReady ? (
+        {pagesOpen && clientReady ? (
+          <PagesView
+            client={clientRef.current!}
+            agents={agents}
+            onOpenBot={(id) => openAgent(id)}
+          />
+        ) : tool && clientReady ? (
           <ToolsView client={clientRef.current!} agents={agents} tab={tool} onTab={setTool} />
         ) : creatingChannel ? (
           <ChannelCreateForm

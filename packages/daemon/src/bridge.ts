@@ -20,6 +20,7 @@ import type { Connectors } from "./connectors";
 import { avatarFor } from "./draft";
 import type { EmailService, SearchQuery } from "./email";
 import type { MemoryStore } from "./memories";
+import type { PageLibrary } from "./pages";
 import type { McpServerSpec } from "./providers/types";
 import type { Broadcast } from "./rpc";
 import type { RuntimeManager } from "./runtime/runtime-manager";
@@ -216,6 +217,40 @@ export const BRIDGE_TOOLS = [
         emoji: { type: "string", description: "Avatar emoji" },
       },
       required: ["name", "instructions"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "page_publish",
+    description:
+      "Publish a self-contained HTML page (report, dashboard, tracker) to the user's Pages library. Inline all CSS/JS/images (data: URIs); pages cannot load anything from the network. Pass `id` to update an existing page.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Existing page id to update" },
+        title: { type: "string" },
+        description: { type: "string" },
+        html: { type: "string", description: "Full HTML document" },
+        file: {
+          type: "string",
+          description: "Or: path of an .html file in your or the shared workspace",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "list_pages",
+    description: "List pages in the Pages library (id, title, version, author bot).",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "read_page",
+    description: "Read the HTML of a page so you can revise it.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string" } },
+      required: ["id"],
       additionalProperties: false,
     },
   },
@@ -430,6 +465,7 @@ export class Bridge {
   email: EmailService | null = null;
   apps: AppsService | null = null;
   approvals: ApprovalService | null = null;
+  pages: PageLibrary | null = null;
   connectors: Connectors | null = null;
   computer: ComputerUse | null = null;
   skills: SkillLibrary | null = null;
@@ -646,6 +682,38 @@ export class Bridge {
         });
         this.broadcast?.("agent.created", created);
         return { text: `created agent ${created.name} (${created.id}, ${created.provider})` };
+      }
+      case "page_publish": {
+        const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+        const opt = (k: string) => (str(args[k]) !== undefined ? { [k]: str(args[k])! } : {});
+        const page = this.pages!.publish(me, {
+          ...opt("id"),
+          ...opt("title"),
+          ...opt("description"),
+          ...opt("html"),
+          ...opt("file"),
+        });
+        return {
+          text: `published "${page.title}" (id ${page.id}, version ${page.version}); the user can open it in UpBot → Pages. File: ${page.path}`,
+        };
+      }
+      case "list_pages": {
+        const names = new Map(this.agents.list().map((a) => [a.id, a.name]));
+        return {
+          text: JSON.stringify(
+            this.pages!.list().map((p) => ({
+              id: p.id,
+              title: p.title,
+              version: p.version,
+              by: names.get(p.agentId) ?? "deleted bot",
+              updatedAt: new Date(p.updatedAt).toISOString(),
+            })),
+          ),
+        };
+      }
+      case "read_page": {
+        const html = this.pages!.html(String(args.id ?? ""));
+        return { text: html.length > 200_000 ? `${html.slice(0, 200_000)}\n…[truncated]` : html };
       }
       case "request_secret":
         return {

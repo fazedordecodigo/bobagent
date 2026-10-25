@@ -21,6 +21,7 @@ import { Marketplace } from "./marketplace";
 import { runMcpBridge } from "./mcp-bridge";
 import { MemoryStore } from "./memories";
 import { MobileServer } from "./mobile";
+import { PageLibrary } from "./pages";
 import { seedDefaultBot, upbotContext } from "./persona";
 import { VmCredentials } from "./remote/credentials";
 import { HostStore } from "./remote/hosts";
@@ -198,6 +199,8 @@ async function main() {
   bridge.apps = apps;
   const approvals = new ApprovalService(db, vault, () => runtimes, broadcast);
   bridge.approvals = approvals;
+  const pages = new PageLibrary(db, workspaceRoot, broadcast);
+  bridge.pages = pages;
   approvalsRef = approvals;
   bridge.connectors = new Connectors(vault);
   bridge.computer = computer;
@@ -224,6 +227,7 @@ async function main() {
       email,
       apps,
       approvals,
+      pages,
       marketplace: new Marketplace(db, skills, store),
       mobile,
       team,
@@ -295,6 +299,10 @@ async function main() {
           () => new Response("bad request", { status: 400 }),
         );
       }
+      const pageMatch = /^\/pages\/([\w-]+)$/.exec(url.pathname);
+      if (pageMatch && req.method === "GET") {
+        return pages.serve(pageMatch[1]!, url.searchParams.get("token") ?? "");
+      }
       if (url.pathname === "/health") {
         const denied = checkOrigin(req);
         if (denied) return denied;
@@ -328,6 +336,7 @@ async function main() {
 
   serverRef = server;
   bridge.port = server.port ?? 0;
+  pages.port = server.port ?? 0;
   runtimes.resumeAllQueues();
   routines.baseUrl = `http://127.0.0.1:${server.port}`;
   routines.start();

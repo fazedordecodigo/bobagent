@@ -14,6 +14,7 @@ import type { GatewayService } from "./gateways";
 import type { Marketplace } from "./marketplace";
 import type { MemoryStore } from "./memories";
 import type { MobileServer } from "./mobile";
+import type { PageLibrary } from "./pages";
 import { ProviderError } from "./providers/types";
 import type { VmCredentials } from "./remote/credentials";
 import type { HostStore } from "./remote/hosts";
@@ -49,6 +50,7 @@ export class Rpc {
       email: EmailService;
       apps: AppsService;
       approvals: ApprovalService;
+      pages: PageLibrary;
       marketplace: Marketplace;
       mobile: MobileServer;
       team: TeamClient;
@@ -335,6 +337,11 @@ export class Rpc {
         return this.extras.gateways.update(params as Parameters<GatewayService["update"]>[0]);
       case "gateways.delete":
         this.extras.gateways.delete((params as { id: string }).id);
+        return { ok: true };
+      case "pages.list":
+        return this.extras.pages.list();
+      case "pages.delete":
+        this.extras.pages.delete((params as { id: string }).id);
         return { ok: true };
       case "approvals.list":
         return this.extras.approvals.list((params as { agentId?: string }).agentId);

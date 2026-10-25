@@ -56,6 +56,16 @@ RPC `approvals.list/respond/rules/setRules` (also allowed for mobile), events
 servers so waits do not time out. UI: `ApprovalCards` above the composer, Settings →
 Approvals. Tests: `test/approvals.e2e.test.ts`.
 
+## Pages (UpBot)
+
+`src/pages.ts` (`PageLibrary`, migration 17 `pages`): bots publish self-contained HTML with
+bridge `page_publish {title, html|file, id?}` (5 MB; `file` must be in the bot's or the
+shared workspace), `list_pages`, `read_page`. Files: `<workspace>/Pages/<id>/index.html`,
+old versions in `.history/v<n>.html`. Served at `GET /pages/<id>?token=<viewToken>` (token
+per daemon start, CSP `default-src 'none'`, no network); UI `PagesView` (sidebar "Pages")
+shows them in `<iframe sandbox="allow-scripts">` (Tauri CSP `frame-src http://127.0.0.1:*`).
+RPC `pages.list/delete`, event `pages.changed`. Tests: `test/pages.e2e.test.ts`.
+
 ## Layout
 
 - `packages/protocol` — `@upbot/protocol`: zod 4 schemas + the typed method map
