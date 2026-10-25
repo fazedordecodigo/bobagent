@@ -12,8 +12,9 @@
     "build:app": "bun run build:daemon && bun run --cwd apps/desktop tauri build --debug --bundles app",
     "test": "bun test packages/daemon",
     "lint": "biome check .",
-    "typecheck": "tsc -p packages/protocol/tsconfig.json && tsc -p packages/daemon/tsconfig.json && tsc -p apps/desktop/tsconfig.json",
-    "smoke:ui": "bun scripts/ui-smoke.ts"
+    "typecheck": "tsc -p packages/protocol/tsconfig.json && tsc -p packages/daemon/tsconfig.json && tsc -p packages/relay/tsconfig.json && tsc -p apps/desktop/tsconfig.json",
+    "smoke:ui": "bun scripts/ui-smoke.ts",
+    "relay": "bun packages/relay/src/main.ts"
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "1.9.0",

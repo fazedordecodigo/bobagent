@@ -1,0 +1,10 @@
+{
+  "name": "@bobagent/relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/main.ts",
+  "devDependencies": {
+    "@types/bun": "1.4.3"
+  }
+}

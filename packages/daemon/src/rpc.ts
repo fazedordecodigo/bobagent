@@ -15,6 +15,7 @@ import type { RoutineService } from "./routines";
 import { RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
 import type { SkillLibrary } from "./skills";
+import type { TeamClient } from "./team";
 import type { Vault } from "./vault";
 import type { Voice } from "./voice";
 
@@ -39,6 +40,7 @@ export class Rpc {
       gateways: GatewayService;
       marketplace: Marketplace;
       mobile: MobileServer;
+      team: TeamClient;
     },
   ) {}
 
@@ -179,6 +181,23 @@ export class Rpc {
       case "agents.compact":
         await this.runtimes.compact((params as { agentId: string }).agentId);
         return { ok: true };
+      case "team.status":
+        return this.extras.team.status();
+      case "team.connect": {
+        const p = params as { url: string; token: string };
+        return this.extras.team.connect(p.url, p.token);
+      }
+      case "team.disconnect":
+        this.extras.team.disconnect();
+        return { ok: true };
+      case "team.share":
+        return this.extras.team.share((params as { agentIds: string[] }).agentIds);
+      case "team.send": {
+        const p = params as { memberId: string; agentId: string; text: string };
+        return this.extras.team.send(p.memberId, p.agentId, p.text);
+      }
+      case "team.messages":
+        return this.extras.team.messages();
       case "mobile.status":
         return this.extras.mobile.status();
       case "mobile.enable":

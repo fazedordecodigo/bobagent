@@ -179,6 +179,10 @@ export const ChatItem = z.discriminatedUnion("kind", [
     text: z.string(),
     from: z.object({ agentId: z.string(), name: z.string() }).nullable().optional(),
     channelId: z.string().nullable().optional(),
+    team: z
+      .object({ requestId: z.string(), memberId: z.string(), memberName: z.string() })
+      .nullable()
+      .optional(),
     gateway: z
       .object({
         id: z.string(),
@@ -360,6 +364,42 @@ export const SkillSaveParams = z
     body: z.string().min(1).max(200_000),
   })
   .strict();
+
+// ---- Teams ----
+
+export const TeamMember = z.object({
+  id: z.string(),
+  name: z.string(),
+  online: z.boolean(),
+  agents: z.array(
+    z.object({ id: z.string(), name: z.string(), provider: z.string(), avatar: z.unknown() }),
+  ),
+});
+export type TeamMember = z.infer<typeof TeamMember>;
+export const TeamStatus = z.object({
+  configured: z.boolean(),
+  url: z.string().nullable(),
+  connected: z.boolean(),
+  error: z.string().nullable(),
+  me: z.object({ id: z.string(), name: z.string() }).nullable(),
+  members: z.array(TeamMember),
+  sharedAgentIds: z.array(z.string()),
+});
+export type TeamStatus = z.infer<typeof TeamStatus>;
+export const TeamMessage = z.object({
+  id: z.string(),
+  requestId: z.string(),
+  direction: z.enum(["out", "in"]),
+  memberId: z.string(),
+  memberName: z.string(),
+  agentId: z.string(),
+  agentName: z.string(),
+  text: z.string(),
+  reply: z.string().nullable(),
+  status: z.enum(["pending", "completed", "failed"]),
+  createdAt: z.number(),
+});
+export type TeamMessage = z.infer<typeof TeamMessage>;
 
 // ---- Mobile companion ----
 
@@ -566,6 +606,23 @@ export const methodMap = {
   "permissions.list": { params: PermissionsListParams, result: PermissionsListResult },
   "permissions.respond": { params: PermissionsRespondParams, result: PermissionsRespondResult },
   "agents.usage": { params: AgentsUsageParams, result: AgentUsage },
+  "team.status": { params: z.object({}).strict(), result: TeamStatus },
+  "team.connect": {
+    params: z.object({ url: z.string().max(2000), token: z.string().min(1).max(500) }).strict(),
+    result: TeamStatus,
+  },
+  "team.disconnect": { params: z.object({}).strict(), result: z.object({ ok: z.literal(true) }) },
+  "team.share": {
+    params: z.object({ agentIds: z.array(z.string()) }).strict(),
+    result: TeamStatus,
+  },
+  "team.send": {
+    params: z
+      .object({ memberId: z.string(), agentId: z.string(), text: z.string().min(1).max(100_000) })
+      .strict(),
+    result: TeamMessage,
+  },
+  "team.messages": { params: z.object({}).strict(), result: z.array(TeamMessage) },
   "mobile.status": { params: z.object({}).strict(), result: MobileStatus },
   "mobile.enable": { params: z.object({ enabled: z.boolean() }).strict(), result: MobileStatus },
   "mobile.pair": {
@@ -761,6 +818,8 @@ export type DaemonEventMap = {
   "agent.usage": AgentUsage;
   "routine.updated": Routine;
   "gateway.updated": Gateway;
+  "team.updated": TeamStatus;
+  "team.message": TeamMessage;
   "gateway.deleted": { id: string };
   "vault.changed": Record<string, never>;
   "computer.changed": { agentIds: string[] };

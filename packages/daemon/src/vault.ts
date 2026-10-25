@@ -63,7 +63,9 @@ export class Vault {
 
   list(): VaultEntry[] {
     const rows = this.db
-      .query("SELECT * FROM vault WHERE name NOT LIKE 'gateway.%' ORDER BY name ASC")
+      .query(
+        "SELECT * FROM vault WHERE name NOT LIKE 'gateway.%' AND name NOT LIKE 'team.%' ORDER BY name ASC",
+      )
       .all() as Row[];
     return rows.map((r) => ({
       name: r.name,

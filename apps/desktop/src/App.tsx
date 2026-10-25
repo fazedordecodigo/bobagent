@@ -21,6 +21,7 @@ import {
   MobileView,
   RoutinesPanel,
   SkillsView,
+  TeamView,
   VaultView,
 } from "./components/Library";
 import { DaemonClient } from "./lib/daemon";
@@ -40,6 +41,7 @@ export default function App() {
   const [gatewaysOpen, setGatewaysOpen] = useState(false);
   const [marketOpen, setMarketOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [teamOpen, setTeamOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const clientRef = useRef<DaemonClient | null>(null);
@@ -120,6 +122,7 @@ export default function App() {
     setGatewaysOpen(false);
     setMarketOpen(false);
     setMobileOpen(false);
+    setTeamOpen(false);
     setSelectedId(id);
     setChannelId(null);
     setCreating(false);
@@ -319,6 +322,17 @@ export default function App() {
             >
               Mobile
             </button>
+            <button
+              type="button"
+              className={`ml-4 text-xs font-semibold tracking-wide uppercase ${teamOpen ? "text-sky-400" : "text-zinc-400"} hover:text-zinc-200`}
+              onClick={() => {
+                openAgent(null);
+                setCreatingChannel(false);
+                setTeamOpen(true);
+              }}
+            >
+              Team
+            </button>
           </li>
           {channels.map((ch) => (
             <li key={ch.id}>
@@ -342,7 +356,9 @@ export default function App() {
         </ul>
       </aside>
       <main className="flex-1 overflow-hidden">
-        {mobileOpen && clientReady ? (
+        {teamOpen && clientReady ? (
+          <TeamView client={clientRef.current!} agents={agents} />
+        ) : mobileOpen && clientReady ? (
           <MobileView client={clientRef.current!} />
         ) : marketOpen && clientReady ? (
           <MarketplaceView client={clientRef.current!} />

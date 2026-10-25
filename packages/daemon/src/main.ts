@@ -20,6 +20,7 @@ import { RoutineService } from "./routines";
 import { Rpc } from "./rpc";
 import { RuntimeManager } from "./runtime/runtime-manager";
 import { SkillLibrary } from "./skills";
+import { TeamClient } from "./team";
 import { Vault } from "./vault";
 import { Voice } from "./voice";
 
@@ -137,6 +138,7 @@ async function main() {
           const row = turn.queueId ? queue.row(turn.queueId) : null;
           channels.onTurnEnded(turn, row);
           gateways.onTurnEnded(turn, row);
+          team.onTurnEnded(turn, row);
         } catch (e) {
           log("channel turn hook failed", e);
         }
@@ -172,6 +174,7 @@ async function main() {
   bridge.connectors = new Connectors(vault);
   bridge.computer = computer;
   const mobile = new MobileServer(db);
+  const team = new TeamClient(db, store, chat, () => runtimes, vault, broadcast);
   const gateways = new GatewayService(db, store, chat, () => runtimes, vault, broadcast);
   const rpc = new Rpc(
     store,
@@ -184,7 +187,15 @@ async function main() {
     skills,
     routines,
     browser,
-    { vault, computer, voice, gateways, marketplace: new Marketplace(db, skills, store), mobile },
+    {
+      vault,
+      computer,
+      voice,
+      gateways,
+      marketplace: new Marketplace(db, skills, store),
+      mobile,
+      team,
+    },
   );
 
   // warm the login-shell PATH cache so provider CLIs resolve like in a terminal
@@ -289,6 +300,7 @@ async function main() {
   gateways.startAll();
   mobile.rpc = (raw) => rpc.handle(raw);
   mobile.start();
+  team.start();
   console.log(`BOBAGENT_READY {"port":${server.port}}`);
   log(`listening on 127.0.0.1:${server.port}, data dir ${dataDir}`);
 

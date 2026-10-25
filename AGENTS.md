@@ -240,6 +240,18 @@ statuses, chat.history/send/cancel, queue.get, permissions.list/respond; no atta
 read chat events from `GET /api/events` (SSE, `?token=`). Foreign Origins get 403.
 RPC `mobile.status/enable/pair/revoke`; UI `MobileView`. Tests: `test/mobile.e2e.test.ts`.
 
+## Teams (Phase 12d)
+
+`packages/relay` (`bun run relay -- --data ./relay-data [--port 8787] [--host 0.0.0.0]`) is a
+self-hostable Bun relay: admin token (`RELAY_ADMIN_TOKEN` or `<data>/admin-token`) manages
+members (`POST/GET /members`, `DELETE /members/:id`, tokens stored hashed in `team.json`);
+members connect to `/ws?token=` and exchange `share` / `send` / `incoming` / `reply` frames.
+No chat content is stored on the relay. Daemon side `src/team.ts` (`settings.team`, token in
+the vault as `team.token`, hidden from `vault.list`, migration 13 `team_messages`): shares
+selected agents, runs incoming messages as `<team_message>` turns and replies on `turn.ended`.
+RPC `team.status/connect/disconnect/share/send/messages`, events `team.updated/message`;
+UI `TeamView`. Tests: `test/team.e2e.test.ts` (spawns the relay).
+
 ## Permissions
 
 Provider agents ask for approval only when THEIR OWN config says so
@@ -258,7 +270,7 @@ configs, so it does not reflect stock defaults. Gemini's config path is unverifi
   `apps/desktop/src-tauri/target/debug/bundle/macos/BobAgent.app`.
 - `bun run test` — `bun test packages/daemon` (daemon e2e: spawns the real daemon).
 - `bun run lint` — `biome check .`
-- `bun run typecheck` — `tsc -p` for protocol, daemon, desktop (sequential).
+- `bun run typecheck` — `tsc -p` for protocol, daemon, relay, desktop (sequential).
 - `cd apps/desktop/src-tauri && cargo check` — Rust side.
 
 ## Conventions

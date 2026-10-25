@@ -162,4 +162,19 @@ export const migrations: string[] = [
     last_seen_at INTEGER,
     revoked_at INTEGER
   )`,
+  // 13: team relay messages (both directions)
+  `CREATE TABLE team_messages (
+    id TEXT PRIMARY KEY,
+    request_id TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    member_id TEXT NOT NULL,
+    member_name TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    agent_name TEXT NOT NULL,
+    text TEXT NOT NULL,
+    reply TEXT,
+    status TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX team_messages_request ON team_messages(request_id, direction)`,
 ];

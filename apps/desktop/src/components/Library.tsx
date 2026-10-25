@@ -10,6 +10,8 @@ import type {
   ProviderId,
   Routine,
   Skill,
+  TeamMessage,
+  TeamStatus,
   VaultEntry,
 } from "@bobagent/protocol";
 import { useCallback, useEffect, useState } from "react";
@@ -1026,6 +1028,194 @@ export function MobileView({ client }: { client: DaemonClient }) {
         ))}
         {st.devices.length === 0 && <li className="text-xs text-zinc-600">None yet.</li>}
       </ul>
+    </div>
+  );
+}
+
+export function TeamView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
+  const [st, setSt] = useState<TeamStatus | null>(null);
+  const [msgs, setMsgs] = useState<TeamMessage[]>([]);
+  const [join, setJoin] = useState({ url: "", token: "" });
+  const [target, setTarget] = useState("");
+  const [text, setText] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    client
+      .request("team.status", {})
+      .then(setSt)
+      .catch(() => {});
+    client
+      .request("team.messages", {})
+      .then(setMsgs)
+      .catch(() => {});
+    const a = client.on("team.updated", setSt);
+    const b = client.on("team.message", (m) =>
+      setMsgs((prev) => {
+        const i = prev.findIndex((x) => x.id === m.id);
+        return i >= 0 ? prev.map((x, j) => (j === i ? m : x)) : [...prev, m];
+      }),
+    );
+    return () => {
+      a();
+      b();
+    };
+  }, [client]);
+  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  if (!st) return null;
+  if (!st.configured) {
+    return (
+      <form
+        className="mx-auto max-w-lg space-y-3 p-6"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setError(null);
+          client.request("team.connect", join).then(setSt).catch(fail);
+        }}
+      >
+        <h2 className="text-lg font-semibold">Team</h2>
+        <p className="text-xs text-zinc-500">
+          Join a BobAgent team relay to share agents with teammates and message theirs. Host one
+          with <code>bun run relay -- --data ./relay-data</code> and invite members with its admin
+          token.
+        </p>
+        <input
+          className={inputCls}
+          placeholder="Relay URL (https://relay.example.com)"
+          value={join.url}
+          onChange={(e) => setJoin({ ...join, url: e.target.value })}
+          required
+        />
+        <input
+          className={inputCls}
+          type="password"
+          placeholder="Member token"
+          value={join.token}
+          onChange={(e) => setJoin({ ...join, token: e.target.value })}
+          required
+        />
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        <button type="submit" className={`${btnCls} bg-sky-600 hover:bg-sky-500`}>
+          Join team
+        </button>
+      </form>
+    );
+  }
+  const options = st.members.flatMap((m) =>
+    m.agents.map((a) => ({ key: `${m.id}:${a.id}`, label: `${a.name} (${m.name})` })),
+  );
+  return (
+    <div className="mx-auto max-w-2xl space-y-4 p-6">
+      <div className="flex items-center gap-2">
+        <h2 className="text-lg font-semibold">Team</h2>
+        <span className={`text-xs ${st.connected ? "text-emerald-400" : "text-amber-400"}`}>
+          {st.connected ? `connected as ${st.me?.name ?? ""}` : (st.error ?? "connecting…")}
+        </span>
+        <button
+          type="button"
+          className="ml-auto text-xs text-zinc-500 hover:text-red-400"
+          onClick={() =>
+            client
+              .request("team.disconnect", {})
+              .then(() => client.request("team.status", {}).then(setSt))
+              .catch(fail)
+          }
+        >
+          Leave
+        </button>
+      </div>
+      <section className="space-y-1">
+        <h3 className="text-sm font-semibold text-zinc-300">Agents you share</h3>
+        <div className="flex flex-wrap gap-3">
+          {agents.map((a) => (
+            <label key={a.id} className="flex items-center gap-1 text-xs text-zinc-400">
+              <input
+                type="checkbox"
+                checked={st.sharedAgentIds.includes(a.id)}
+                onChange={() =>
+                  client
+                    .request("team.share", {
+                      agentIds: st.sharedAgentIds.includes(a.id)
+                        ? st.sharedAgentIds.filter((x) => x !== a.id)
+                        : [...st.sharedAgentIds, a.id],
+                    })
+                    .then(setSt)
+                    .catch(fail)
+                }
+              />
+              {a.name}
+            </label>
+          ))}
+        </div>
+      </section>
+      <section className="space-y-1">
+        <h3 className="text-sm font-semibold text-zinc-300">Teammates</h3>
+        <ul className="space-y-1 text-sm">
+          {st.members.map((m) => (
+            <li key={m.id}>
+              <span className={m.online ? "text-zinc-200" : "text-zinc-600"}>{m.name}</span>
+              <span className="ml-2 text-xs text-zinc-500">
+                {m.online
+                  ? m.agents.map((a) => a.name).join(", ") || "no shared agents"
+                  : "offline"}
+              </span>
+            </li>
+          ))}
+          {st.members.length === 0 && <li className="text-xs text-zinc-600">No teammates yet.</li>}
+        </ul>
+      </section>
+      <ul className="space-y-2">
+        {msgs.map((m) => (
+          <li key={m.id} className="rounded border border-zinc-800 p-2 text-sm">
+            <div className="text-xs text-zinc-500">
+              {m.direction === "out"
+                ? `You → ${m.agentName} (${m.memberName})`
+                : `${m.memberName} → your ${m.agentName}`}{" "}
+              · {m.status}
+            </div>
+            <div className="whitespace-pre-wrap">{m.text}</div>
+            {m.reply && <div className="mt-1 whitespace-pre-wrap text-zinc-300">↳ {m.reply}</div>}
+          </li>
+        ))}
+      </ul>
+      <form
+        className="flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const [memberId, agentId] = (target || options[0]?.key || "").split(":");
+          if (!memberId || !agentId || !text.trim()) return;
+          setError(null);
+          client
+            .request("team.send", { memberId, agentId, text })
+            .then(() => setText(""))
+            .catch(fail);
+        }}
+      >
+        <select
+          className={`${inputCls} w-48`}
+          value={target}
+          onChange={(e) => setTarget(e.target.value)}
+        >
+          {options.map((o) => (
+            <option key={o.key} value={o.key}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <input
+          className={inputCls}
+          placeholder="Message a teammate's agent"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+        <button
+          type="submit"
+          className={`${btnCls} bg-sky-600 hover:bg-sky-500`}
+          disabled={options.length === 0}
+        >
+          Send
+        </button>
+      </form>
+      {error && <p className="text-xs text-red-400">{error}</p>}
     </div>
   );
 }
