@@ -105,8 +105,13 @@ describe("remote hosts + subagents e2e", () => {
     host = (await c.request("hosts.install", { id: host.id })) as RemoteHost;
     expect(existsSync(join(sshHome, ".bobagent/bin/bobagent-host.ts"))).toBe(true);
     expect(host.root).toBe(join(sshHome, ".bobagent"));
-    expect(host.preflight?.firecrackerReady).toBe(
-      process.platform === "linux" && !!host.preflight?.kvm,
+    const pre = host.preflight;
+    expect(pre?.firecrackerReady).toBe(
+      process.platform === "linux" &&
+        !!pre?.kvm &&
+        !!pre.firecracker?.version &&
+        !!pre.kernelImage &&
+        !!pre.rootfs,
     );
     const call = sshCalls().at(-1)!;
     expect(call.target).toBe("bob@vps.example.com");
