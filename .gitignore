@@ -1,0 +1,10 @@
+node_modules/
+dist/
+target/
+apps/desktop/src-tauri/binaries/
+apps/desktop/src-tauri/gen/
+spikes/out/
+*.db
+*.db-wal
+*.db-shm
+.DS_Store

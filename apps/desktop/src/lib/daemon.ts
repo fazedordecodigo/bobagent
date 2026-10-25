@@ -1,0 +1,98 @@
+import type { DaemonEventMap, MethodName, MethodParams, MethodResult } from "@openagent/protocol";
+import { invoke } from "@tauri-apps/api/core";
+
+type DaemonConnection = { port: number; token: string };
+
+type EventHandler<E extends keyof DaemonEventMap> = (data: DaemonEventMap[E]) => void;
+
+export class DaemonClient {
+  private ws: WebSocket | null = null;
+  private nextId = 1;
+  private pending = new Map<
+    string,
+    { resolve: (v: unknown) => void; reject: (e: unknown) => void }
+  >();
+  private handlers = new Map<string, Set<(data: never) => void>>();
+  private reconnectDelay = 500;
+  private closed = false;
+  private connection: DaemonConnection | null = null;
+
+  async connect(): Promise<void> {
+    this.connection = await invoke<DaemonConnection>("daemon_connection");
+    await this.openSocket();
+  }
+
+  private openSocket(): Promise<void> {
+    const { port, token } = this.connection!;
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${encodeURIComponent(token)}`);
+      this.ws = ws;
+      ws.onopen = () => {
+        this.reconnectDelay = 500;
+        resolve();
+      };
+      ws.onerror = () => {
+        reject(new Error("daemon socket error"));
+      };
+      ws.onmessage = (ev) => {
+        const msg = JSON.parse(String(ev.data));
+        if ("event" in msg) {
+          const set = this.handlers.get(msg.event as string);
+          if (set) for (const h of set) h(msg.data as never);
+        } else if ("id" in msg) {
+          const p = this.pending.get(msg.id);
+          if (p) {
+            this.pending.delete(msg.id);
+            if ("error" in msg) {
+              p.reject(Object.assign(new Error(msg.error.message), { code: msg.error.code }));
+            } else {
+              p.resolve(msg.result);
+            }
+          }
+        }
+      };
+      ws.onclose = () => {
+        this.ws = null;
+        for (const [, p] of this.pending) p.reject(new Error("daemon socket closed"));
+        this.pending.clear();
+        if (!this.closed) {
+          setTimeout(() => {
+            if (!this.closed) this.openSocket().catch(() => {});
+          }, this.reconnectDelay);
+          this.reconnectDelay = Math.min(this.reconnectDelay * 2, 5000);
+        }
+      };
+    });
+  }
+
+  request<M extends MethodName>(method: M, params: MethodParams<M>): Promise<MethodResult<M>> {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error("daemon not connected"));
+    }
+    const id = String(this.nextId++);
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, {
+        resolve: resolve as (v: unknown) => void,
+        reject,
+      });
+      ws.send(JSON.stringify({ id, method, params }));
+    });
+  }
+
+  on<E extends keyof DaemonEventMap>(event: E, cb: EventHandler<E>): () => void {
+    let set = this.handlers.get(event);
+    if (!set) {
+      set = new Set();
+      this.handlers.set(event, set);
+    }
+    const fn = cb as (data: never) => void;
+    set.add(fn);
+    return () => set?.delete(fn);
+  }
+
+  close() {
+    this.closed = true;
+    this.ws?.close();
+  }
+}

@@ -1,0 +1,164 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+use rand::RngCore;
+use serde::Serialize;
+use std::ffi::OsStr;
+use std::sync::{Arc, Mutex};
+use tauri::{Manager, RunEvent, State};
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
+use tauri_plugin_shell::ShellExt;
+use tokio::sync::Notify;
+
+const READY_PREFIX: &str = "OPENAGENT_READY ";
+
+#[derive(Serialize, Clone)]
+struct DaemonConnection {
+    port: u16,
+    token: String,
+}
+
+#[derive(Default)]
+struct DaemonInner {
+    conn: Option<DaemonConnection>,
+    error: Option<String>,
+    child: Option<CommandChild>,
+}
+
+struct DaemonState {
+    inner: Mutex<DaemonInner>,
+    ready: Notify,
+}
+
+type SharedState = Arc<DaemonState>;
+
+fn hex_token() -> String {
+    let mut bytes = [0u8; 32];
+    rand::rng().fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn spawn_daemon(app: &tauri::App) -> Result<(), String> {
+    let state: SharedState = app.state::<SharedState>().inner().clone();
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir: {e}"))?;
+    std::fs::create_dir_all(&data_dir).map_err(|e| format!("create data dir: {e}"))?;
+    let token = hex_token();
+
+    let sidecar = app
+        .shell()
+        .sidecar("openagentd")
+        .map_err(|e| format!("sidecar: {e}"))?;
+    let (mut rx, child) = sidecar
+        .args([OsStr::new("--data-dir"), data_dir.as_os_str()])
+        .env("OPENAGENT_TOKEN", &token)
+        .spawn()
+        .map_err(|e| format!("spawn openagentd: {e}"))?;
+
+    {
+        let mut inner = state.inner.lock().unwrap();
+        inner.child = Some(child);
+    }
+
+    let task_state = state.clone();
+    tauri::async_runtime::spawn(async move {
+        let state = task_state;
+        let mut stdout_buf = String::new();
+        while let Some(event) = rx.recv().await {
+            match event {
+                CommandEvent::Stdout(bytes) => {
+                    stdout_buf.push_str(&String::from_utf8_lossy(&bytes));
+                    while let Some(idx) = stdout_buf.find('\n') {
+                        let line = stdout_buf[..idx].trim_end().to_string();
+                        stdout_buf = stdout_buf[idx + 1..].to_string();
+                        if let Some(json) = line.strip_prefix(READY_PREFIX) {
+                            match serde_json::from_str::<serde_json::Value>(json) {
+                                Ok(v) => {
+                                    let port = v["port"].as_u64().unwrap_or(0) as u16;
+                                    {
+                                        let mut inner = state.inner.lock().unwrap();
+                                        inner.conn = Some(DaemonConnection {
+                                            port,
+                                            token: token.clone(),
+                                        });
+                                    }
+                                    state.ready.notify_waiters();
+                                }
+                                Err(e) => log::error!("bad READY line from openagentd: {e}"),
+                            }
+                        }
+                    }
+                }
+                CommandEvent::Stderr(bytes) => {
+                    for line in String::from_utf8_lossy(&bytes).lines() {
+                        log::info!("openagentd: {line}");
+                    }
+                }
+                CommandEvent::Error(e) => log::error!("openagentd error: {e}"),
+                CommandEvent::Terminated(status) => {
+                    log::warn!("openagentd terminated: {status:?}");
+                    {
+                        let mut inner = state.inner.lock().unwrap();
+                        if inner.conn.is_none() && inner.error.is_none() {
+                            inner.error = Some(format!("openagentd exited: {status:?}"));
+                        }
+                    }
+                    state.ready.notify_waiters();
+                }
+                _ => {}
+            }
+        }
+    });
+    Ok(())
+}
+
+#[tauri::command]
+async fn daemon_connection(state: State<'_, SharedState>) -> Result<DaemonConnection, String> {
+    loop {
+        let notified = state.ready.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        {
+            let inner = state.inner.lock().unwrap();
+            if let Some(conn) = &inner.conn {
+                return Ok(conn.clone());
+            }
+            if let Some(err) = &inner.error {
+                return Err(err.clone());
+            }
+        }
+        notified.await;
+    }
+}
+
+fn main() {
+    let shared: SharedState = Arc::new(DaemonState {
+        inner: Mutex::new(DaemonInner::default()),
+        ready: Notify::new(),
+    });
+
+    tauri::Builder::default()
+        .plugin(tauri_plugin_log::Builder::new().build())
+        .plugin(tauri_plugin_shell::init())
+        .manage(shared)
+        .setup(move |app| {
+            if let Err(e) = spawn_daemon(app) {
+                let state = app.state::<SharedState>();
+                state.inner.lock().unwrap().error = Some(e);
+            }
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![daemon_connection])
+        .build(tauri::generate_context!())
+        .expect("error while building OpenAgent")
+        .run(|app_handle, event| {
+            if let RunEvent::Exit = event {
+                let state = app_handle.state::<SharedState>();
+                let mut inner = state.inner.lock().unwrap();
+                if let Some(child) = inner.child.take() {
+                    let _ = child.kill();
+                }
+            }
+        });
+}
