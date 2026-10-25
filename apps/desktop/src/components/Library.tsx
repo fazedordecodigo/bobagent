@@ -4,14 +4,16 @@ import type {
   BrowserState,
   Gateway,
   GatewayKind,
+  MarketplaceItem,
   Memory,
+  ProviderId,
   Routine,
   Skill,
   VaultEntry,
 } from "@bobagent/protocol";
 import { useCallback, useEffect, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
-import { btnCls, inputCls } from "./AgentSettings";
+import { btnCls, inputCls, PROVIDERS } from "./AgentSettings";
 
 export function AvatarBadge({
   agent,
@@ -806,6 +808,130 @@ export function GatewaysView({ client, agents }: { client: DaemonClient; agents:
           disabled={agents.length === 0}
         >
           Connect
+        </button>
+      </form>
+    </div>
+  );
+}
+
+export function MarketplaceView({ client }: { client: DaemonClient }) {
+  const [data, setData] = useState<{
+    sources: string[];
+    items: MarketplaceItem[];
+    errors: { source: string; error: string }[];
+  } | null>(null);
+  const [sources, setSources] = useState("");
+  const [provider, setProvider] = useState<ProviderId>("claude");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => {
+    client
+      .request("marketplace.list", {})
+      .then((d) => {
+        setData(d);
+        setSources(d.sources.join("\n"));
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  }, [client]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  const install = (i: MarketplaceItem) => {
+    setBusy(`${i.source}#${i.id}`);
+    setError(null);
+    client
+      .request("marketplace.install", {
+        source: i.source,
+        id: i.id,
+        ...(i.kind === "agent" ? { provider } : {}),
+      })
+      .then(load)
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(null));
+  };
+  return (
+    <div className="mx-auto max-w-2xl space-y-4 p-6">
+      <div className="flex items-center gap-2">
+        <h2 className="text-lg font-semibold">Marketplace</h2>
+        <label className="ml-auto text-xs text-zinc-400">
+          Provider for new agents{" "}
+          <select
+            className="rounded bg-zinc-900 px-1"
+            value={provider}
+            onChange={(e) => setProvider(e.target.value as ProviderId)}
+          >
+            {PROVIDERS.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {error && <p className="text-sm text-red-400">{error}</p>}
+      {data?.errors.map((e) => (
+        <p key={e.source} className="text-xs text-amber-400">
+          {e.source}: {e.error}
+        </p>
+      ))}
+      <ul className="grid grid-cols-2 gap-2">
+        {data?.items.map((i) => (
+          <li
+            key={`${i.source}#${i.id}`}
+            className="flex flex-col rounded border border-zinc-800 p-3 text-sm"
+          >
+            <div className="flex items-center gap-2">
+              <span className="font-medium">{i.name}</span>
+              <span className="rounded bg-zinc-800 px-1 text-[10px] text-zinc-400 uppercase">
+                {i.kind}
+              </span>
+            </div>
+            <p className="mt-1 flex-1 text-xs text-zinc-400">{i.description}</p>
+            <div className="mt-2 flex items-center text-[10px] text-zinc-500">
+              {i.author} · v{i.version}
+              <button
+                type="button"
+                className={`${btnCls} ml-auto bg-sky-600 py-0.5 text-xs hover:bg-sky-500`}
+                disabled={busy !== null}
+                onClick={() => install(i)}
+              >
+                {busy === `${i.source}#${i.id}`
+                  ? "Installing…"
+                  : i.installed
+                    ? "Reinstall"
+                    : "Install"}
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <form
+        className="space-y-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setError(null);
+          client
+            .request("marketplace.setSources", {
+              urls: sources
+                .split("\n")
+                .map((s) => s.trim())
+                .filter(Boolean),
+            })
+            .then(load)
+            .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+        }}
+      >
+        <h3 className="text-sm font-semibold text-zinc-300">Registries</h3>
+        <textarea
+          className={`${inputCls} font-mono text-xs`}
+          value={sources}
+          onChange={(e) => setSources(e.target.value)}
+        />
+        <p className="text-xs text-zinc-500">
+          One index.json URL per line (https or file). Files are checked against their sha256.
+        </p>
+        <button type="submit" className={`${btnCls} bg-zinc-700 hover:bg-zinc-600`}>
+          Save registries
         </button>
       </form>
     </div>

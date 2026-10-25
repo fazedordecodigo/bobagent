@@ -219,6 +219,16 @@ events `gateway.updated/deleted`; UI `GatewaysView`. Test base URLs:
 `BOBAGENT_TELEGRAM_API`, `BOBAGENT_SLACK_API`, `BOBAGENT_DISCORD_API`.
 Tests: `test/gateways.e2e.test.ts`.
 
+## Marketplace (Phase 12b)
+
+`marketplace/` holds the default registry (`index.json` + `skills/*.md` + `agents/*.json`),
+fetched from raw.githubusercontent.com (`BOBAGENT_MARKETPLACE_URL` overrides; user sources in
+`settings.marketplace_sources`, http(s)/file URLs). `src/marketplace.ts` verifies each file's
+sha256 before installing; skills go to the skills library (author `marketplace:<author>`),
+agent templates create an agent (chosen provider) and install their listed skills. RPC
+`marketplace.list/install/setSources`; UI `MarketplaceView`. Regenerate the index with
+`bun scripts/marketplace-index.ts`. Tests: `test/marketplace.e2e.test.ts`.
+
 ## Permissions
 
 Provider agents ask for approval only when THEIR OWN config says so

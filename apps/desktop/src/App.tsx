@@ -16,6 +16,7 @@ import {
   BrowserView,
   ComputerUsePanel,
   GatewaysView,
+  MarketplaceView,
   MemoriesPanel,
   RoutinesPanel,
   SkillsView,
@@ -36,6 +37,7 @@ export default function App() {
   const [browserOpen, setBrowserOpen] = useState(false);
   const [vaultOpen, setVaultOpen] = useState(false);
   const [gatewaysOpen, setGatewaysOpen] = useState(false);
+  const [marketOpen, setMarketOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const clientRef = useRef<DaemonClient | null>(null);
@@ -114,6 +116,7 @@ export default function App() {
     setBrowserOpen(false);
     setVaultOpen(false);
     setGatewaysOpen(false);
+    setMarketOpen(false);
     setSelectedId(id);
     setChannelId(null);
     setCreating(false);
@@ -291,6 +294,17 @@ export default function App() {
             >
               Gateways
             </button>
+            <button
+              type="button"
+              className={`ml-4 text-xs font-semibold tracking-wide uppercase ${marketOpen ? "text-sky-400" : "text-zinc-400"} hover:text-zinc-200`}
+              onClick={() => {
+                openAgent(null);
+                setCreatingChannel(false);
+                setMarketOpen(true);
+              }}
+            >
+              Marketplace
+            </button>
           </li>
           {channels.map((ch) => (
             <li key={ch.id}>
@@ -314,7 +328,9 @@ export default function App() {
         </ul>
       </aside>
       <main className="flex-1 overflow-hidden">
-        {gatewaysOpen && clientReady ? (
+        {marketOpen && clientReady ? (
+          <MarketplaceView client={clientRef.current!} />
+        ) : gatewaysOpen && clientReady ? (
           <GatewaysView client={clientRef.current!} agents={agents} />
         ) : vaultOpen && clientReady ? (
           <VaultView client={clientRef.current!} agents={agents} />

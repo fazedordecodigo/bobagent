@@ -7,6 +7,7 @@ import type { ChatStore, QueueStore } from "./chat-store";
 import type { ComputerUse } from "./computer";
 import { draftAgent } from "./draft";
 import type { GatewayService } from "./gateways";
+import type { Marketplace } from "./marketplace";
 import type { MemoryStore } from "./memories";
 import { ProviderError } from "./providers/types";
 import type { RoutineService } from "./routines";
@@ -30,7 +31,13 @@ export class Rpc {
     private skills: SkillLibrary,
     private routines: RoutineService,
     private browser: BrowserService,
-    private extras: { vault: Vault; computer: ComputerUse; voice: Voice; gateways: GatewayService },
+    private extras: {
+      vault: Vault;
+      computer: ComputerUse;
+      voice: Voice;
+      gateways: GatewayService;
+      marketplace: Marketplace;
+    },
   ) {}
 
   /** Returns the response payload string for one raw incoming message. */
@@ -169,6 +176,30 @@ export class Rpc {
         return this.runtimes.usage((params as { agentId: string }).agentId);
       case "agents.compact":
         await this.runtimes.compact((params as { agentId: string }).agentId);
+        return { ok: true };
+      case "marketplace.list":
+        return {
+          sources: this.extras.marketplace.sources(),
+          ...(await this.extras.marketplace.list()),
+        };
+      case "marketplace.install": {
+        const p = params as { source: string; id: string; provider?: string };
+        let r: Awaited<ReturnType<Marketplace["install"]>>;
+        try {
+          r = await this.extras.marketplace.install(p.source, p.id, p.provider);
+        } catch (e) {
+          if (e instanceof RpcError) throw e;
+          throw new RpcError("bad_request", (e as Error).message);
+        }
+        if (r.skills.length) this.broadcast("skills.changed", {});
+        if (r.agent) {
+          const agent = r.agent;
+          queueMicrotask(() => this.broadcast("agent.created", agent));
+        }
+        return r;
+      }
+      case "marketplace.setSources":
+        this.extras.marketplace.setSources((params as { urls: string[] }).urls);
         return { ok: true };
       case "gateways.list":
         return this.extras.gateways.list();

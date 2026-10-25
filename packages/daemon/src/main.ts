@@ -12,6 +12,7 @@ import { Connectors } from "./connectors";
 import { openDatabase } from "./db";
 import { mergedPath } from "./env/login-path";
 import { GatewayService } from "./gateways";
+import { Marketplace } from "./marketplace";
 import { runMcpBridge } from "./mcp-bridge";
 import { MemoryStore } from "./memories";
 import { RoutineService } from "./routines";
@@ -180,7 +181,7 @@ async function main() {
     skills,
     routines,
     browser,
-    { vault, computer, voice, gateways },
+    { vault, computer, voice, gateways, marketplace: new Marketplace(db, skills, store) },
   );
 
   // warm the login-shell PATH cache so provider CLIs resolve like in a terminal

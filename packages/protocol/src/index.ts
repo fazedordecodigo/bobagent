@@ -361,6 +361,22 @@ export const SkillSaveParams = z
   })
   .strict();
 
+// ---- Marketplace ----
+
+export const MarketplaceItem = z.object({
+  id: z.string(),
+  kind: z.enum(["skill", "agent"]),
+  name: z.string(),
+  description: z.string(),
+  author: z.string(),
+  version: z.string(),
+  url: z.string(),
+  sha256: z.string(),
+  source: z.string(),
+  installed: z.boolean(),
+});
+export type MarketplaceItem = z.infer<typeof MarketplaceItem>;
+
 // ---- Messaging gateways ----
 
 export const GatewayStatus = z.enum(["connecting", "connected", "error", "stopped"]);
@@ -534,6 +550,24 @@ export const methodMap = {
   "permissions.list": { params: PermissionsListParams, result: PermissionsListResult },
   "permissions.respond": { params: PermissionsRespondParams, result: PermissionsRespondResult },
   "agents.usage": { params: AgentsUsageParams, result: AgentUsage },
+  "marketplace.list": {
+    params: z.object({}).strict(),
+    result: z.object({
+      sources: z.array(z.string()),
+      items: z.array(MarketplaceItem),
+      errors: z.array(z.object({ source: z.string(), error: z.string() })),
+    }),
+  },
+  "marketplace.install": {
+    params: z
+      .object({ source: z.string(), id: z.string(), provider: ProviderId.optional() })
+      .strict(),
+    result: z.object({ skills: z.array(z.string()), agent: Agent.nullable() }),
+  },
+  "marketplace.setSources": {
+    params: z.object({ urls: z.array(z.string().max(2000)).max(20) }).strict(),
+    result: z.object({ ok: z.literal(true) }),
+  },
   "gateways.list": { params: z.object({}).strict(), result: z.array(Gateway) },
   "gateways.create": {
     params: z
