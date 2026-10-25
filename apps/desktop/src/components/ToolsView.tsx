@@ -1,5 +1,6 @@
 import type { Agent } from "@upbot/protocol";
 import type { DaemonClient } from "../lib/daemon";
+import { AppsView } from "./AppsView";
 import { EmailView } from "./EmailView";
 import { HostsView } from "./HostsView";
 import {
@@ -13,6 +14,7 @@ import {
 } from "./Library";
 
 export type ToolTab =
+  | "apps"
   | "email"
   | "skills"
   | "marketplace"
@@ -24,6 +26,7 @@ export type ToolTab =
   | "hosts";
 
 const TABS: { id: ToolTab; label: string; hint: string }[] = [
+  { id: "apps", label: "Apps", hint: "Connect apps (MCP) for all bots" },
   { id: "email", label: "Email", hint: "Mailboxes and drafts awaiting your review" },
   { id: "skills", label: "Skills", hint: "Shared skills library" },
   { id: "marketplace", label: "Marketplace", hint: "Install skills and bot templates" },
@@ -71,6 +74,7 @@ export function ToolsView({
         ))}
       </div>
       <div className="flex-1 overflow-y-auto">
+        {tab === "apps" && <AppsView client={client} agents={agents} />}
         {tab === "email" && <EmailView client={client} agents={agents} />}
         {tab === "skills" && <SkillsView client={client} />}
         {tab === "marketplace" && <MarketplaceView client={client} />}

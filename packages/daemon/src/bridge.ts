@@ -11,6 +11,7 @@ import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Agent } from "@upbot/protocol";
 import { ProviderId } from "@upbot/protocol";
 import type { AgentStore } from "./agents";
+import type { AppsService } from "./apps";
 import type { BrowserService } from "./browser";
 import type { ChannelService } from "./channels";
 import type { ComputerUse } from "./computer";
@@ -400,6 +401,7 @@ export class Bridge {
   browser: BrowserService | null = null;
   vault: Vault | null = null;
   email: EmailService | null = null;
+  apps: AppsService | null = null;
   connectors: Connectors | null = null;
   computer: ComputerUse | null = null;
   skills: SkillLibrary | null = null;
@@ -443,14 +445,18 @@ export class Bridge {
   }
 
   async handle(agentId: string, body: Json): Promise<Json> {
-    if (body.method === "tools/list") return { tools: BRIDGE_TOOLS };
+    if (body.method === "tools/list")
+      return {
+        tools: [...BRIDGE_TOOLS, ...((await this.apps?.toolsFor(agentId).catch(() => [])) ?? [])],
+      };
     if (body.method !== "tools/call")
       throw new Error(`unknown bridge method ${String(body.method)}`);
     const params = (body.params ?? {}) as Json;
     const args = (params.arguments ?? {}) as Json;
     let r: ToolResult;
     try {
-      r = await this.call(agentId, String(params.name), args);
+      const name = String(params.name);
+      r = (await this.apps?.call(agentId, name, args)) ?? (await this.call(agentId, name, args));
     } catch (e) {
       r = { text: (e as Error).message, isError: true };
     }

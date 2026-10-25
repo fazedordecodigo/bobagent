@@ -30,6 +30,17 @@ update/discard`); events `email.accounts.changed`, `email.draft.updated`. UI: Se
 Email and `DraftCards` above the composer. Tests: `UPBOT_EMAIL_FAKE_MAILBOX=<json>` replaces
 IMAP, `UPBOT_EMAIL_PLAINTEXT=1` allows non-TLS SMTP (`test/email.e2e.test.ts` with smtp-server).
 
+## Connected apps (UpBot)
+
+`src/apps.ts` (`AppsService`, migration 16 `connected_apps`): the daemon itself runs each app's
+MCP server via `@modelcontextprotocol/sdk` (stdio with secrets as env, or streamable HTTP with
+secret-filled headers). Catalog `APP_CATALOG` (Notion, GitHub remote MCP, Brave Search,
+Airtable, Stripe; pinned npx versions) plus `custom-stdio` / `custom-http`. Secrets in the
+vault as `app.<id>.<KEY>` (hidden from `vault.list`); tool output has secrets redacted.
+The bridge appends app tools to `tools/list` as `<slug>__<tool>` and routes calls to them
+(`agentIds` empty = every bot). RPC `apps.catalog/list/connect/update/refresh/delete`, event
+`apps.changed`; UI Settings → Apps. Tests: `test/apps.e2e.test.ts` + `fixtures/fake-mcp-server.ts`.
+
 ## Layout
 
 - `packages/protocol` — `@upbot/protocol`: zod 4 schemas + the typed method map

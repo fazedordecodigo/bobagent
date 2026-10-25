@@ -1,5 +1,6 @@
 import { type MethodName, methodMap } from "@upbot/protocol";
 import type { AgentStore } from "./agents";
+import type { AppsService } from "./apps";
 import { attachmentsBlock, saveAttachments } from "./attachments";
 import { type BrowserService, findBrowser } from "./browser";
 import type { ChannelService } from "./channels";
@@ -44,6 +45,7 @@ export class Rpc {
       voice: Voice;
       gateways: GatewayService;
       email: EmailService;
+      apps: AppsService;
       marketplace: Marketplace;
       mobile: MobileServer;
       team: TeamClient;
@@ -330,6 +332,19 @@ export class Rpc {
         return this.extras.gateways.update(params as Parameters<GatewayService["update"]>[0]);
       case "gateways.delete":
         this.extras.gateways.delete((params as { id: string }).id);
+        return { ok: true };
+      case "apps.catalog":
+        return this.extras.apps.catalog();
+      case "apps.list":
+        return this.extras.apps.list();
+      case "apps.connect":
+        return this.extras.apps.connect(params as Parameters<AppsService["connect"]>[0]);
+      case "apps.update":
+        return this.extras.apps.update(params as Parameters<AppsService["update"]>[0]);
+      case "apps.refresh":
+        return this.extras.apps.refresh((params as { id: string }).id);
+      case "apps.delete":
+        await this.extras.apps.delete((params as { id: string }).id);
         return { ok: true };
       case "email.accounts.list":
         return this.extras.email.listAccounts();

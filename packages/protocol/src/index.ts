@@ -549,6 +549,43 @@ export const EmailDraft = z.object({
 export type EmailDraft = z.infer<typeof EmailDraft>;
 const EmailAddressList = z.array(z.string().trim().email().max(320)).max(50);
 
+export const AppSecretSpec = z.object({
+  key: z.string(),
+  label: z.string(),
+  hint: z.string(),
+  /** "Header: template" with {value}; null = passed to the server as an env var. */
+  header: z.string().nullable(),
+});
+export const AppCatalogEntry = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  transport: z.enum(["stdio", "http"]),
+  command: z.array(z.string()).nullable(),
+  url: z.string().nullable(),
+  secrets: z.array(AppSecretSpec),
+  docsUrl: z.string(),
+});
+export type AppCatalogEntry = z.infer<typeof AppCatalogEntry>;
+export const ConnectedApp = z.object({
+  id: z.string(),
+  catalogId: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  transport: z.enum(["stdio", "http"]),
+  command: z.array(z.string()).nullable(),
+  url: z.string().nullable(),
+  secretKeys: z.array(z.string()),
+  agentIds: z.array(z.string()),
+  enabled: z.boolean(),
+  status: z.enum(["stopped", "starting", "ready", "error"]),
+  error: z.string().nullable(),
+  tools: z.array(z.object({ name: z.string(), description: z.string() })),
+  createdAt: z.number(),
+});
+export type ConnectedApp = z.infer<typeof ConnectedApp>;
+const AppSecrets = z.record(z.string().max(64), z.string().max(20_000));
+
 export const Gateway = z.object({
   id: z.string(),
   kind: GatewayKind,
@@ -864,6 +901,38 @@ export const methodMap = {
     params: z.object({ id: z.string() }).strict(),
     result: z.object({ ok: z.literal(true) }),
   },
+  "apps.catalog": { params: z.object({}).strict(), result: z.array(AppCatalogEntry) },
+  "apps.list": { params: z.object({}).strict(), result: z.array(ConnectedApp) },
+  "apps.connect": {
+    params: z
+      .object({
+        catalogId: z.string(),
+        name: z.string().trim().min(1).max(40).optional(),
+        secrets: AppSecrets,
+        command: z.array(z.string().max(1000)).min(1).max(50).optional(),
+        url: z.string().url().max(2000).optional(),
+        headers: z.record(z.string().max(100), z.string().max(2000)).optional(),
+        agentIds: z.array(z.string()).max(200).optional(),
+      })
+      .strict(),
+    result: ConnectedApp,
+  },
+  "apps.update": {
+    params: z
+      .object({
+        id: z.string(),
+        enabled: z.boolean().optional(),
+        agentIds: z.array(z.string()).max(200).optional(),
+        secrets: AppSecrets.optional(),
+      })
+      .strict(),
+    result: ConnectedApp,
+  },
+  "apps.refresh": { params: z.object({ id: z.string() }).strict(), result: ConnectedApp },
+  "apps.delete": {
+    params: z.object({ id: z.string() }).strict(),
+    result: z.object({ ok: z.literal(true) }),
+  },
   "email.accounts.list": { params: z.object({}).strict(), result: z.array(EmailAccount) },
   "email.accounts.save": {
     params: z
@@ -1049,6 +1118,7 @@ export type DaemonEventMap = {
   "routine.updated": Routine;
   "gateway.updated": Gateway;
   "email.accounts.changed": Record<string, never>;
+  "apps.changed": Record<string, never>;
   "email.draft.updated": EmailDraft;
   "team.updated": TeamStatus;
   "team.message": TeamMessage;

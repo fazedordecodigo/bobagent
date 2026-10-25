@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { AgentStore } from "./agents";
+import { AppsService } from "./apps";
 import { Bridge } from "./bridge";
 import { BrowserService } from "./browser";
 import { ChannelService } from "./channels";
@@ -190,6 +191,8 @@ async function main() {
   bridge.vault = vault;
   const email = new EmailService(db, vault, broadcast);
   bridge.email = email;
+  const apps = new AppsService(db, vault, broadcast);
+  bridge.apps = apps;
   bridge.connectors = new Connectors(vault);
   bridge.computer = computer;
   const mobile = new MobileServer(db);
@@ -213,6 +216,7 @@ async function main() {
       voice,
       gateways,
       email,
+      apps,
       marketplace: new Marketplace(db, skills, store),
       mobile,
       team,

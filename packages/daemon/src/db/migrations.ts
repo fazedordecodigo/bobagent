@@ -225,4 +225,12 @@ export const migrations: string[] = [
     updated_at INTEGER NOT NULL
   );
   CREATE INDEX email_drafts_agent ON email_drafts(agent_id, status)`,
+  // 16: connected apps (MCP servers; secrets in the vault as app.<id>.<KEY>)
+  `CREATE TABLE connected_apps (
+    id TEXT PRIMARY KEY,
+    catalog_id TEXT NOT NULL,
+    config_json TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL
+  )`,
 ];

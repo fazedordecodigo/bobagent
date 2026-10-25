@@ -1,0 +1,457 @@
+import type { Database } from "bun:sqlite";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import {
+  getDefaultEnvironment,
+  StdioClientTransport,
+} from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import type { AppCatalogEntry, ConnectedApp } from "@upbot/protocol";
+import { RpcError } from "./runtime/agent-runtime";
+import type { Vault } from "./vault";
+
+// Connected apps: MCP servers the daemon runs (stdio) or talks to (streamable HTTP) on behalf
+// of the bots. Secrets live in the vault as app.<id>.<KEY> and only reach the server process
+// (env) or its HTTP headers; bots see the app's tools through the upbot bridge as
+// `<slug>__<tool>` and never the credentials. Account-wide: agentIds empty = every bot.
+
+type Broadcast = (event: string, data: unknown) => void;
+type Tool = { name: string; description?: string; inputSchema?: unknown };
+
+export const APP_CATALOG: AppCatalogEntry[] = [
+  {
+    id: "notion",
+    name: "Notion",
+    description: "Search, read and edit pages and databases.",
+    transport: "stdio",
+    command: ["npx", "-y", "@notionhq/notion-mcp-server@2.5.2"],
+    url: null,
+    secrets: [
+      {
+        key: "NOTION_TOKEN",
+        label: "Integration token",
+        hint: "notion.so/profile/integrations → new internal integration; share pages with it",
+        header: null,
+      },
+    ],
+    docsUrl: "https://github.com/makenotion/notion-mcp-server",
+  },
+  {
+    id: "github",
+    name: "GitHub",
+    description: "Repositories, issues, pull requests and Actions.",
+    transport: "http",
+    command: null,
+    url: "https://api.githubcopilot.com/mcp/",
+    secrets: [
+      {
+        key: "GITHUB_TOKEN",
+        label: "Personal access token",
+        hint: "github.com/settings/personal-access-tokens",
+        header: "Authorization: Bearer {value}",
+      },
+    ],
+    docsUrl: "https://github.com/github/github-mcp-server",
+  },
+  {
+    id: "brave-search",
+    name: "Brave Search",
+    description: "Web, news, image and local search.",
+    transport: "stdio",
+    command: ["npx", "-y", "@brave/brave-search-mcp-server@2.1.4"],
+    url: null,
+    secrets: [
+      { key: "BRAVE_API_KEY", label: "API key", hint: "brave.com/search/api", header: null },
+    ],
+    docsUrl: "https://github.com/brave/brave-search-mcp-server",
+  },
+  {
+    id: "airtable",
+    name: "Airtable",
+    description: "Read and write bases, tables and records.",
+    transport: "stdio",
+    command: ["npx", "-y", "airtable-mcp-server@1.14.0"],
+    url: null,
+    secrets: [
+      {
+        key: "AIRTABLE_API_KEY",
+        label: "Personal access token",
+        hint: "airtable.com/create/tokens",
+        header: null,
+      },
+    ],
+    docsUrl: "https://github.com/domdomegg/airtable-mcp-server",
+  },
+  {
+    id: "stripe",
+    name: "Stripe",
+    description: "Customers, payments, invoices and products.",
+    transport: "stdio",
+    command: ["npx", "-y", "@stripe/mcp@0.3.3", "--tools=all"],
+    url: null,
+    secrets: [
+      {
+        key: "STRIPE_SECRET_KEY",
+        label: "Secret or restricted key",
+        hint: "dashboard.stripe.com/apikeys (prefer a restricted key)",
+        header: null,
+      },
+    ],
+    docsUrl: "https://github.com/stripe/agent-toolkit",
+  },
+];
+
+type Row = {
+  id: string;
+  catalog_id: string;
+  config_json: string;
+  enabled: number;
+  created_at: number;
+};
+type Config = {
+  name: string;
+  transport: "stdio" | "http";
+  command: string[] | null;
+  url: string | null;
+  secretKeys: string[];
+  headers: Record<string, string>;
+  agentIds: string[];
+};
+
+type Live = {
+  client: Client | null;
+  starting: Promise<void> | null;
+  status: ConnectedApp["status"];
+  error: string | null;
+  tools: Tool[];
+};
+
+export function slugFor(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 20) || "app"
+  );
+}
+
+export class AppsService {
+  private live = new Map<string, Live>();
+
+  constructor(
+    private db: Database,
+    private vault: Vault,
+    private broadcast: Broadcast,
+  ) {}
+
+  catalog(): AppCatalogEntry[] {
+    return APP_CATALOG;
+  }
+
+  private rows(): Row[] {
+    return this.db.query("SELECT * FROM connected_apps ORDER BY created_at ASC").all() as Row[];
+  }
+
+  private row(id: string): Row {
+    const r = this.db.query("SELECT * FROM connected_apps WHERE id = ?").get(id) as Row | null;
+    if (!r) throw new RpcError("not_found", "app not found");
+    return r;
+  }
+
+  private config(r: Row): Config {
+    return JSON.parse(r.config_json) as Config;
+  }
+
+  private toApp(r: Row): ConnectedApp {
+    const c = this.config(r);
+    const l = this.live.get(r.id);
+    return {
+      id: r.id,
+      catalogId: r.catalog_id,
+      name: c.name,
+      slug: slugFor(c.name),
+      transport: c.transport,
+      command: c.command,
+      url: c.url,
+      secretKeys: c.secretKeys,
+      agentIds: c.agentIds,
+      enabled: r.enabled === 1,
+      status: r.enabled ? (l?.status ?? "stopped") : "stopped",
+      error: l?.error ?? null,
+      tools: (l?.tools ?? []).map((t) => ({ name: t.name, description: t.description ?? "" })),
+      createdAt: r.created_at,
+    };
+  }
+
+  list(): ConnectedApp[] {
+    return this.rows().map((r) => this.toApp(r));
+  }
+
+  get(id: string): ConnectedApp {
+    return this.toApp(this.row(id));
+  }
+
+  private changed() {
+    this.broadcast("apps.changed", {});
+  }
+
+  connect(p: {
+    catalogId: string;
+    name?: string;
+    secrets: Record<string, string>;
+    command?: string[];
+    url?: string;
+    headers?: Record<string, string>;
+    agentIds?: string[];
+  }): ConnectedApp {
+    const entry = APP_CATALOG.find((e) => e.id === p.catalogId);
+    let config: Config;
+    if (entry) {
+      const missing = entry.secrets.find((s) => !p.secrets[s.key]);
+      if (missing) throw new RpcError("bad_request", `${missing.label} is required`);
+      config = {
+        name: p.name || entry.name,
+        transport: entry.transport,
+        command: entry.command,
+        url: entry.url,
+        secretKeys: entry.secrets.map((s) => s.key),
+        headers: Object.fromEntries(
+          entry.secrets
+            .filter((s) => s.header)
+            .map((s) => {
+              const [h, v] = s.header!.split(/:\s*/, 2) as [string, string];
+              return [h, v.replace("{value}", `{${s.key}}`)];
+            }),
+        ),
+        agentIds: p.agentIds ?? [],
+      };
+    } else if (p.catalogId === "custom-stdio" || p.catalogId === "custom-http") {
+      if (!p.name) throw new RpcError("bad_request", "name is required");
+      const http = p.catalogId === "custom-http";
+      if (http ? !p.url : !p.command?.length)
+        throw new RpcError("bad_request", http ? "url is required" : "command is required");
+      if (http && !/^https?:\/\//.test(p.url!))
+        throw new RpcError("bad_request", "url must be http(s)");
+      config = {
+        name: p.name,
+        transport: http ? "http" : "stdio",
+        command: http ? null : p.command!,
+        url: http ? p.url! : null,
+        secretKeys: Object.keys(p.secrets),
+        headers: p.headers ?? {},
+        agentIds: p.agentIds ?? [],
+      };
+    } else {
+      throw new RpcError("bad_request", `unknown app ${p.catalogId}`);
+    }
+    for (const k of config.secretKeys) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(k))
+        throw new RpcError("bad_request", `invalid secret name ${k}`);
+    }
+    const slug = slugFor(config.name);
+    if (this.list().some((a) => a.slug === slug))
+      throw new RpcError("conflict", `an app named "${config.name}" is already connected`);
+    const id = crypto.randomUUID();
+    for (const [k, v] of Object.entries(p.secrets)) this.vault.set(`app.${id}.${k}`, v, []);
+    this.db
+      .query(
+        "INSERT INTO connected_apps (id, catalog_id, config_json, enabled, created_at) VALUES (?, ?, ?, 1, ?)",
+      )
+      .run(id, p.catalogId, JSON.stringify(config), Date.now());
+    this.changed();
+    void this.ensure(id).catch(() => {});
+    return this.get(id);
+  }
+
+  async update(p: {
+    id: string;
+    enabled?: boolean;
+    agentIds?: string[];
+    secrets?: Record<string, string>;
+  }): Promise<ConnectedApp> {
+    const r = this.row(p.id);
+    const c = this.config(r);
+    if (p.agentIds) c.agentIds = p.agentIds;
+    if (p.secrets) {
+      for (const [k, v] of Object.entries(p.secrets)) {
+        if (!c.secretKeys.includes(k)) throw new RpcError("bad_request", `unknown secret ${k}`);
+        if (v) this.vault.set(`app.${p.id}.${k}`, v, []);
+      }
+    }
+    const enabled = p.enabled ?? r.enabled === 1;
+    this.db
+      .query("UPDATE connected_apps SET config_json = ?, enabled = ? WHERE id = ?")
+      .run(JSON.stringify(c), enabled ? 1 : 0, p.id);
+    if (p.secrets || !enabled) await this.stop(p.id);
+    this.changed();
+    if (enabled) void this.ensure(p.id).catch(() => {});
+    return this.get(p.id);
+  }
+
+  async delete(id: string): Promise<void> {
+    const c = this.config(this.row(id));
+    await this.stop(id);
+    this.db.query("DELETE FROM connected_apps WHERE id = ?").run(id);
+    for (const k of c.secretKeys) this.vault.delete(`app.${id}.${k}`);
+    this.live.delete(id);
+    this.changed();
+  }
+
+  async refresh(id: string): Promise<ConnectedApp> {
+    await this.stop(id);
+    await this.ensure(id).catch(() => {});
+    return this.get(id);
+  }
+
+  private async stop(id: string): Promise<void> {
+    const l = this.live.get(id);
+    if (!l) return;
+    this.live.delete(id);
+    await l.client?.close().catch(() => {});
+  }
+
+  async closeAll(): Promise<void> {
+    await Promise.all([...this.live.keys()].map((id) => this.stop(id)));
+  }
+
+  private secrets(id: string, c: Config): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const k of c.secretKeys) out[k] = this.vault.revealInternal(`app.${id}.${k}`);
+    return out;
+  }
+
+  /** Starts (or reuses) the app's MCP client and loads its tool list. */
+  private ensure(id: string): Promise<void> {
+    const existing = this.live.get(id);
+    if (existing?.client && existing.status === "ready") return Promise.resolve();
+    if (existing?.starting) return existing.starting;
+    const l: Live = { client: null, starting: null, status: "starting", error: null, tools: [] };
+    this.live.set(id, l);
+    this.changed();
+    l.starting = (async () => {
+      const c = this.config(this.row(id));
+      const secrets = this.secrets(id, c);
+      const fill = (s: string) => s.replace(/\{([A-Za-z0-9_]+)\}/g, (_, k) => secrets[k] ?? "");
+      const transport =
+        c.transport === "http"
+          ? new StreamableHTTPClientTransport(new URL(c.url!), {
+              requestInit: {
+                headers: Object.fromEntries(
+                  Object.entries(c.headers).map(([h, v]) => [h, fill(v)]),
+                ),
+              },
+            })
+          : new StdioClientTransport({
+              command: c.command![0]!,
+              args: c.command!.slice(1),
+              env: {
+                ...getDefaultEnvironment(),
+                PATH: process.env.PATH ?? "",
+                ...secrets,
+              },
+              stderr: "ignore",
+            });
+      const client = new Client({ name: "upbot", version: "0.2.1" });
+      const timeout = AbortSignal.timeout(Number(process.env.UPBOT_APP_START_TIMEOUT_MS) || 60_000);
+      await client.connect(transport as Transport, { signal: timeout });
+      const tools: Tool[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await client.listTools(cursor ? { cursor } : {}, { signal: timeout });
+        tools.push(...(page.tools as Tool[]));
+        cursor = page.nextCursor;
+      } while (cursor && tools.length < 500);
+      client.onclose = () => {
+        if (this.live.get(id) === l) {
+          l.status = "error";
+          l.error = "the app's MCP server exited";
+          l.client = null;
+          this.changed();
+        }
+      };
+      l.client = client;
+      l.tools = tools;
+      l.status = "ready";
+    })()
+      .catch((e) => {
+        l.status = "error";
+        l.error = this.redact(id, (e as Error).message).slice(0, 500);
+        throw new Error(l.error);
+      })
+      .finally(() => {
+        l.starting = null;
+        this.changed();
+      });
+    return l.starting;
+  }
+
+  private redact(id: string, text: string): string {
+    try {
+      const c = this.config(this.row(id));
+      let out = text;
+      for (const v of Object.values(this.secrets(id, c)))
+        if (v) out = out.split(v).join("[redacted]");
+      return out;
+    } catch {
+      return text;
+    }
+  }
+
+  private appsFor(agentId: string): Row[] {
+    return this.rows().filter((r) => {
+      if (!r.enabled) return false;
+      const ids = this.config(r).agentIds;
+      return ids.length === 0 || ids.includes(agentId);
+    });
+  }
+
+  /** Bridge tool definitions for a bot (starting the apps it may use). */
+  async toolsFor(agentId: string): Promise<Tool[]> {
+    const rows = this.appsFor(agentId);
+    await Promise.all(rows.map((r) => this.ensure(r.id).catch(() => {})));
+    const out: Tool[] = [];
+    for (const r of rows) {
+      const l = this.live.get(r.id);
+      if (l?.status !== "ready") continue;
+      const c = this.config(r);
+      const slug = slugFor(c.name);
+      for (const t of l.tools) {
+        const name = `${slug}__${t.name}`.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64);
+        out.push({
+          name,
+          description: `[${c.name}] ${t.description ?? ""}`.trim(),
+          inputSchema: t.inputSchema ?? { type: "object" },
+        });
+      }
+    }
+    return out;
+  }
+
+  /** Runs `<slug>__<tool>`; null when the name is not an app tool. */
+  async call(
+    agentId: string,
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<{ text: string; isError: boolean } | null> {
+    const i = name.indexOf("__");
+    if (i <= 0) return null;
+    const slug = name.slice(0, i);
+    const r = this.rows().find((x) => slugFor(this.config(x).name) === slug);
+    if (!r) return null;
+    if (!this.appsFor(agentId).some((x) => x.id === r.id))
+      throw new Error(`the ${this.config(r).name} app is not available to you`);
+    await this.ensure(r.id);
+    const l = this.live.get(r.id)!;
+    const tool = l.tools.find(
+      (t) => `${slug}__${t.name}`.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64) === name,
+    );
+    if (!tool) throw new Error(`unknown tool ${name}`);
+    const res = await l.client!.callTool({ name: tool.name, arguments: args });
+    const content = (res.content ?? []) as { type: string; text?: string }[];
+    const text = content
+      .map((c) => (c.type === "text" ? (c.text ?? "") : `[${c.type} content]`))
+      .join("\n");
+    return { text: this.redact(r.id, text).slice(0, 100_000), isError: res.isError === true };
+  }
+}

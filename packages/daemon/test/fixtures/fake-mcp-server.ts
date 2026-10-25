@@ -1,0 +1,43 @@
+// Minimal stdio MCP server for connected-app tests: tools `echo` and `whoami`
+// (`whoami` reports whether FAKE_APP_TOKEN reached the server's env).
+import { createInterface } from "node:readline";
+
+const send = (m: unknown) => process.stdout.write(`${JSON.stringify(m)}\n`);
+createInterface({ input: process.stdin }).on("line", (line) => {
+  const m = JSON.parse(line) as { id?: number; method: string; params?: Record<string, unknown> };
+  if (m.id === undefined) return;
+  if (m.method === "initialize")
+    return send({
+      jsonrpc: "2.0",
+      id: m.id,
+      result: {
+        protocolVersion: (m.params?.protocolVersion as string) ?? "2025-06-18",
+        capabilities: { tools: {} },
+        serverInfo: { name: "fake-app", version: "1" },
+      },
+    });
+  if (m.method === "tools/list")
+    return send({
+      jsonrpc: "2.0",
+      id: m.id,
+      result: {
+        tools: [
+          {
+            name: "echo",
+            description: "Echo text",
+            inputSchema: { type: "object", properties: { text: { type: "string" } } },
+          },
+          { name: "whoami", description: "Token check", inputSchema: { type: "object" } },
+        ],
+      },
+    });
+  if (m.method === "tools/call") {
+    const p = m.params as { name: string; arguments: { text?: string } };
+    const text =
+      p.name === "echo"
+        ? `echo:${p.arguments.text}`
+        : `token-present:${Boolean(process.env.FAKE_APP_TOKEN)} token:${process.env.FAKE_APP_TOKEN}`;
+    return send({ jsonrpc: "2.0", id: m.id, result: { content: [{ type: "text", text }] } });
+  }
+  send({ jsonrpc: "2.0", id: m.id, error: { code: -32601, message: "method not found" } });
+});
