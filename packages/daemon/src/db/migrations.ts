@@ -243,4 +243,6 @@ export const migrations: string[] = [
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   )`,
+  // 18: replies in group chats
+  `ALTER TABLE channel_messages ADD COLUMN reply_to TEXT`,
 ];

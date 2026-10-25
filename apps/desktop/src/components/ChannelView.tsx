@@ -14,6 +14,7 @@ export function ChannelView({
 }) {
   const [messages, setMessages] = useState<ChannelMessage[]>([]);
   const [text, setText] = useState("");
+  const [replyTo, setReplyTo] = useState<ChannelMessage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const name = (id: string | null) => agents.find((a) => a.id === id)?.name ?? "deleted bot";
@@ -55,12 +56,26 @@ export function ChannelView({
     const t = text.trim();
     if (!t) return;
     act(async () => {
-      await client.request("channels.post", { channelId: channel.id, text: t });
+      await client.request("channels.post", {
+        channelId: channel.id,
+        text: t,
+        ...(replyTo ? { replyTo: replyTo.id } : {}),
+      });
       setText("");
+      setReplyTo(null);
     });
   };
 
   const archived = channel.status === "archived";
+  const byId = new Map(messages.map((m) => [m.id, m]));
+  const author = (m: ChannelMessage) =>
+    m.authorKind === "agent" ? name(m.authorAgentId) : m.authorKind === "user" ? "You" : "system";
+  const mention = /(^|\s)@([\w-]*)$/.exec(text);
+  const suggestions = mention
+    ? ["everyone", ...channel.memberIds.map((id) => name(id))].filter((n) =>
+        n.toLowerCase().startsWith(mention[2]!.toLowerCase()),
+      )
+    : [];
   return (
     <div className="flex h-full flex-col">
       <header className="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-4 py-3">
@@ -142,12 +157,20 @@ export function ChannelView({
               {m.text}
             </p>
           ) : (
-            <div key={m.id} className={`flex ${m.authorKind === "user" ? "justify-end" : ""}`}>
+            <div
+              key={m.id}
+              className={`group flex items-start gap-1 ${m.authorKind === "user" ? "flex-row-reverse" : ""}`}
+            >
               <div
                 className={`max-w-[75%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
                   m.authorKind === "user" ? "bg-sky-700/80" : "bg-zinc-800"
                 }`}
               >
+                {m.replyTo && byId.get(m.replyTo) && (
+                  <div className="mb-1 border-l-2 border-zinc-500 pl-2 text-xs text-zinc-300 opacity-80">
+                    {author(byId.get(m.replyTo)!)}: {byId.get(m.replyTo)!.text.slice(0, 140)}
+                  </div>
+                )}
                 {m.authorKind === "agent" && (
                   <div className="mb-1 text-xs text-zinc-400">
                     {name(m.authorAgentId)}
@@ -156,17 +179,57 @@ export function ChannelView({
                 )}
                 {m.text}
               </div>
+              {channel.status === "active" && (
+                <button
+                  type="button"
+                  className="invisible mt-1 text-xs text-zinc-500 group-hover:visible hover:text-zinc-300"
+                  title="Reply"
+                  aria-label="Reply"
+                  onClick={() => setReplyTo(m)}
+                >
+                  ↩ Reply
+                </button>
+              )}
             </div>
           ),
         )}
         {messages.length === 0 && (
           <p className="text-sm text-zinc-500">
-            Messages go to the channel owner, who can delegate to the other members.
+            Messages go to the owner, who can delegate to the other bots. Use @Name to talk to a bot
+            directly, @everyone to ask all of them, or reply to a bot's message.
           </p>
         )}
         <div ref={bottomRef} />
       </div>
       {error && <p className="px-4 text-xs text-red-400">{error}</p>}
+      {replyTo && (
+        <div className="flex items-center gap-2 border-t border-zinc-800 px-4 py-1 text-xs text-zinc-400">
+          Replying to {author(replyTo)}:{" "}
+          <span className="truncate">{replyTo.text.slice(0, 100)}</span>
+          <button
+            type="button"
+            className="ml-auto hover:text-zinc-200"
+            aria-label="Cancel reply"
+            onClick={() => setReplyTo(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
+      {suggestions.length > 0 && (
+        <div className="flex flex-wrap gap-1 border-t border-zinc-800 px-4 py-1">
+          {suggestions.map((n) => (
+            <button
+              key={n}
+              type="button"
+              className="rounded bg-zinc-800 px-2 py-0.5 text-xs hover:bg-zinc-700"
+              onClick={() => setText(text.replace(/@([\w-]*)$/, `@${n} `))}
+            >
+              @{n}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="flex gap-2 border-t border-zinc-800 p-3">
         <textarea
           className={`${inputCls} min-h-[44px] flex-1 resize-none`}

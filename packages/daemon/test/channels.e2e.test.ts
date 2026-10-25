@@ -122,6 +122,43 @@ describe("channels e2e", () => {
     );
   });
 
+  test("@mentions, @everyone and replies route to the addressed bots", async () => {
+    const prompts = () =>
+      readLog(stateDir)
+        .filter((l) => l.method === "session/prompt")
+        .map((l) => JSON.stringify(l.params));
+    const forwardsBefore = prompts().filter((p) => p.includes("Bob replied in the channel")).length;
+    const bobMsg = messageFrom(bob.id);
+    await c.request("channels.post", { channelId: ch.id, text: "@bob please check" });
+    const reply = await bobMsg;
+    expect(prompts().at(-1)).toContain("The user mentioned you");
+    await Bun.sleep(700);
+    // a reply to a direct mention is not forwarded to the owner
+    expect(prompts().filter((p) => p.includes("Bob replied in the channel")).length).toBe(
+      forwardsBefore,
+    );
+
+    const both = Promise.all([messageFrom(alice.id), messageFrom(bob.id)]);
+    await c.request("channels.post", { channelId: ch.id, text: "@everyone status?" });
+    await both;
+    expect(prompts().filter((p) => p.includes("addressed everyone")).length).toBe(2);
+
+    const bobAgain = messageFrom(bob.id);
+    const { messageId } = (await c.request("channels.post", {
+      channelId: ch.id,
+      text: "more detail please",
+      replyTo: reply.id,
+    })) as { messageId: string };
+    await bobAgain;
+    const last = prompts().at(-1)!;
+    expect(last).toContain("The user replied to your message");
+    expect(last).toContain("in_reply_to");
+    const { messages } = (await c.request("channels.history", { channelId: ch.id })) as {
+      messages: ChannelMessage[];
+    };
+    expect(messages.find((m) => m.id === messageId)?.replyTo).toBe(reply.id);
+  });
+
   test("delegate rejects non-members", async () => {
     const carol = await newAgent("Carol");
     const reply = messageFrom(alice.id);

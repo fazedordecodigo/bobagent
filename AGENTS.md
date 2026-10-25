@@ -66,6 +66,15 @@ per daemon start, CSP `default-src 'none'`, no network); UI `PagesView` (sidebar
 shows them in `<iframe sandbox="allow-scripts">` (Tauri CSP `frame-src http://127.0.0.1:*`).
 RPC `pages.list/delete`, event `pages.changed`. Tests: `test/pages.e2e.test.ts`.
 
+## Group chat + navigation (UpBot)
+
+Channels are "Group chats" in the UI. `ChannelService.post(channelId, text, replyTo?)`:
+`@Name` sends to those members, `@everyone`/`@all` to every member, a reply to a bot's
+message goes to that bot (quoted as `<in_reply_to>`), otherwise the owner. Member replies are
+forwarded to the owner only for bot-originated work (`queue.from_agent_id`). Migration 18 adds
+`channel_messages.reply_to`. UI: `CommandPalette` (⌘K all, ⌘⇧F bots) and shortcuts in
+`App.tsx` (⌘N new bot, ⌘1–9 switch bot, ⌘, settings, ⌘P pages).
+
 ## Layout
 
 - `packages/protocol` — `@upbot/protocol`: zod 4 schemas + the typed method map

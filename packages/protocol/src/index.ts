@@ -738,6 +738,7 @@ export const ChannelMessage = z.object({
   authorAgentId: z.string().nullable(),
   text: z.string(),
   createdAt: z.number(),
+  replyTo: z.string().nullable(),
 });
 export type ChannelMessage = z.infer<typeof ChannelMessage>;
 
@@ -758,7 +759,11 @@ export const ChannelsHistoryResult = z.object({
   messages: z.array(ChannelMessage),
 });
 export const ChannelsPostParams = z
-  .object({ channelId: z.string(), text: z.string().trim().min(1).max(100_000) })
+  .object({
+    channelId: z.string(),
+    text: z.string().trim().min(1).max(100_000),
+    replyTo: z.string().optional(),
+  })
   .strict();
 export const ChannelsReassignParams = z
   .object({ channelId: z.string(), ownerId: z.string() })

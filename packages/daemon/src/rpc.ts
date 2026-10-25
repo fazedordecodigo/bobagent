@@ -523,8 +523,8 @@ export class Rpc {
         return this.channels.history(p.channelId, p.limit);
       }
       case "channels.post": {
-        const p = params as { channelId: string; text: string };
-        return this.channels.post(p.channelId, p.text);
+        const p = params as { channelId: string; text: string; replyTo?: string };
+        return this.channels.post(p.channelId, p.text, p.replyTo);
       }
       case "channels.stop":
         return this.channels.stop((params as { channelId: string }).channelId);

@@ -31,6 +31,7 @@ type MessageRow = {
   author_agent_id: string | null;
   text: string;
   created_at: number;
+  reply_to?: string | null;
 };
 
 function rowToMessage(r: MessageRow): ChannelMessage {
@@ -42,6 +43,7 @@ function rowToMessage(r: MessageRow): ChannelMessage {
     authorAgentId: r.author_agent_id,
     text: r.text,
     createdAt: r.created_at,
+    replyTo: r.reply_to ?? null,
   };
 }
 
@@ -164,6 +166,7 @@ export class ChannelService {
     authorKind: ChannelMessage["authorKind"],
     authorAgentId: string | null,
     text: string,
+    replyTo: string | null = null,
   ): ChannelMessage {
     const seqRow = this.db
       .query("SELECT COALESCE(MAX(seq), 0) + 1 AS s FROM channel_messages WHERE channel_id = ?")
@@ -176,10 +179,11 @@ export class ChannelService {
       author_agent_id: authorAgentId,
       text,
       created_at: Date.now(),
+      reply_to: replyTo,
     };
     this.db
       .query(
-        "INSERT INTO channel_messages (id, channel_id, seq, author_kind, author_agent_id, text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO channel_messages (id, channel_id, seq, author_kind, author_agent_id, text, created_at, reply_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         row.id,
@@ -189,6 +193,7 @@ export class ChannelService {
         row.author_agent_id,
         row.text,
         row.created_at,
+        row.reply_to ?? null,
       );
     const msg = rowToMessage(row);
     this.broadcast("channel.message", msg);
@@ -250,12 +255,55 @@ ${text}`;
     return ch;
   }
 
-  post(channelId: string, text: string): { messageId: string } {
+  private message(channelId: string, id: string): ChannelMessage {
+    const r = this.db
+      .query("SELECT * FROM channel_messages WHERE id = ? AND channel_id = ?")
+      .get(id, channelId) as MessageRow | null;
+    if (!r) throw new RpcError("not_found", "message not found in this channel");
+    return rowToMessage(r);
+  }
+
+  /** Members addressed with @Name, or every member for @everyone / @all. */
+  mentioned(ch: Channel, text: string): { ids: string[]; everyone: boolean } {
+    if (/(^|\s)@(everyone|all)(?![\w-])/i.test(text))
+      return { ids: [...ch.memberIds], everyone: true };
+    const lower = text.toLowerCase();
+    const ids = ch.memberIds.filter((id) => {
+      const n = this.agents.get(id)?.name;
+      if (!n) return false;
+      const re = new RegExp(
+        `(^|\\s)@${n.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`,
+      );
+      return re.test(lower);
+    });
+    return { ids, everyone: false };
+  }
+
+  post(channelId: string, text: string, replyTo?: string): { messageId: string } {
     const ch = this.requireActive(channelId);
-    const target = ch.ownerId ?? ch.memberIds[0];
-    if (!target) throw new RpcError("bad_request", "channel has no members");
-    const msg = this.append(ch.id, "user", null, text);
-    this.deliver(ch, target, text, this.framePrompt(ch, target, "The user posted:", text), null, 0);
+    if (!ch.memberIds.length) throw new RpcError("bad_request", "channel has no members");
+    const quoted = replyTo ? this.message(ch.id, replyTo) : null;
+    const { ids, everyone } = this.mentioned(ch, text);
+    const repliedBot =
+      quoted?.authorKind === "agent" &&
+      quoted.authorAgentId &&
+      ch.memberIds.includes(quoted.authorAgentId)
+        ? quoted.authorAgentId
+        : null;
+    const targets = ids.length ? ids : [repliedBot ?? ch.ownerId ?? (ch.memberIds[0] as string)];
+    const intro = everyone
+      ? "The user addressed everyone in the channel:"
+      : ids.length
+        ? "The user mentioned you:"
+        : repliedBot
+          ? "The user replied to your message:"
+          : "The user posted:";
+    const msg = this.append(ch.id, "user", null, text, quoted?.id ?? null);
+    const quote = quoted
+      ? `<in_reply_to author="${xmlAttr(quoted.authorKind === "agent" ? this.name(quoted.authorAgentId) : quoted.authorKind)}">\n${quoted.text.slice(0, 4000)}\n</in_reply_to>\n`
+      : "";
+    for (const t of targets)
+      this.deliver(ch, t, text, this.framePrompt(ch, t, intro, quote + text), null, 0);
     return { messageId: msg.id };
   }
 
@@ -296,7 +344,10 @@ ${text}`;
   }
 
   /** Called for every turn.ended event. */
-  onTurnEnded(turn: Turn, queueRow: { channel_id: string | null; hops: number } | null) {
+  onTurnEnded(
+    turn: Turn,
+    queueRow: { channel_id: string | null; hops: number; from_agent_id?: string | null } | null,
+  ) {
     if (!queueRow?.channel_id) return;
     const r = this.row(queueRow.channel_id);
     if (!r || r.status !== "active") return;
@@ -320,7 +371,9 @@ ${text}`;
     if (!reply) return;
     this.append(ch.id, "agent", turn.agentId, reply);
     const hops = queueRow.hops + 1;
+    // a member's reply goes back to the owner only when the owner (or another bot) asked
     if (
+      queueRow.from_agent_id &&
       ch.ownerId &&
       ch.ownerId !== turn.agentId &&
       ch.memberIds.includes(ch.ownerId) &&

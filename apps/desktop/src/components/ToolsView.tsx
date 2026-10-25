@@ -27,7 +27,7 @@ export type ToolTab =
   | "team"
   | "hosts";
 
-const TABS: { id: ToolTab; label: string; hint: string }[] = [
+export const TABS: { id: ToolTab; label: string; hint: string }[] = [
   { id: "apps", label: "Apps", hint: "Connect apps (MCP) for all bots" },
   { id: "approvals", label: "Approvals", hint: "Ask-first / allow rules and pending requests" },
   { id: "email", label: "Email", hint: "Mailboxes and drafts awaiting your review" },

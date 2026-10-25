@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AgentSettings, btnCls, inputCls, PROVIDERS } from "./components/AgentSettings";
 import { ChannelCreateForm, ChannelView } from "./components/ChannelView";
 import { ChatView } from "./components/ChatView";
+import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
 import {
   AvatarBadge,
   AvatarEditor,
@@ -18,7 +19,7 @@ import {
   RoutinesPanel,
 } from "./components/Library";
 import { PagesView } from "./components/PagesView";
-import { ToolsView, type ToolTab } from "./components/ToolsView";
+import { TABS, ToolsView, type ToolTab } from "./components/ToolsView";
 import { UpdateButton } from "./components/UpdateButton";
 import { DaemonClient } from "./lib/daemon";
 
@@ -34,6 +35,8 @@ export default function App() {
   const [tool, setTool] = useState<ToolTab | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pagesOpen, setPagesOpen] = useState(false);
+  const [palette, setPalette] = useState<{ group?: string } | null>(null);
+  const [paletteItems, setPaletteItems] = useState<PaletteItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const clientRef = useRef<DaemonClient | null>(null);
   const [clientReady, setClientReady] = useState(false);
@@ -115,6 +118,103 @@ export default function App() {
     setCreatingChannel(false);
     setSettingsOpen(false);
   };
+  const shortcutsRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  shortcutsRef.current = (e: KeyboardEvent) => {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+    const k = e.key.toLowerCase();
+    if (k === "k") setPalette({});
+    else if (k === "f" && e.shiftKey) setPalette({ group: "Bots" });
+    else if (k === "n" && !e.shiftKey) {
+      openAgent(null);
+      setCreating(true);
+    } else if (k === ",") {
+      openAgent(null);
+      setTool("apps");
+    } else if (k === "p" && !e.shiftKey) {
+      openAgent(null);
+      setPagesOpen(true);
+    } else if (/^[1-9]$/.test(k) && !e.shiftKey) {
+      const a = agents[Number(k) - 1];
+      if (!a) return;
+      openAgent(a.id);
+    } else return;
+    e.preventDefault();
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => shortcutsRef.current(e);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: openAgent is recreated every render
+  useEffect(() => {
+    if (!palette) return;
+    const base: PaletteItem[] = [
+      ...agents.map((a) => ({
+        id: `bot:${a.id}`,
+        group: "Bots",
+        label: a.name,
+        hint: a.provider,
+        run: () => openAgent(a.id),
+      })),
+      ...channels.map((ch) => ({
+        id: `chat:${ch.id}`,
+        group: "Group chats",
+        label: `# ${ch.name}`,
+        hint: ch.status,
+        run: () => {
+          openAgent(null);
+          setChannelId(ch.id);
+        },
+      })),
+      ...TABS.map((t) => ({
+        id: `tab:${t.id}`,
+        group: "Settings",
+        label: t.label,
+        hint: t.hint,
+        run: () => {
+          openAgent(null);
+          setTool(t.id);
+        },
+      })),
+      {
+        id: "new-bot",
+        group: "Actions",
+        label: "New bot",
+        run: () => {
+          openAgent(null);
+          setCreating(true);
+        },
+      },
+      {
+        id: "new-chat",
+        group: "Actions",
+        label: "New group chat",
+        run: () => {
+          openAgent(null);
+          setCreatingChannel(true);
+        },
+      },
+    ];
+    setPaletteItems(base);
+    clientRef.current
+      ?.request("pages.list", {})
+      .then((pages) =>
+        setPaletteItems([
+          ...base,
+          ...pages.map((p) => ({
+            id: `page:${p.id}`,
+            group: "Pages",
+            label: p.title,
+            hint: p.description,
+            run: () => {
+              openAgent(null);
+              setPagesOpen(true);
+            },
+          })),
+        ]),
+      )
+      .catch(() => {});
+  }, [palette, agents, channels]);
   const createChannel = useCallback(
     async (form: { name: string; memberIds: string[]; ownerId: string | null }) => {
       const client = clientRef.current;
@@ -281,8 +381,22 @@ export default function App() {
             </li>
           ))}
         </ul>
+        <button
+          type="button"
+          className="mx-4 mb-2 rounded border border-zinc-800 px-2 py-1 text-left text-xs text-zinc-500 hover:bg-zinc-900"
+          onClick={() => setPalette({})}
+        >
+          Search… <span className="float-right">⌘K</span>
+        </button>
         <UpdateButton />
       </aside>
+      {palette && (
+        <CommandPalette
+          items={paletteItems}
+          {...(palette.group ? { initialGroup: palette.group } : {})}
+          onClose={() => setPalette(null)}
+        />
+      )}
       <main className="flex-1 overflow-hidden">
         {pagesOpen && clientReady ? (
           <PagesView
