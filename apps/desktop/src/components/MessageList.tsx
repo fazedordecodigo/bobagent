@@ -84,11 +84,13 @@ export function MessageList({
   hasMore,
   onLoadEarlier,
   onPermissionRespond,
+  onSpeak,
 }: {
   items: ChatItem[];
   hasMore: boolean;
   onLoadEarlier: () => void;
   onPermissionRespond: (requestId: string, optionId: string | null) => void;
+  onSpeak?: ((text: string) => void) | undefined;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
@@ -147,10 +149,20 @@ export function MessageList({
             );
           case "agent_message":
             return (
-              <div key={item.id} className="flex">
+              <div key={item.id} className="group flex items-end gap-1">
                 <div className="max-w-[75%] rounded-lg bg-zinc-800 px-3 py-2 text-sm whitespace-pre-wrap">
                   {item.text}
                 </div>
+                {onSpeak && (
+                  <button
+                    type="button"
+                    title="Read aloud"
+                    className="invisible text-xs text-zinc-500 group-hover:visible hover:text-zinc-300"
+                    onClick={() => onSpeak(item.text)}
+                  >
+                    🔊
+                  </button>
+                )}
               </div>
             );
           case "agent_thought":

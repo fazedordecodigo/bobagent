@@ -13,12 +13,15 @@ import { ProviderId } from "@bobagent/protocol";
 import type { AgentStore } from "./agents";
 import type { BrowserService } from "./browser";
 import type { ChannelService } from "./channels";
+import type { ComputerUse } from "./computer";
+import type { Connectors } from "./connectors";
 import { avatarFor } from "./draft";
 import type { MemoryStore } from "./memories";
 import type { McpServerSpec } from "./providers/types";
 import type { Broadcast } from "./rpc";
 import type { RuntimeManager } from "./runtime/runtime-manager";
 import type { SkillLibrary } from "./skills";
+import type { Vault } from "./vault";
 
 // Local MCP bridge: each provider session gets a `bobagent` stdio MCP server
 // (`bobagentd mcp-bridge`) that forwards tool calls to POST /bridge with a
@@ -211,6 +214,55 @@ export const BRIDGE_TOOLS = [
         [],
       ],
       ["browser_close", "Close your browser tab.", {}, []],
+      ["vault_list", "List the names of vault secrets the user shared with you.", {}, []],
+      [
+        "vault_get",
+        "Read a vault secret the user shared with you. Never print or store it in files you share.",
+        { name: { type: "string" } },
+        ["name"],
+      ],
+      [
+        "github_api",
+        "Call the GitHub REST API as the user (needs the connector.github vault secret shared with you).",
+        { method: { type: "string" }, path: { type: "string" }, body: { type: "object" } },
+        ["path"],
+      ],
+      [
+        "onepassword_read",
+        "Read a 1Password field by reference op://vault/item/field (needs connector.1password shared with you).",
+        { reference: { type: "string" } },
+        ["reference"],
+      ],
+      [
+        "bitwarden_get",
+        "Read a Bitwarden item field: password, username, notes, totp, uri or item (needs connector.bitwarden).",
+        { item: { type: "string" }, field: { type: "string" } },
+        ["item"],
+      ],
+      [
+        "computer_screenshot",
+        "Computer Use: screenshot the main display into your workspace.",
+        {},
+        [],
+      ],
+      [
+        "computer_click",
+        "Computer Use: click at screen point x,y (double=true for a double click).",
+        { x: { type: "number" }, y: { type: "number" }, double: { type: "boolean" } },
+        ["x", "y"],
+      ],
+      [
+        "computer_type",
+        "Computer Use: type text into the focused app.",
+        { text: { type: "string" } },
+        ["text"],
+      ],
+      [
+        "computer_key",
+        "Computer Use: press a key (letter/digit, return, tab, escape, arrows, ...) with optional modifiers.",
+        { key: { type: "string" }, modifiers: { type: "array", items: { type: "string" } } },
+        ["key"],
+      ],
     ] as const
   ).map(([name, description, properties, required]) => ({
     name,
@@ -234,6 +286,9 @@ export class Bridge {
   channels: ChannelService | null = null;
   memories: MemoryStore | null = null;
   browser: BrowserService | null = null;
+  vault: Vault | null = null;
+  connectors: Connectors | null = null;
+  computer: ComputerUse | null = null;
   skills: SkillLibrary | null = null;
   broadcast: Broadcast | null = null;
 
@@ -414,6 +469,30 @@ export class Bridge {
         this.broadcast?.("agent.created", created);
         return { text: `created agent ${created.name} (${created.id}, ${created.provider})` };
       }
+      case "vault_list":
+        return { text: JSON.stringify(this.vault!.allowed(me.id)) };
+      case "vault_get":
+        return { text: this.vault!.reveal(String(args.name ?? ""), me.id) };
+      case "github_api":
+        return { text: await this.connectors!.github(me.id, args) };
+      case "onepassword_read":
+        return { text: await this.connectors!.onePassword(me.id, String(args.reference ?? "")) };
+      case "bitwarden_get":
+        return {
+          text: await this.connectors!.bitwarden(
+            me.id,
+            String(args.item ?? ""),
+            String(args.field ?? "password"),
+          ),
+        };
+      case "computer_screenshot":
+        return { text: await this.computer!.screenshot(me) };
+      case "computer_click":
+        return { text: await this.computer!.click(me, args.x, args.y, args.double === true) };
+      case "computer_type":
+        return { text: await this.computer!.type(me, String(args.text ?? "")) };
+      case "computer_key":
+        return { text: await this.computer!.key(me, String(args.key ?? ""), args.modifiers) };
       case "browser_open":
         return { text: await this.browser!.open(me, String(args.url ?? "")) };
       case "browser_snapshot":

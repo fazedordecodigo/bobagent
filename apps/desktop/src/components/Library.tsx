@@ -1,4 +1,12 @@
-import type { Agent, AgentAvatar, BrowserState, Memory, Routine, Skill } from "@bobagent/protocol";
+import type {
+  Agent,
+  AgentAvatar,
+  BrowserState,
+  Memory,
+  Routine,
+  Skill,
+  VaultEntry,
+} from "@bobagent/protocol";
 import { useCallback, useEffect, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
 import { btnCls, inputCls } from "./AgentSettings";
@@ -422,5 +430,179 @@ export function BrowserView({ client, agents }: { client: DaemonClient; agents: 
         {state.tabs.length === 0 && <li className="text-sm text-zinc-500">No open tabs.</li>}
       </ul>
     </div>
+  );
+}
+
+const CONNECTORS = [
+  ["connector.github", "GitHub personal access token (github_api tool)"],
+  [
+    "connector.1password",
+    "1Password service account token, or 'desktop' for the op app integration",
+  ],
+  ["connector.bitwarden", "Bitwarden BW_SESSION from `bw unlock --raw`"],
+] as const;
+
+export function VaultView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
+  const [entries, setEntries] = useState<VaultEntry[]>([]);
+  const [form, setForm] = useState({ name: "", value: "", agentIds: [] as string[] });
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => {
+    client
+      .request("vault.list", {})
+      .then(setEntries)
+      .catch(() => {});
+  }, [client]);
+  useEffect(() => {
+    load();
+    return client.on("vault.changed", load);
+  }, [client, load]);
+  const toggle = (ids: string[], id: string) =>
+    ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id];
+  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  return (
+    <div className="mx-auto max-w-2xl space-y-4 p-6">
+      <h2 className="text-lg font-semibold">Vault</h2>
+      <p className="text-xs text-zinc-500">
+        Secrets are encrypted with a key kept in the macOS Keychain. Agents only see the secrets you
+        share with them (vault_get); connectors use their secret without revealing it.
+      </p>
+      <ul className="space-y-2">
+        {entries.map((e) => (
+          <li key={e.name} className="rounded border border-zinc-800 p-3 text-sm">
+            <div className="flex items-center">
+              <span className="font-mono">{e.name}</span>
+              <button
+                type="button"
+                className="ml-auto text-xs text-zinc-500 hover:text-red-400"
+                onClick={() => client.request("vault.delete", { name: e.name }).catch(fail)}
+              >
+                Delete
+              </button>
+            </div>
+            <div className="mt-1 flex flex-wrap gap-3">
+              {agents.map((a) => (
+                <label key={a.id} className="flex items-center gap-1 text-xs text-zinc-400">
+                  <input
+                    type="checkbox"
+                    checked={e.agentIds.includes(a.id)}
+                    onChange={() =>
+                      client
+                        .request("vault.setAccess", {
+                          name: e.name,
+                          agentIds: toggle(e.agentIds, a.id),
+                        })
+                        .catch(fail)
+                    }
+                  />
+                  {a.name}
+                </label>
+              ))}
+            </div>
+          </li>
+        ))}
+        {entries.length === 0 && <li className="text-sm text-zinc-500">No secrets yet.</li>}
+      </ul>
+      <form
+        className="space-y-2 rounded border border-zinc-800 p-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setError(null);
+          client
+            .request("vault.set", form)
+            .then(() => setForm({ name: "", value: "", agentIds: [] }))
+            .catch(fail);
+        }}
+      >
+        <h3 className="text-sm font-semibold text-zinc-300">Add or replace a secret</h3>
+        <div className="flex gap-2">
+          <input
+            className={inputCls}
+            placeholder="name"
+            value={form.name}
+            list="vault-connectors"
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            required
+          />
+          <input
+            className={inputCls}
+            type="password"
+            placeholder="value"
+            value={form.value}
+            onChange={(e) => setForm({ ...form, value: e.target.value })}
+            required
+          />
+        </div>
+        <datalist id="vault-connectors">
+          {CONNECTORS.map(([n, d]) => (
+            <option key={n} value={n}>
+              {d}
+            </option>
+          ))}
+        </datalist>
+        <div className="flex flex-wrap gap-3">
+          {agents.map((a) => (
+            <label key={a.id} className="flex items-center gap-1 text-xs text-zinc-400">
+              <input
+                type="checkbox"
+                checked={form.agentIds.includes(a.id)}
+                onChange={() => setForm({ ...form, agentIds: toggle(form.agentIds, a.id) })}
+              />
+              {a.name}
+            </label>
+          ))}
+        </div>
+        <ul className="text-xs text-zinc-500">
+          {CONNECTORS.map(([n, d]) => (
+            <li key={n}>
+              <span className="font-mono">{n}</span>: {d}
+            </li>
+          ))}
+        </ul>
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        <button type="submit" className={`${btnCls} bg-sky-600 hover:bg-sky-500`}>
+          Save secret
+        </button>
+      </form>
+    </div>
+  );
+}
+
+export function ComputerUsePanel({ client, agentId }: { client: DaemonClient; agentId: string }) {
+  const [state, setState] = useState<{ available: boolean; agentIds: string[] } | null>(null);
+  const load = useCallback(() => {
+    client
+      .request("computer.access", {})
+      .then(setState)
+      .catch(() => {});
+  }, [client]);
+  useEffect(() => {
+    load();
+    return client.on("computer.changed", load);
+  }, [client, load]);
+  if (!state?.available) return null;
+  const on = state.agentIds.includes(agentId);
+  return (
+    <section className="mx-auto max-w-lg space-y-1 px-6 pb-6">
+      <h3 className="text-sm font-semibold text-zinc-300">Computer Use</h3>
+      <label className="flex items-center gap-2 text-sm text-zinc-300">
+        <input
+          type="checkbox"
+          checked={on}
+          onChange={() =>
+            client
+              .request("computer.setAccess", {
+                agentIds: on
+                  ? state.agentIds.filter((x) => x !== agentId)
+                  : [...state.agentIds, agentId],
+              })
+              .catch(() => {})
+          }
+        />
+        Let this agent see the screen and control the mouse and keyboard
+      </label>
+      <p className="text-xs text-zinc-500">
+        macOS asks for Screen Recording and Accessibility permission the first time.
+      </p>
+    </section>
   );
 }

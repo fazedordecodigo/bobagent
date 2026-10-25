@@ -17,15 +17,52 @@ export function Composer({
   running,
   onSend,
   onStop,
+  onTranscribe,
 }: {
   running: boolean;
   onSend: (text: string, attachments: OutgoingAttachment[]) => Promise<void>;
   onStop: () => void;
+  onTranscribe?: ((audioBase64: string, mime: string) => Promise<string>) | undefined;
 }) {
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [files, setFiles] = useState<File[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+  const recorder = useRef<MediaRecorder | null>(null);
+  const [recording, setRecording] = useState(false);
+
+  const toggleMic = async () => {
+    if (!onTranscribe) return;
+    if (recorder.current) {
+      recorder.current.stop();
+      return;
+    }
+    setError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      rec.ondataavailable = (e) => chunks.push(e.data);
+      rec.onstop = async () => {
+        for (const t of stream.getTracks()) t.stop();
+        recorder.current = null;
+        setRecording(false);
+        const blob = new Blob(chunks, { type: rec.mimeType });
+        try {
+          const b64 = await readBase64(new File([blob], "voice", { type: rec.mimeType }));
+          const heard = await onTranscribe(b64, rec.mimeType);
+          if (heard) setText((t) => (t ? `${t} ${heard}` : heard));
+        } catch (e) {
+          setError(e instanceof Error ? e.message : String(e));
+        }
+      };
+      recorder.current = rec;
+      rec.start();
+      setRecording(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   const submit = async () => {
     const t = text.trim() || (files.length > 0 ? "See the attached files." : "");
@@ -87,6 +124,16 @@ export function Composer({
         >
           📎
         </button>
+        {onTranscribe && (
+          <button
+            type="button"
+            onClick={() => void toggleMic()}
+            className={`rounded-md px-2 py-2 text-sm hover:bg-zinc-800 ${recording ? "animate-pulse text-red-400" : "text-zinc-400 hover:text-zinc-200"}`}
+            title={recording ? "Stop and transcribe" : "Dictate"}
+          >
+            🎙
+          </button>
+        )}
         <textarea
           className="max-h-40 min-h-10 flex-1 resize-y rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-zinc-500 focus:outline-none"
           placeholder="Message the agent…"

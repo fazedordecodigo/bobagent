@@ -7,6 +7,8 @@ import { Bridge } from "./bridge";
 import { BrowserService } from "./browser";
 import { ChannelService } from "./channels";
 import { ChatStore, QueueStore } from "./chat-store";
+import { ComputerUse } from "./computer";
+import { Connectors } from "./connectors";
 import { openDatabase } from "./db";
 import { mergedPath } from "./env/login-path";
 import { runMcpBridge } from "./mcp-bridge";
@@ -15,6 +17,8 @@ import { RoutineService } from "./routines";
 import { Rpc } from "./rpc";
 import { RuntimeManager } from "./runtime/runtime-manager";
 import { SkillLibrary } from "./skills";
+import { Vault } from "./vault";
+import { Voice } from "./voice";
 
 const VERSION = "0.1.0";
 const ORIGIN_ALLOWLIST = new Set([
@@ -155,6 +159,12 @@ async function main() {
   const routines = new RoutineService(db, store, () => runtimes, broadcast);
   const browser = new BrowserService(join(dataDir, "browser-profile"), broadcast);
   bridge.browser = browser;
+  const vault = new Vault(db, dataDir);
+  const computer = new ComputerUse(db);
+  const voice = new Voice(join(dataDir, "voice"), mergedPath);
+  bridge.vault = vault;
+  bridge.connectors = new Connectors(vault);
+  bridge.computer = computer;
   const rpc = new Rpc(
     store,
     chat,
@@ -166,6 +176,7 @@ async function main() {
     skills,
     routines,
     browser,
+    { vault, computer, voice },
   );
 
   // warm the login-shell PATH cache so provider CLIs resolve like in a terminal

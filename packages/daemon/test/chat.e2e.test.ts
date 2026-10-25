@@ -530,7 +530,7 @@ describe("chat e2e (fake acp agent)", () => {
     const db2 = new Database(join(dir, "bobagent.db"), { readonly: true });
     expect(
       (db2.query("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number }).n,
-    ).toBe(9);
+    ).toBe(10);
     db2.close();
     rmSync(dir, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
@@ -708,7 +708,7 @@ describe("chat e2e (fake acp agent)", () => {
 
     const db2 = new Database(join(dir, "bobagent.db"), { readonly: true });
     const n = (db2.query("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number }).n;
-    expect(n).toBe(9);
+    expect(n).toBe(10);
     db2.close();
     rmSync(dir, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });

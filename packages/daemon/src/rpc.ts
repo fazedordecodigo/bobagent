@@ -4,6 +4,7 @@ import { attachmentsBlock, saveAttachments } from "./attachments";
 import { type BrowserService, findBrowser } from "./browser";
 import type { ChannelService } from "./channels";
 import type { ChatStore, QueueStore } from "./chat-store";
+import type { ComputerUse } from "./computer";
 import { draftAgent } from "./draft";
 import type { MemoryStore } from "./memories";
 import { ProviderError } from "./providers/types";
@@ -11,6 +12,8 @@ import type { RoutineService } from "./routines";
 import { RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
 import type { SkillLibrary } from "./skills";
+import type { Vault } from "./vault";
+import type { Voice } from "./voice";
 
 export type Broadcast = (event: string, data: unknown) => void;
 
@@ -26,6 +29,7 @@ export class Rpc {
     private skills: SkillLibrary,
     private routines: RoutineService,
     private browser: BrowserService,
+    private extras: { vault: Vault; computer: ComputerUse; voice: Voice },
   ) {}
 
   /** Returns the response payload string for one raw incoming message. */
@@ -165,6 +169,60 @@ export class Rpc {
       case "agents.compact":
         await this.runtimes.compact((params as { agentId: string }).agentId);
         return { ok: true };
+      case "vault.list":
+        return this.extras.vault.list();
+      case "vault.set": {
+        const p = params as { name: string; value: string; agentIds: string[] };
+        this.extras.vault.set(p.name, p.value, p.agentIds);
+        this.broadcast("vault.changed", {});
+        return { ok: true };
+      }
+      case "vault.setAccess": {
+        const p = params as { name: string; agentIds: string[] };
+        if (!this.extras.vault.setAccess(p.name, p.agentIds))
+          throw new RpcError("not_found", "secret not found");
+        this.broadcast("vault.changed", {});
+        return { ok: true };
+      }
+      case "vault.delete":
+        if (!this.extras.vault.delete((params as { name: string }).name)) {
+          throw new RpcError("not_found", "secret not found");
+        }
+        this.broadcast("vault.changed", {});
+        return { ok: true };
+      case "computer.access":
+        return {
+          available: this.extras.computer.available(),
+          agentIds: this.extras.computer.access(),
+        };
+      case "computer.setAccess": {
+        const ids = (params as { agentIds: string[] }).agentIds;
+        if (ids.some((id) => !this.agents.get(id)))
+          throw new RpcError("not_found", "agent not found");
+        this.extras.computer.setAccess(ids);
+        this.broadcast("computer.changed", { agentIds: this.extras.computer.access() });
+        return { ok: true };
+      }
+      case "voice.status":
+        return this.extras.voice.status();
+      case "voice.speak":
+        try {
+          this.extras.voice.speak((params as { text: string }).text);
+        } catch (e) {
+          throw new RpcError("bad_request", (e as Error).message);
+        }
+        return { ok: true };
+      case "voice.stop":
+        this.extras.voice.stop();
+        return { ok: true };
+      case "voice.transcribe": {
+        const p = params as { audioBase64: string; mime: string };
+        try {
+          return { text: await this.extras.voice.transcribe(p.audioBase64, p.mime) };
+        } catch (e) {
+          throw new RpcError("bad_request", (e as Error).message);
+        }
+      }
       case "browser.status":
         return {
           available: findBrowser() !== null && process.env.BOBAGENT_BROWSER !== "off",

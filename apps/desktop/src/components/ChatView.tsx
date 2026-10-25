@@ -1,5 +1,5 @@
 import type { Agent } from "@bobagent/protocol";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useChat } from "../hooks/useChat";
 import type { DaemonClient } from "../lib/daemon";
 import { PermissionNotice } from "./AgentSettings";
@@ -37,6 +37,13 @@ export function ChatView({
     queueRemove,
   } = useChat(client, agent.id);
   const [sendBusy, setSendBusy] = useState(false);
+  const [voice, setVoice] = useState({ tts: false, stt: false });
+  useEffect(() => {
+    client
+      .request("voice.status", {})
+      .then(setVoice)
+      .catch(() => {});
+  }, [client]);
 
   return (
     <div className="flex h-full flex-col">
@@ -89,6 +96,11 @@ export function ChatView({
         items={items}
         hasMore={hasMore}
         onLoadEarlier={loadEarlier}
+        onSpeak={
+          voice.tts
+            ? (text) => void client.request("voice.speak", { text }).catch(() => {})
+            : undefined
+        }
         onPermissionRespond={(requestId, optionId) => {
           void client.request("permissions.respond", { requestId, optionId }).catch(() => {});
         }}
@@ -145,6 +157,12 @@ export function ChatView({
         </div>
       )}
       <Composer
+        onTranscribe={
+          voice.stt
+            ? async (audioBase64, mime) =>
+                (await client.request("voice.transcribe", { audioBase64, mime })).text
+            : undefined
+        }
         running={runningTurn !== null || sendBusy}
         onSend={async (text, attachments) => {
           setSendBusy(true);

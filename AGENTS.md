@@ -185,6 +185,26 @@ text), `browser_click`, `browser_type`, `browser_press`, `browser_back`, `browse
 `BOBAGENT_BROWSER_HEADLESS=1` for tests. Tests: `test/browser.e2e.test.ts` (skipped when no
 browser is installed).
 
+## Vault, connectors, Computer Use, voice (Phase 11)
+
+Vault (`src/vault.ts`, migration 10 `vault` + `settings`): AES-256-GCM secrets; key in the
+macOS Keychain (service `BobAgent`, account `vault-key`), else `<data-dir>/vault.key`;
+`BOBAGENT_VAULT_KEY` (64 hex) overrides for tests. Per-secret agent allowlist. RPC
+`vault.list/set/setAccess/delete` (values never returned), event `vault.changed`; bridge
+`vault_list`, `vault_get`. Connectors (`src/connectors.ts`) use shared secrets without
+returning them: `connector.github` -> `github_api` (REST proxy, token redacted,
+`BOBAGENT_GITHUB_API` for tests); `connector.1password` -> `onepassword_read` (`op read`,
+optional service-account token); `connector.bitwarden` -> `bitwarden_get` (`bw get`,
+BW_SESSION). `BOBAGENT_OP_COMMAND`/`BOBAGENT_BW_COMMAND` override the CLIs.
+Computer Use (`src/computer.ts`, macOS): off per agent until `computer.setAccess`; bridge
+`computer_screenshot` (screencapture), `computer_click` (CoreGraphics via JXA),
+`computer_type`, `computer_key` (System Events, whitelisted keys/modifiers);
+`BOBAGENT_COMPUTER_DRYRUN=<file>` logs commands instead (tests).
+Voice (`src/voice.ts`): `voice.speak/stop` (`say`, or `BOBAGENT_TTS_COMMAND` with text on
+stdin), `voice.transcribe` (`BOBAGENT_STT_COMMAND` with `{file}`, or `whisper` on PATH),
+`voice.status`. UI: Vault view, Computer Use toggle, composer mic, read-aloud button;
+`src-tauri/Info.plist` has the microphone usage string. Tests: `test/phase11.e2e.test.ts`.
+
 ## Permissions
 
 Provider agents ask for approval only when THEIR OWN config says so

@@ -131,4 +131,14 @@ export const migrations: string[] = [
     error TEXT,
     created_at INTEGER NOT NULL
   )`,
+  // 10: encrypted vault + key/value settings
+  `CREATE TABLE vault (
+    name TEXT PRIMARY KEY,
+    iv TEXT NOT NULL,
+    data TEXT NOT NULL,
+    agent_ids TEXT NOT NULL DEFAULT '[]',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
 ];

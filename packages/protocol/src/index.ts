@@ -347,6 +347,17 @@ export const SkillSaveParams = z
   })
   .strict();
 
+// ---- Vault, Computer Use, voice ----
+
+export const VaultEntry = z.object({
+  name: z.string(),
+  agentIds: z.array(z.string()),
+  updatedAt: z.number(),
+});
+export type VaultEntry = z.infer<typeof VaultEntry>;
+const VaultName = z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/);
+const Ok = z.object({ ok: z.literal(true) });
+
 // ---- Agent browser ----
 
 export const BrowserTab = z.object({ agentId: z.string(), url: z.string(), title: z.string() });
@@ -490,6 +501,42 @@ export const methodMap = {
   "permissions.list": { params: PermissionsListParams, result: PermissionsListResult },
   "permissions.respond": { params: PermissionsRespondParams, result: PermissionsRespondResult },
   "agents.usage": { params: AgentsUsageParams, result: AgentUsage },
+  "vault.list": { params: z.object({}).strict(), result: z.array(VaultEntry) },
+  "vault.set": {
+    params: z
+      .object({
+        name: VaultName,
+        value: z.string().min(1).max(100_000),
+        agentIds: z.array(z.string()).default([]),
+      })
+      .strict(),
+    result: Ok,
+  },
+  "vault.setAccess": {
+    params: z.object({ name: VaultName, agentIds: z.array(z.string()) }).strict(),
+    result: Ok,
+  },
+  "vault.delete": { params: z.object({ name: VaultName }).strict(), result: Ok },
+  "computer.access": {
+    params: z.object({}).strict(),
+    result: z.object({ available: z.boolean(), agentIds: z.array(z.string()) }),
+  },
+  "computer.setAccess": {
+    params: z.object({ agentIds: z.array(z.string()) }).strict(),
+    result: Ok,
+  },
+  "voice.status": {
+    params: z.object({}).strict(),
+    result: z.object({ tts: z.boolean(), stt: z.boolean() }),
+  },
+  "voice.speak": { params: z.object({ text: z.string().min(1).max(20_000) }).strict(), result: Ok },
+  "voice.stop": { params: z.object({}).strict(), result: Ok },
+  "voice.transcribe": {
+    params: z
+      .object({ audioBase64: z.string().min(1).max(36_000_000), mime: z.string().max(100) })
+      .strict(),
+    result: z.object({ text: z.string() }),
+  },
   "browser.status": { params: z.object({}).strict(), result: BrowserState },
   "browser.closeTab": {
     params: z.object({ agentId: z.string() }).strict(),
@@ -589,6 +636,8 @@ export type DaemonEventMap = {
   "agent.config": { agentId: string; configOptions: ConfigOption[] };
   "agent.usage": AgentUsage;
   "routine.updated": Routine;
+  "vault.changed": Record<string, never>;
+  "computer.changed": { agentIds: string[] };
   "browser.updated": { running: boolean; tabs: BrowserTab[] };
   "routine.deleted": { id: string };
   "memories.changed": { agentId: string };
