@@ -512,6 +512,43 @@ export type MarketplaceItem = z.infer<typeof MarketplaceItem>;
 
 export const GatewayStatus = z.enum(["connecting", "connected", "error", "stopped"]);
 export type GatewayStatus = z.infer<typeof GatewayStatus>;
+export const EmailProvider = z.enum(["gmail", "icloud", "outlook", "custom"]);
+export type EmailProvider = z.infer<typeof EmailProvider>;
+export const EmailAccount = z.object({
+  id: z.string(),
+  label: z.string(),
+  provider: EmailProvider,
+  address: z.string(),
+  username: z.string(),
+  imapHost: z.string(),
+  imapPort: z.number().int(),
+  smtpHost: z.string(),
+  smtpPort: z.number().int(),
+  smtpSecure: z.boolean(),
+  /** Bots allowed to use the account; empty = every bot. */
+  agentIds: z.array(z.string()),
+  hasPassword: z.boolean(),
+  createdAt: z.number(),
+});
+export type EmailAccount = z.infer<typeof EmailAccount>;
+export const EmailDraftStatus = z.enum(["pending", "sending", "sent", "discarded", "failed"]);
+export const EmailDraft = z.object({
+  id: z.string(),
+  agentId: z.string(),
+  accountId: z.string(),
+  to: z.array(z.string()),
+  cc: z.array(z.string()),
+  subject: z.string(),
+  body: z.string(),
+  inReplyTo: z.string().nullable(),
+  status: EmailDraftStatus,
+  error: z.string().nullable(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+export type EmailDraft = z.infer<typeof EmailDraft>;
+const EmailAddressList = z.array(z.string().trim().email().max(320)).max(50);
+
 export const Gateway = z.object({
   id: z.string(),
   kind: GatewayKind,
@@ -827,6 +864,54 @@ export const methodMap = {
     params: z.object({ id: z.string() }).strict(),
     result: z.object({ ok: z.literal(true) }),
   },
+  "email.accounts.list": { params: z.object({}).strict(), result: z.array(EmailAccount) },
+  "email.accounts.save": {
+    params: z
+      .object({
+        id: z.string().optional(),
+        label: z.string().trim().max(80).optional(),
+        provider: EmailProvider,
+        address: z.string().trim().email().max(320),
+        username: z.string().trim().max(320).optional(),
+        password: z.string().min(1).max(1000).optional(),
+        imapHost: z.string().trim().max(255).optional(),
+        imapPort: z.number().int().min(1).max(65535).optional(),
+        smtpHost: z.string().trim().max(255).optional(),
+        smtpPort: z.number().int().min(1).max(65535).optional(),
+        smtpSecure: z.boolean().optional(),
+        agentIds: z.array(z.string()).max(200).optional(),
+      })
+      .strict(),
+    result: EmailAccount,
+  },
+  "email.accounts.delete": {
+    params: z.object({ id: z.string() }).strict(),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  "email.accounts.test": {
+    params: z.object({ id: z.string() }).strict(),
+    result: z.object({ ok: z.boolean(), imap: z.string(), smtp: z.string() }),
+  },
+  "email.drafts.list": {
+    params: z
+      .object({ agentId: z.string().optional(), pendingOnly: z.boolean().optional() })
+      .strict(),
+    result: z.array(EmailDraft),
+  },
+  "email.drafts.update": {
+    params: z
+      .object({
+        id: z.string(),
+        to: EmailAddressList.min(1).optional(),
+        cc: EmailAddressList.optional(),
+        subject: z.string().max(998).optional(),
+        body: z.string().max(200_000).optional(),
+      })
+      .strict(),
+    result: EmailDraft,
+  },
+  "email.drafts.send": { params: z.object({ id: z.string() }).strict(), result: EmailDraft },
+  "email.drafts.discard": { params: z.object({ id: z.string() }).strict(), result: EmailDraft },
   "vault.list": { params: z.object({}).strict(), result: z.array(VaultEntry) },
   "vault.set": {
     params: z
@@ -963,6 +1048,8 @@ export type DaemonEventMap = {
   "agent.usage": AgentUsage;
   "routine.updated": Routine;
   "gateway.updated": Gateway;
+  "email.accounts.changed": Record<string, never>;
+  "email.draft.updated": EmailDraft;
   "team.updated": TeamStatus;
   "team.message": TeamMessage;
   "hosts.changed": Record<string, never>;

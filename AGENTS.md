@@ -18,6 +18,18 @@ set by the test helper). Shared workspace: `UPBOT_WORKSPACE_ROOT` or
 `dirname(agentsRoot)/Workspace` (`~/UpBot/Workspace`), passed to local sessions as
 `StartOpts.extraDirs` (Claude `--add-dir`, Codex `writableRoots`).
 
+## Email (UpBot)
+
+`src/email.ts` (`EmailService`, migration 15 `email_accounts`, `email_drafts`): IMAP via
+`imapflow` + `mailparser`, SMTP via `nodemailer`. Presets gmail/icloud/outlook; app password
+in the vault as `email.<id>.password` (hidden from `vault.list`, never given to bots).
+`agentIds` empty = every bot. Bridge tools `email_accounts`, `email_search`, `email_read`,
+`email_draft` (creates a pending draft only), `email_draft_status`. Only the user sends:
+RPC `email.drafts.send` (also `email.accounts.list/save/delete/test`, `email.drafts.list/
+update/discard`); events `email.accounts.changed`, `email.draft.updated`. UI: Settings →
+Email and `DraftCards` above the composer. Tests: `UPBOT_EMAIL_FAKE_MAILBOX=<json>` replaces
+IMAP, `UPBOT_EMAIL_PLAINTEXT=1` allows non-TLS SMTP (`test/email.e2e.test.ts` with smtp-server).
+
 ## Layout
 
 - `packages/protocol` — `@upbot/protocol`: zod 4 schemas + the typed method map

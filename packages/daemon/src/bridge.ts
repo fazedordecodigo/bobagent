@@ -16,6 +16,7 @@ import type { ChannelService } from "./channels";
 import type { ComputerUse } from "./computer";
 import type { Connectors } from "./connectors";
 import { avatarFor } from "./draft";
+import type { EmailService, SearchQuery } from "./email";
 import type { MemoryStore } from "./memories";
 import type { McpServerSpec } from "./providers/types";
 import type { Broadcast } from "./rpc";
@@ -216,6 +217,75 @@ export const BRIDGE_TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "email_accounts",
+    description: "List the email accounts the user connected that you may use.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "email_search",
+    description:
+      "Search an email account over IMAP. Returns the newest matches first (uid, from, to, subject, date, seen).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        account: {
+          type: "string",
+          description: "Account id, address or label; optional when only one",
+        },
+        mailbox: { type: "string", description: "Default INBOX" },
+        text: { type: "string" },
+        from: { type: "string" },
+        to: { type: "string" },
+        subject: { type: "string" },
+        since: { type: "string", description: "YYYY-MM-DD" },
+        unseen: { type: "boolean" },
+        limit: { type: "number", description: "1-100, default 20" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "email_read",
+    description: "Read one email (headers, plain-text body, attachment names) by uid.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        account: { type: "string" },
+        mailbox: { type: "string" },
+        uid: { type: "number" },
+      },
+      required: ["uid"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "email_draft",
+    description:
+      "Prepare an email for the user to review. You cannot send email: the user sees the draft, can edit it, and decides to Send or Discard. Use email_draft_status to check the outcome.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        account: { type: "string" },
+        to: { type: "array", items: { type: "string" } },
+        cc: { type: "array", items: { type: "string" } },
+        subject: { type: "string" },
+        body: { type: "string", description: "Plain text" },
+        replyToUid: { type: "number", description: "uid of the INBOX message this replies to" },
+      },
+      required: ["to", "subject", "body"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "email_draft_status",
+    description: "Status of drafts you created (pending, sent, discarded, failed).",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string", description: "Draft id; omit for your recent drafts" } },
+      additionalProperties: false,
+    },
+  },
   ...(
     [
       [
@@ -329,6 +399,7 @@ export class Bridge {
   memories: MemoryStore | null = null;
   browser: BrowserService | null = null;
   vault: Vault | null = null;
+  email: EmailService | null = null;
   connectors: Connectors | null = null;
   computer: ComputerUse | null = null;
   skills: SkillLibrary | null = null;
@@ -537,6 +608,64 @@ export class Bridge {
         });
         this.broadcast?.("agent.created", created);
         return { text: `created agent ${created.name} (${created.id}, ${created.provider})` };
+      }
+      case "email_accounts":
+        return {
+          text: JSON.stringify(
+            this.email!.accountsFor(me.id).map(({ id, label, address, provider }) => ({
+              id,
+              label,
+              address,
+              provider,
+            })),
+          ),
+        };
+      case "email_search": {
+        const acct = this.email!.resolve(me.id, args.account);
+        return { text: JSON.stringify(await this.email!.search(acct, args as SearchQuery)) };
+      }
+      case "email_read": {
+        const acct = this.email!.resolve(me.id, args.account);
+        const mailbox = typeof args.mailbox === "string" && args.mailbox ? args.mailbox : "INBOX";
+        return { text: JSON.stringify(await this.email!.read(acct, Number(args.uid), mailbox)) };
+      }
+      case "email_draft": {
+        const acct = this.email!.resolve(me.id, args.account);
+        const list = (v: unknown) =>
+          (Array.isArray(v) ? v : typeof v === "string" ? v.split(",") : [])
+            .map((x) => String(x).trim())
+            .filter(Boolean);
+        const to = list(args.to);
+        const cc = list(args.cc);
+        const bad = [...to, ...cc].find((x) => !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(x));
+        if (!to.length) throw new Error("`to` needs at least one address");
+        if (bad) throw new Error(`not an email address: ${bad}`);
+        let inReplyTo: string | null = null;
+        let subject = String(args.subject ?? "");
+        if (typeof args.replyToUid === "number") {
+          const orig = await this.email!.read(acct, args.replyToUid);
+          inReplyTo = orig.messageId;
+          if (!/^re:/i.test(subject)) subject = subject || `Re: ${orig.subject}`;
+        }
+        const d = this.email!.createDraft(me.id, acct, {
+          to,
+          cc,
+          subject,
+          body: String(args.body ?? ""),
+          inReplyTo,
+        });
+        return {
+          text: `Draft ${d.id} is waiting for the user's review in UpBot. It is NOT sent; the user will Send or Discard it.`,
+        };
+      }
+      case "email_draft_status": {
+        const mine = this.email!.listDrafts({ agentId: me.id }).slice(0, 20);
+        const pick = typeof args.id === "string" ? mine.filter((d) => d.id === args.id) : mine;
+        return {
+          text: JSON.stringify(
+            pick.map(({ id, to, subject, status, error }) => ({ id, to, subject, status, error })),
+          ),
+        };
       }
       case "vault_list":
         return { text: JSON.stringify(this.vault!.allowed(me.id)) };

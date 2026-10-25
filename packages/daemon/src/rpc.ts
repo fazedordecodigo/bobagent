@@ -6,6 +6,7 @@ import type { ChannelService } from "./channels";
 import type { ChatStore, QueueStore } from "./chat-store";
 import type { ComputerUse } from "./computer";
 import { draftAgent } from "./draft";
+import type { EmailService } from "./email";
 import type { GatewayService } from "./gateways";
 import type { Marketplace } from "./marketplace";
 import type { MemoryStore } from "./memories";
@@ -42,6 +43,7 @@ export class Rpc {
       computer: ComputerUse;
       voice: Voice;
       gateways: GatewayService;
+      email: EmailService;
       marketplace: Marketplace;
       mobile: MobileServer;
       team: TeamClient;
@@ -329,6 +331,23 @@ export class Rpc {
       case "gateways.delete":
         this.extras.gateways.delete((params as { id: string }).id);
         return { ok: true };
+      case "email.accounts.list":
+        return this.extras.email.listAccounts();
+      case "email.accounts.save":
+        return this.extras.email.saveAccount(params as Parameters<EmailService["saveAccount"]>[0]);
+      case "email.accounts.delete":
+        this.extras.email.deleteAccount((params as { id: string }).id);
+        return { ok: true };
+      case "email.accounts.test":
+        return this.extras.email.testAccount((params as { id: string }).id);
+      case "email.drafts.list":
+        return this.extras.email.listDrafts(params as { agentId?: string; pendingOnly?: boolean });
+      case "email.drafts.update":
+        return this.extras.email.updateDraft(params as Parameters<EmailService["updateDraft"]>[0]);
+      case "email.drafts.send":
+        return this.extras.email.sendDraft((params as { id: string }).id);
+      case "email.drafts.discard":
+        return this.extras.email.discardDraft((params as { id: string }).id);
       case "vault.list":
         return this.extras.vault.list();
       case "vault.set": {

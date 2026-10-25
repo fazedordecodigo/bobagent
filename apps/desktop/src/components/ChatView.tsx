@@ -4,6 +4,7 @@ import { useChat } from "../hooks/useChat";
 import type { DaemonClient } from "../lib/daemon";
 import { PermissionNotice } from "./AgentSettings";
 import { Composer } from "./Composer";
+import { DraftCards } from "./EmailView";
 import { MessageList } from "./MessageList";
 import { UsageBar } from "./UsageBar";
 
@@ -156,6 +157,7 @@ export function ChatView({
           </div>
         </div>
       )}
+      <DraftCards client={client} agentId={agent.id} />
       <Composer
         onTranscribe={
           voice.stt

@@ -11,6 +11,7 @@ import { ChatStore, QueueStore } from "./chat-store";
 import { ComputerUse } from "./computer";
 import { Connectors } from "./connectors";
 import { openDatabase } from "./db";
+import { EmailService } from "./email";
 import { mergedPath } from "./env/login-path";
 import { GatewayService } from "./gateways";
 import { migrateLegacyHome } from "./legacy";
@@ -187,6 +188,8 @@ async function main() {
   const computer = new ComputerUse(db);
   const voice = new Voice(join(dataDir, "voice"), mergedPath);
   bridge.vault = vault;
+  const email = new EmailService(db, vault, broadcast);
+  bridge.email = email;
   bridge.connectors = new Connectors(vault);
   bridge.computer = computer;
   const mobile = new MobileServer(db);
@@ -209,6 +212,7 @@ async function main() {
       computer,
       voice,
       gateways,
+      email,
       marketplace: new Marketplace(db, skills, store),
       mobile,
       team,

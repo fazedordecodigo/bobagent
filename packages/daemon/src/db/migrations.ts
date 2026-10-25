@@ -208,4 +208,21 @@ export const migrations: string[] = [
   );
   CREATE INDEX subagents_parent ON subagents(parent_id, status);
   CREATE INDEX subagents_batch ON subagents(batch_id)`,
+  // 15: email accounts (password in the vault as email.<id>.password) and bot-drafted emails
+  `CREATE TABLE email_accounts (
+    id TEXT PRIMARY KEY,
+    config_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE email_drafts (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    data_json TEXT NOT NULL,
+    status TEXT NOT NULL,
+    error TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX email_drafts_agent ON email_drafts(agent_id, status)`,
 ];
