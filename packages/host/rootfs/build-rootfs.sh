@@ -111,7 +111,7 @@ RUN for p in ${PROVIDERS}; do case "\$p" in \
       codex) npm install -g @openai/codex ;; \
       gemini) npm install -g @google/gemini-cli ;; \
       opencode) npm install -g opencode-ai ;; \
-      cursor) curl -fsS https://cursor.com/install | bash && ln -sf /root/.local/bin/agent /usr/local/bin/agent ;; \
+      cursor) HOME=/opt/cursor-agent-home bash -c 'curl -fsS https://cursor.com/install | bash' && ln -sf /opt/cursor-agent-home/.local/bin/agent /usr/local/bin/agent ;; \
     esac; done
 DOCKER
 docker build -t upbot-guest "$work"
