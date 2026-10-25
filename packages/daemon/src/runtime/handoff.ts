@@ -12,7 +12,7 @@ function clip(text: string): string {
   return `${text.slice(0, HEAD)}\n[…]\n${text.slice(-TAIL)}`;
 }
 
-export function buildHandoff(messages: Msg[]): string | null {
+export function buildHandoff(messages: Msg[], summary: string | null = null): string | null {
   // newest-first selection until BUDGET chars of clipped text
   const picked: Msg[] = [];
   let total = 0;
@@ -24,9 +24,12 @@ export function buildHandoff(messages: Msg[]): string | null {
     picked.unshift(m);
     total += lineLen;
   }
-  if (picked.length === 0) return null;
+  const summaryBlock = summary
+    ? `<conversation_summary>\nSummary of your earlier work in this app (the context was compacted):\n${summary}\n</conversation_summary>\n\n`
+    : "";
+  if (picked.length === 0) return summaryBlock || null;
   const body = picked
     .map((m) => `[${m.kind === "user_message" ? "user" : "assistant"}] ${clip(m.text)}`)
     .join("\n");
-  return `<conversation_history>\nThis is the earlier conversation with you in this app. Your previous session is not available, so use it as context.\n${body}\n</conversation_history>\n\n`;
+  return `${summaryBlock}<conversation_history>\nThis is the earlier conversation with you in this app${summary ? " since the summary" : ""}. Your previous session is not available, so use it as context.\n${body}\n</conversation_history>\n\n`;
 }

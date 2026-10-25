@@ -85,4 +85,15 @@ export const migrations: string[] = [
   CREATE INDEX channel_messages_seq ON channel_messages(channel_id, seq);
   ALTER TABLE queue ADD COLUMN channel_id TEXT;
   ALTER TABLE queue ADD COLUMN prompt TEXT`,
+  // 7: per-agent token usage + context
+  `CREATE TABLE agent_usage (
+    agent_id TEXT PRIMARY KEY REFERENCES agents(id),
+    used_tokens INTEGER,
+    context_window INTEGER,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_usd REAL NOT NULL DEFAULT 0,
+    compactions INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL
+  )`,
 ];

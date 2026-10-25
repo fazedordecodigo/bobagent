@@ -5,6 +5,7 @@ import type { DaemonClient } from "../lib/daemon";
 import { PermissionNotice } from "./AgentSettings";
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
+import { UsageBar } from "./UsageBar";
 
 const dotCls: Record<string, string> = {
   idle: "bg-zinc-500",
@@ -51,10 +52,17 @@ export function ChatView({
             {status.status !== "idle" ? ` · ${status.status}` : ""}
           </div>
         </div>
+        <div className="ml-auto">
+          <UsageBar
+            client={client}
+            agentId={agent.id}
+            busy={status.status !== "idle" && status.status !== "error"}
+          />
+        </div>
         <button
           type="button"
           onClick={onOpenSettings}
-          className="ml-auto rounded p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+          className="rounded p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
           title="Agent settings"
         >
           <svg

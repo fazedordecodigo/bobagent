@@ -252,9 +252,30 @@ class CodexSession implements ProviderSession {
       case "turn/completed":
         this.onTurnCompleted((p.turn ?? {}) as Json);
         return;
+      case "thread/tokenUsage/updated":
+        this.onTokenUsage((p.tokenUsage ?? {}) as Json);
+        return;
       default:
         this.hooks.onUpdate({ type: "ignored", kind: method });
     }
+  }
+
+  private prevTotals = { input: 0, output: 0 };
+
+  private onTokenUsage(t: Json) {
+    const n = (v: unknown) => (typeof v === "number" ? v : 0);
+    const total = (t.total ?? {}) as Json;
+    const last = (t.last ?? {}) as Json;
+    const input = n(total.inputTokens);
+    const output = n(total.outputTokens);
+    this.hooks.onUpdate({
+      type: "usage",
+      usedTokens: t.last ? n(last.totalTokens) : null,
+      contextWindow: typeof t.modelContextWindow === "number" ? t.modelContextWindow : null,
+      inputTokens: Math.max(0, input - this.prevTotals.input),
+      outputTokens: Math.max(0, output - this.prevTotals.output),
+    });
+    this.prevTotals = { input, output };
   }
 
   private onTurnCompleted(turn: Json) {

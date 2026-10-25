@@ -20,6 +20,15 @@ export type NormalizedUpdate =
     }
   | { type: "config_update"; configOptions: ConfigOption[] }
   | { type: "mode_update"; modeId: string }
+  | {
+      /** usedTokens/contextWindow are snapshots; input/output/cost are per-turn deltas. */
+      type: "usage";
+      usedTokens?: number | null;
+      contextWindow?: number | null;
+      inputTokens?: number;
+      outputTokens?: number;
+      costUsd?: number;
+    }
   | { type: "ignored"; kind: string };
 
 export interface ProviderHooks {

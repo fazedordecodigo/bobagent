@@ -181,6 +181,31 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
     return { stopReason: "end_turn" };
   }
 
+  if (text.includes("<compaction_request>")) {
+    await say(
+      "agent_message_chunk",
+      `SUMMARY: ${sessions[sessionId].prompts.length - 1} earlier prompts`,
+    );
+    return { stopReason: "end_turn" };
+  }
+
+  const usageCmd = /^usage:(\d+)\/(\d+)$/.exec(text);
+  if (usageCmd) {
+    await ctx.client.notify("session/update", {
+      sessionId,
+      update: {
+        sessionUpdate: "usage_update",
+        used: Number(usageCmd[1]),
+        size: Number(usageCmd[2]),
+      },
+    });
+    await say("agent_message_chunk", "ok");
+    return {
+      stopReason: "end_turn",
+      usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+    } as { stopReason: string };
+  }
+
   if (text.startsWith("echo:")) {
     const t = text.slice(5);
     const n = Math.max(1, Math.ceil(t.length / 3));

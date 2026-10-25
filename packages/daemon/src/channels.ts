@@ -66,7 +66,7 @@ export class ChannelService {
     const rows = this.db
       .query(
         `SELECT m.agent_id FROM channel_members m JOIN agents a ON a.id = m.agent_id
-         WHERE m.channel_id = ? AND a.deleted_at IS NULL ORDER BY a.created_at ASC`,
+         WHERE m.channel_id = ? AND a.deleted_at IS NULL ORDER BY m.rowid ASC`,
       )
       .all(id) as { agent_id: string }[];
     return rows.map((r) => r.agent_id);

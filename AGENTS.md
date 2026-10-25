@@ -130,6 +130,21 @@ member's reply is forwarded to the owner (hop-limited by `MAX_HOPS`). Bridge too
 queued channel items and cancel running channel turns; posting needs `active`.
 UI: sidebar "Channels" + `components/ChannelView.tsx`. Tests: `test/channels.e2e.test.ts`.
 
+## Usage + compaction (Phase 7)
+
+Providers emit `{type:"usage"}` updates (ACP `usage_update` + `PromptResponse.usage`,
+Claude `result.usage`/`total_cost_usd`/`modelUsage.contextWindow`, Codex
+`thread/tokenUsage/updated`). `agent_usage` (migration 7) stores the context snapshot
+(`usedTokens`/`contextWindow`) and cumulative in/out tokens and cost; `agents.usage` RPC +
+`agent.usage` event; UI `components/UsageBar.tsx`. Compaction (`AgentRuntime.compact`, via
+`agents.compact` or automatically after a completed turn when used/window >=
+`BOBAGENT_COMPACT_THRESHOLD`, default 0.85, `off` disables): the agent answers a
+`<compaction_request>` prompt (output captured, permissions denied, timeout
+`BOBAGENT_COMPACT_TIMEOUT_MS`), the provider session is dropped and forgotten, and a
+`compaction` chat item stores the summary. The next fresh session gets
+`<conversation_summary>` plus only the history after it. The queue waits while compacting.
+Tests: `test/usage.e2e.test.ts`.
+
 ## Permissions
 
 Provider agents ask for approval only when THEIR OWN config says so

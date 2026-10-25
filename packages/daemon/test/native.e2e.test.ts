@@ -116,6 +116,12 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
     const thoughts = h.items.filter((i) => i.kind === "agent_thought" && i.turnId === t2.id);
     expect(thoughts.map((i) => ("text" in i ? i.text : ""))).toEqual(["pondering"]);
     expect(await lastAgentText(a.id)).toBe("deep");
+    const usage = (await c.request("agents.usage", { agentId: a.id })) as {
+      inputTokens: number;
+      contextWindow: number | null;
+    };
+    expect(usage.inputTokens).toBeGreaterThan(0);
+    expect(usage.contextWindow).toBe(cs.provider === "claude" ? 200000 : 258000);
     const log = readLog(stateDir);
     if (cs.provider === "claude") {
       const argv = log.find((l) => l.method === "argv")!.params as string[];

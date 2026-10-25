@@ -84,13 +84,18 @@ function streamText(msgId: string, text: string, kind: "text" | "thinking" = "te
   });
 }
 
+let totalCost = 0;
 function result(extra: Record<string, unknown> = {}) {
+  totalCost += 0.01;
   send({
     type: "result",
     subtype: "success",
     is_error: false,
     session_id: sessionId,
     result: "",
+    usage: { input_tokens: 10, cache_read_input_tokens: 5, output_tokens: 7 },
+    total_cost_usd: totalCost,
+    modelUsage: { fake: { contextWindow: 200000 } },
     ...extra,
   });
 }

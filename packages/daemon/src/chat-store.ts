@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { ChatItem, Turn, TurnStatus } from "@bobagent/protocol";
+import type { AgentUsage, ChatItem, Turn, TurnStatus } from "@bobagent/protocol";
 
 type TurnRow = {
   id: string;
@@ -157,6 +157,84 @@ export class ChatStore {
     const hasMore = rows.length > limit;
     const page = rows.slice(0, limit).reverse();
     return { items: page.map(rowToItem), hasMore };
+  }
+
+  clearAgentSession(agentId: string): void {
+    this.db.query("DELETE FROM agent_sessions WHERE agent_id = ?").run(agentId);
+  }
+
+  getUsage(agentId: string): AgentUsage {
+    const r = this.db.query("SELECT * FROM agent_usage WHERE agent_id = ?").get(agentId) as {
+      used_tokens: number | null;
+      context_window: number | null;
+      input_tokens: number;
+      output_tokens: number;
+      cost_usd: number;
+      compactions: number;
+      updated_at: number;
+    } | null;
+    return {
+      agentId,
+      usedTokens: r?.used_tokens ?? null,
+      contextWindow: r?.context_window ?? null,
+      inputTokens: r?.input_tokens ?? 0,
+      outputTokens: r?.output_tokens ?? 0,
+      costUsd: r?.cost_usd ?? 0,
+      compactions: r?.compactions ?? 0,
+      updatedAt: r?.updated_at ?? 0,
+    };
+  }
+
+  private putUsage(u: AgentUsage): AgentUsage {
+    this.db
+      .query(
+        `INSERT OR REPLACE INTO agent_usage
+         (agent_id, used_tokens, context_window, input_tokens, output_tokens, cost_usd, compactions, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        u.agentId,
+        u.usedTokens,
+        u.contextWindow,
+        u.inputTokens,
+        u.outputTokens,
+        u.costUsd,
+        u.compactions,
+        u.updatedAt,
+      );
+    return u;
+  }
+
+  applyUsage(
+    agentId: string,
+    d: {
+      usedTokens?: number | null;
+      contextWindow?: number | null;
+      inputTokens?: number;
+      outputTokens?: number;
+      costUsd?: number;
+    },
+  ): AgentUsage {
+    const u = this.getUsage(agentId);
+    return this.putUsage({
+      ...u,
+      usedTokens: d.usedTokens ?? u.usedTokens,
+      contextWindow: d.contextWindow ?? u.contextWindow,
+      inputTokens: u.inputTokens + (d.inputTokens ?? 0),
+      outputTokens: u.outputTokens + (d.outputTokens ?? 0),
+      costUsd: u.costUsd + (d.costUsd ?? 0),
+      updatedAt: Date.now(),
+    });
+  }
+
+  markCompacted(agentId: string): AgentUsage {
+    const u = this.getUsage(agentId);
+    return this.putUsage({
+      ...u,
+      usedTokens: null,
+      compactions: u.compactions + 1,
+      updatedAt: Date.now(),
+    });
   }
 
   getAgentSession(agentId: string): { provider: string; sessionId: string } | null {

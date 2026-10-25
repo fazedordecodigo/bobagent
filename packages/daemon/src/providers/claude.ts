@@ -196,8 +196,44 @@ class ClaudeSession implements ProviderSession {
     this.hooks.onUpdate(u);
   }
 
+  private lastContextTokens: number | null = null;
+  private lastCostUsd = 0;
+
+  private emitUsage(m: Json) {
+    const n = (v: unknown) => (typeof v === "number" ? v : 0);
+    const usage = (m.usage ?? {}) as Json;
+    let contextWindow: number | null = null;
+    for (const mu of Object.values((m.modelUsage ?? {}) as Record<string, Json>)) {
+      if (typeof mu?.contextWindow === "number")
+        contextWindow = Math.max(contextWindow ?? 0, mu.contextWindow);
+    }
+    const total = typeof m.total_cost_usd === "number" ? m.total_cost_usd : this.lastCostUsd;
+    const costUsd = Math.max(0, total - this.lastCostUsd);
+    this.lastCostUsd = total;
+    this.hooks.onUpdate({
+      type: "usage",
+      usedTokens: this.lastContextTokens,
+      contextWindow,
+      inputTokens:
+        n(usage.input_tokens) +
+        n(usage.cache_read_input_tokens) +
+        n(usage.cache_creation_input_tokens),
+      outputTokens: n(usage.output_tokens),
+      costUsd,
+    });
+  }
+
   private onAssistant(m: Json) {
     const msg = (m.message ?? {}) as Json;
+    const mu = msg.usage as Json | undefined;
+    if (mu) {
+      const n = (v: unknown) => (typeof v === "number" ? v : 0);
+      this.lastContextTokens =
+        n(mu.input_tokens) +
+        n(mu.cache_read_input_tokens) +
+        n(mu.cache_creation_input_tokens) +
+        n(mu.output_tokens);
+    }
     if (typeof m.error === "string" && this.active) this.active.assistantError = m.error;
     const synthetic = msg.model === "<synthetic>";
     const id = str(msg.id);
@@ -240,6 +276,7 @@ class ClaudeSession implements ProviderSession {
     if (!active) return;
     this.active = null;
     this.streamed.clear();
+    this.emitUsage(m);
     if (active.interrupting) {
       active.resolve({ stopReason: "cancelled" });
       return;

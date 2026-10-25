@@ -140,6 +140,14 @@ function mapUpdate(params: unknown): NormalizedUpdate {
       return { type: "config_update", configOptions: normalizeConfigOptions(u) };
     case "current_mode_update":
       return { type: "mode_update", modeId: String(u.currentModeId ?? "") };
+    case "usage_update": {
+      const raw = u as unknown as { used?: unknown; size?: unknown };
+      return {
+        type: "usage",
+        usedTokens: typeof raw.used === "number" ? raw.used : null,
+        contextWindow: typeof raw.size === "number" ? raw.size : null,
+      };
+    }
     default:
       return { type: "ignored", kind: u.sessionUpdate ?? "unknown" };
   }
@@ -153,7 +161,7 @@ class AcpSession implements ProviderSession {
     readonly resumed: boolean,
     private conn: acp.ClientConnection,
     private child: ChildProcess,
-    _hooks: ProviderHooks,
+    private hooks: ProviderHooks,
   ) {}
 
   async setConfigOption(configId: string, value: string): Promise<ConfigOption[]> {
@@ -171,7 +179,17 @@ class AcpSession implements ProviderSession {
     const res = (await this.conn.agent.request("session/prompt", {
       sessionId: this.sessionId,
       prompt: [{ type: "text", text }],
-    } as never)) as { stopReason?: string };
+    } as never)) as {
+      stopReason?: string;
+      usage?: { inputTokens?: number; outputTokens?: number };
+    };
+    if (res.usage) {
+      this.hooks.onUpdate({
+        type: "usage",
+        inputTokens: res.usage.inputTokens ?? 0,
+        outputTokens: res.usage.outputTokens ?? 0,
+      });
+    }
     return { stopReason: res.stopReason ?? "end_turn" };
   }
 

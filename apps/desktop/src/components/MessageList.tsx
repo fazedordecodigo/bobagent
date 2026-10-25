@@ -150,6 +150,27 @@ export function MessageList({
             return <ToolCallRow key={item.id} item={item} />;
           case "permission":
             return <PermissionCard key={item.id} item={item} onRespond={onPermissionRespond} />;
+          case "compaction":
+            return (
+              <div
+                key={item.id}
+                className="my-2 border-y border-zinc-800 py-2 text-xs text-zinc-500"
+              >
+                <div className="text-center">
+                  {item.status === "running"
+                    ? "Compacting context…"
+                    : item.status === "failed"
+                      ? `Context compaction failed: ${item.error ?? "unknown error"}`
+                      : `Context compacted (${item.reason})`}
+                </div>
+                {item.status === "completed" && (
+                  <details className="mt-1">
+                    <summary className="cursor-pointer text-center">Summary</summary>
+                    <p className="mt-1 whitespace-pre-wrap text-zinc-400">{item.summary}</p>
+                  </details>
+                )}
+              </div>
+            );
           case "error":
             return (
               <div

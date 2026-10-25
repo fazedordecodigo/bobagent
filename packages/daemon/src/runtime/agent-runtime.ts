@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type {
   Agent,
   AgentStatus,
+  AgentUsage,
   ChatItem,
   ConfigOption,
   PendingPermission,
@@ -11,6 +12,7 @@ import type {
 import type { AgentStore } from "../agents";
 import type { ChatStore, QueueSource, QueueStore } from "../chat-store";
 import { checkProviderAvailable, DEFAULT_MODE, getDriver } from "../providers";
+import { withTimeout } from "../providers/process";
 import {
   type McpServerSpec,
   ProviderError,
@@ -18,6 +20,25 @@ import {
   type ProviderSession,
 } from "../providers/types";
 import { buildHandoff } from "./handoff";
+
+const COMPACT_PROMPT = `<compaction_request>
+Your context window is nearly full. Write a concise but complete summary of this conversation
+so you can continue in a fresh session: the user's goals, decisions made, current state of the
+work (files, commands, results), open questions and next steps. Reply with the summary only and
+do not use any tools.
+</compaction_request>`;
+
+function compactThreshold(): number | null {
+  const raw = process.env.BOBAGENT_COMPACT_THRESHOLD;
+  if (raw === "off" || raw === "0") return null;
+  const n = raw ? Number(raw) : 0.85;
+  return Number.isFinite(n) && n > 0 && n <= 1 ? n : 0.85;
+}
+
+function compactTimeoutMs(): number {
+  const n = Number(process.env.BOBAGENT_COMPACT_TIMEOUT_MS);
+  return Number.isFinite(n) && n > 0 ? n : 180_000;
+}
 
 function xmlAttr(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
@@ -72,6 +93,8 @@ export class AgentRuntime {
   private draining = false;
   private turnHops = 0;
   private turnChannelId: string | null = null;
+  private compacting = false;
+  private capture: string[] | null = null;
   private disposing = false;
 
   constructor(
@@ -162,7 +185,8 @@ export class AgentRuntime {
 
   /** Starts the oldest queued item when idle and unpaused. */
   drain(): void {
-    if (this.draining || this.turn || this.sessionStarting || this.disposing) return;
+    if (this.draining || this.turn || this.sessionStarting || this.disposing || this.compacting)
+      return;
     if (this.agents.queuePaused(this.agent.id)) return;
     const next = this.queue.peek(this.agent.id);
     if (!next) return;
@@ -299,14 +323,25 @@ export class AgentRuntime {
         if (instructions) {
           promptText = `<agent_instructions>\n${instructions}\n</agent_instructions>\n\n${promptText}`;
         }
-        const prior = this.store
-          .history(this.agent.id, undefined, 500)
-          .items.filter(
+        const all = this.store.history(this.agent.id, undefined, 500).items;
+        let start = 0;
+        let summary: string | null = null;
+        for (let k = all.length - 1; k >= 0; k--) {
+          const it = all[k]!;
+          if (it.kind === "compaction" && it.status === "completed") {
+            start = k + 1;
+            summary = it.summary;
+            break;
+          }
+        }
+        const prior = all
+          .slice(start)
+          .filter(
             (i): i is Extract<ChatItem, { kind: "user_message" | "agent_message" }> =>
               (i.kind === "user_message" || i.kind === "agent_message") && i.turnId !== turn.id,
           )
           .map((i) => ({ kind: i.kind, text: i.text }));
-        const handoff = buildHandoff(prior);
+        const handoff = buildHandoff(prior, summary);
         if (handoff) promptText = handoff + promptText;
       }
       this.sessionPromptCount += 1;
@@ -364,7 +399,71 @@ export class AgentRuntime {
         return;
       }
     }
+    if (status === "completed" && this.shouldAutoCompact()) {
+      this.compact("auto").catch(() => {});
+      return;
+    }
     this.drain();
+  }
+
+  // ---- Usage + compaction ----
+
+  usage(): AgentUsage {
+    return this.store.getUsage(this.agent.id);
+  }
+
+  private shouldAutoCompact(): boolean {
+    const threshold = compactThreshold();
+    if (threshold === null) return false;
+    const u = this.store.getUsage(this.agent.id);
+    if (!u.contextWindow || u.usedTokens === null) return false;
+    return u.usedTokens / u.contextWindow >= threshold;
+  }
+
+  /** Summarize the session with the agent itself, then continue in a fresh session seeded with the summary. */
+  async compact(reason: "auto" | "manual"): Promise<void> {
+    if (this.turn || this.compacting || this.sessionStarting || this.disposing) {
+      throw new RpcError("busy", "the agent is busy");
+    }
+    if (this.store.history(this.agent.id, undefined, 1).items.length === 0) {
+      throw new RpcError("bad_request", "nothing to compact yet");
+    }
+    this.compacting = true;
+    const item = this.store.createItem(this.agent.id, null, "compaction", {
+      reason,
+      status: "running",
+      summary: "",
+    });
+    this.broadcast("item.created", item);
+    try {
+      const session = await this.ensureSession();
+      this.setStatus("running");
+      if (!this.sessionConfigApplied) await this.applySessionConfig(session);
+      this.capture = [];
+      await withTimeout(session.prompt(COMPACT_PROMPT), compactTimeoutMs(), "compaction");
+      const summary = this.capture.join("").trim();
+      this.capture = null;
+      if (!summary) throw new Error("the agent returned an empty summary");
+      this.dropSession();
+      this.store.clearAgentSession(this.agent.id);
+      this.broadcast(
+        "item.updated",
+        this.store.updateItemData(item.id, { reason, status: "completed", summary }),
+      );
+      this.broadcast("agent.usage", this.store.markCompacted(this.agent.id));
+    } catch (e) {
+      this.capture = null;
+      const error = e instanceof Error ? e.message : String(e);
+      this.broadcast(
+        "item.updated",
+        this.store.updateItemData(item.id, { reason, status: "failed", summary: "", error }),
+      );
+      throw e instanceof RpcError ? e : new RpcError("internal", `compaction failed: ${error}`);
+    } finally {
+      this.compacting = false;
+      if (this.status === "running") this.setStatus("idle");
+      this.drain();
+    }
   }
 
   cancel(): void {
@@ -476,6 +575,7 @@ export class AgentRuntime {
     toolKind: string | null;
     options: PermissionOption[];
   }): Promise<{ optionId: string | null }> {
+    if (this.compacting) return Promise.resolve({ optionId: null });
     const turn = this.turn;
     const requestId = crypto.randomUUID();
     return new Promise((resolve) => {
@@ -513,6 +613,14 @@ export class AgentRuntime {
   // ---- Updates ----
 
   private onUpdate(u: Parameters<ProviderHooks["onUpdate"]>[0]): void {
+    if (u.type === "usage") {
+      this.broadcast("agent.usage", this.store.applyUsage(this.agent.id, u));
+      return;
+    }
+    if (this.capture) {
+      if (u.type === "message_chunk") this.capture.push(u.text);
+      return;
+    }
     if (u.type === "config_update") {
       this.configOptions = u.configOptions;
       this.broadcast("agent.config", {

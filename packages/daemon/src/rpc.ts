@@ -137,6 +137,11 @@ export class Rpc {
         this.runtimes.respondPermission(p.requestId, p.optionId);
         return { ok: true };
       }
+      case "agents.usage":
+        return this.runtimes.usage((params as { agentId: string }).agentId);
+      case "agents.compact":
+        await this.runtimes.compact((params as { agentId: string }).agentId);
+        return { ok: true };
       case "channels.list":
         return this.channels.list((params as { includeArchived?: boolean }).includeArchived);
       case "channels.create":

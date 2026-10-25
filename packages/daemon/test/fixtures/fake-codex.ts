@@ -96,7 +96,22 @@ function message(threadId: string, turnId: string, text: string) {
   notify("item/completed", { threadId, turnId, item: { type: "agentMessage", id: itemId, text } });
 }
 
+let usageTotals = 0;
 function complete(threadId: string, turnId: string, status: string, error: J | null = null) {
+  usageTotals += 1;
+  notify("thread/tokenUsage/updated", {
+    threadId,
+    turnId,
+    tokenUsage: {
+      total: {
+        totalTokens: usageTotals * 150,
+        inputTokens: usageTotals * 100,
+        outputTokens: usageTotals * 50,
+      },
+      last: { totalTokens: 150, inputTokens: 100, outputTokens: 50 },
+      modelContextWindow: 258000,
+    },
+  });
   notify("turn/completed", { threadId, turn: { id: turnId, items: [], status, error } });
 }
 

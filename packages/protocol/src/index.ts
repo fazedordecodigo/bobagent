@@ -176,6 +176,13 @@ export const ChatItem = z.discriminatedUnion("kind", [
     resolution: z.object({ optionId: z.string().nullable() }).nullable(),
   }),
   ChatItemBase.extend({ kind: z.literal("error"), message: z.string() }),
+  ChatItemBase.extend({
+    kind: z.literal("compaction"),
+    reason: z.enum(["auto", "manual"]),
+    status: z.enum(["running", "completed", "failed"]),
+    summary: z.string(),
+    error: z.string().nullable().optional(),
+  }),
 ]);
 export type ChatItem = z.infer<typeof ChatItem>;
 
@@ -275,6 +282,23 @@ export const PermissionsRespondParams = z
 export type PermissionsRespondParams = z.infer<typeof PermissionsRespondParams>;
 export const PermissionsRespondResult = z.object({ ok: z.literal(true) });
 
+// ---- Usage + compaction ----
+
+export const AgentUsage = z.object({
+  agentId: z.string(),
+  /** Tokens in the provider's current context (null = provider does not report it). */
+  usedTokens: z.number().nullable(),
+  contextWindow: z.number().nullable(),
+  inputTokens: z.number(),
+  outputTokens: z.number(),
+  costUsd: z.number(),
+  compactions: z.number(),
+  updatedAt: z.number(),
+});
+export type AgentUsage = z.infer<typeof AgentUsage>;
+export const AgentsUsageParams = z.object({ agentId: z.string() }).strict();
+export const AgentsCompactParams = z.object({ agentId: z.string() }).strict();
+
 // ---- Channels ----
 
 export const ChannelStatus = z.enum(["active", "stopped", "archived"]);
@@ -354,6 +378,8 @@ export const methodMap = {
   "agents.statuses": { params: AgentsStatusesParams, result: AgentsStatusesResult },
   "permissions.list": { params: PermissionsListParams, result: PermissionsListResult },
   "permissions.respond": { params: PermissionsRespondParams, result: PermissionsRespondResult },
+  "agents.usage": { params: AgentsUsageParams, result: AgentUsage },
+  "agents.compact": { params: AgentsCompactParams, result: z.object({ ok: z.literal(true) }) },
   "channels.list": { params: ChannelsListParams, result: z.array(Channel) },
   "channels.create": { params: ChannelsCreateParams, result: Channel },
   "channels.history": { params: ChannelsHistoryParams, result: ChannelsHistoryResult },
@@ -384,6 +410,7 @@ export type DaemonEventMap = {
   "permission.resolved": { requestId: string; agentId: string; optionId: string | null };
   "queue.updated": QueueState;
   "agent.config": { agentId: string; configOptions: ConfigOption[] };
+  "agent.usage": AgentUsage;
   "channel.created": Channel;
   "channel.updated": Channel;
   "channel.message": ChannelMessage;
