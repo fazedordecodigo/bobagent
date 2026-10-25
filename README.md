@@ -74,9 +74,15 @@ MicroVMs start signed out. Under **Settings → Hosts → MicroVM sign-in** save
 subscription token (`claude setup-token`) or Anthropic API key, and/or an OpenAI API key for
 Codex. They are encrypted in the vault, hidden from agents, and sent only inside the run spec
 (SSH stdin, then vsock) as the provider's environment in Firecracker sessions; Codex logs in
-with `account/login/start` (`apiKey`) inside the VM. Process placements keep the host's login.
-Run the opt-in signed-out Claude/Codex SSH + Firecracker test with
-`bun run test:firecracker:providers`.
+with `account/login/start` (`apiKey`) inside the VM. Codex credentialed sessions use
+`CODEX_HOME=/run/bobagent/codex-home` on guest tmpfs; fake-key runs left no
+`/root/.codex/auth.json` on the persistent workspace. With fake `OPENAI_API_KEY` or
+`CODEX_API_KEY` alone, Codex `account/read` still reported signed out. Rejected VM credentials
+show a redacted provider detail and direct the user to **Settings → Hosts**. Process placements
+keep the host's login. Codex's own home and thread cache are ephemeral; if a thread cannot be
+resumed, BobAgent starts a fresh Codex thread while retaining its chat history. `bun run
+test:firecracker:providers` exercises fake Claude API/OAuth and Codex credentials, rejection
+handling, persistence, and credential leak boundaries.
 
 VMs have no network device: provider stdio, the agent-to-agent bridge, and an HTTPS proxy all
 use vsock. The proxy resolves hostnames once and rejects requests if any IPv4 result is not

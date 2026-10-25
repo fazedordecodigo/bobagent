@@ -2,11 +2,14 @@ import type { ConfigOption, PermissionOption, ToolCallStatus } from "@bobagent/p
 import {
   AUTH_RE,
   authMessage,
+  isVmCredentialRejection,
   type ProviderProcess,
   providerCommand,
   readJsonLines,
+  redactCredential,
   spawnProvider,
   truncate,
+  vmCredentialRejectedMessage,
   withTimeout,
   writeJsonLine,
 } from "./process";
@@ -145,13 +148,20 @@ class CodexSession implements ProviderSession {
     private proc: ProviderProcess,
     private hooks: ProviderHooks,
     private cwd: string,
+    private vmCredential: string | null,
   ) {
     readJsonLines(proc.child.stdout!, (m) => this.onMessage(m));
     proc.onUnexpectedExit((message) => this.fail(message));
   }
 
   private fail(message: string) {
-    const err = new Error(message);
+    const err =
+      this.vmCredential && isVmCredentialRejection(message)
+        ? new ProviderError(
+            "auth_required",
+            vmCredentialRejectedMessage("codex", message, this.vmCredential),
+          )
+        : new Error(redactCredential(message, this.vmCredential));
     for (const p of this.pending.values()) p.reject(err);
     this.pending.clear();
     const active = this.active;
@@ -296,11 +306,19 @@ class CodexSession implements ProviderSession {
     }
     if (turn.status === "failed") {
       const detail = str((turn.error as Json | null)?.message) ?? "codex turn failed";
-      active.reject(
-        AUTH_RE.test(detail)
-          ? new ProviderError("auth_required", authMessage("codex", detail))
-          : new Error(detail),
-      );
+      if (this.vmCredential && isVmCredentialRejection(detail))
+        active.reject(
+          new ProviderError(
+            "auth_required",
+            vmCredentialRejectedMessage("codex", detail, this.vmCredential),
+          ),
+        );
+      else
+        active.reject(
+          AUTH_RE.test(detail)
+            ? new ProviderError("auth_required", authMessage("codex", detail))
+            : new Error(redactCredential(detail, this.vmCredential)),
+        );
       return;
     }
     active.resolve({ stopReason: "end_turn" });
@@ -484,8 +502,15 @@ export class CodexDriver implements ProviderDriver {
     const { cwd, resumeSessionId, hooks } = opts;
     const mcp = opts.mcpServers ?? [];
     const { bin, args } = providerCommand("codex", opts.remote);
-    const proc = spawnProvider(bin, args, cwd, undefined, opts.remote);
-    const session = new CodexSession(proc, hooks, cwd);
+    const vmKey = opts.remote?.credentials.OPENAI_API_KEY ?? null;
+    const proc = spawnProvider(
+      bin,
+      args,
+      cwd,
+      vmKey ? { CODEX_HOME: "/run/bobagent/codex-home" } : undefined,
+      opts.remote,
+    );
+    const session = new CodexSession(proc, hooks, cwd, vmKey);
     try {
       await session.request("initialize", {
         clientInfo: { name: "bobagent", title: "BobAgent", version: "0.1.0" },
@@ -493,11 +518,19 @@ export class CodexDriver implements ProviderDriver {
       });
       session.notify("initialized");
       let account = await session.request("account/read", { refreshToken: false });
-      const vmKey = opts.remote?.credentials.OPENAI_API_KEY;
       if (account.account == null && account.requiresOpenaiAuth === true && vmKey) {
         await session.request("account/login/start", { type: "apiKey", apiKey: vmKey });
         account = await session.request("account/read", { refreshToken: false });
       }
+      if (account.account == null && account.requiresOpenaiAuth === true && vmKey)
+        throw new ProviderError(
+          "auth_required",
+          vmCredentialRejectedMessage(
+            "codex",
+            "Codex app-server remained signed out after API-key login",
+            vmKey,
+          ),
+        );
       if (
         account.account == null &&
         account.requiresOpenaiAuth === true &&
@@ -549,11 +582,21 @@ export class CodexDriver implements ProviderDriver {
       if (e instanceof ProviderError) throw e;
       const tail = proc.stderrTail();
       const message = (e as Error).message;
+      if (vmKey && isVmCredentialRejection(message))
+        throw new ProviderError(
+          "auth_required",
+          vmCredentialRejectedMessage("codex", message, vmKey),
+        );
       if (AUTH_RE.test(message))
-        throw new ProviderError("auth_required", authMessage("codex", message));
+        throw new ProviderError(
+          "auth_required",
+          authMessage("codex", redactCredential(message, vmKey)),
+        );
+      const safeTail = redactCredential(tail, vmKey);
+      const safeMessage = redactCredential(message, vmKey);
       throw new ProviderError(
         "provider_unavailable",
-        `codex failed to start: ${message}${tail ? `\n${tail.split("\n").slice(-5).join("\n")}` : ""}`,
+        `codex failed to start: ${safeMessage}${safeTail ? `\n${safeTail.split("\n").slice(-5).join("\n")}` : ""}`,
       );
     }
   }

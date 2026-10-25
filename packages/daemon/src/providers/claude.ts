@@ -2,11 +2,14 @@ import type { ConfigOption, PermissionOption } from "@bobagent/protocol";
 import {
   AUTH_RE,
   authMessage,
+  isVmCredentialRejection,
   type ProviderProcess,
   providerCommand,
   readJsonLines,
+  redactCredential,
   spawnProvider,
   truncate,
+  vmCredentialRejectedMessage,
   withTimeout,
   writeJsonLine,
 } from "./process";
@@ -109,6 +112,7 @@ class ClaudeSession implements ProviderSession {
     private hooks: ProviderHooks,
     sessionId: string,
     resumed: boolean,
+    private vmCredential: string | null,
   ) {
     this.sessionId = sessionId;
     this.resumed = resumed;
@@ -117,7 +121,13 @@ class ClaudeSession implements ProviderSession {
   }
 
   private fail(message: string) {
-    const err = new Error(message);
+    const err =
+      this.vmCredential && isVmCredentialRejection(message)
+        ? new ProviderError(
+            "auth_required",
+            vmCredentialRejectedMessage("claude", message, this.vmCredential),
+          )
+        : new Error(redactCredential(message, this.vmCredential));
     for (const p of this.control.values()) p.reject(err);
     this.control.clear();
     const active = this.active;
@@ -285,10 +295,27 @@ class ClaudeSession implements ProviderSession {
     }
     if (m.is_error === true || (typeof m.subtype === "string" && m.subtype !== "success")) {
       const detail = str(m.result) ?? (Array.isArray(m.errors) ? m.errors.join("; ") : "");
-      if (active.assistantError === "authentication_failed" || AUTH_RE.test(detail)) {
+      if (
+        this.vmCredential &&
+        (active.assistantError === "authentication_failed" || isVmCredentialRejection(detail))
+      ) {
+        active.reject(
+          new ProviderError(
+            "auth_required",
+            vmCredentialRejectedMessage("claude", detail, this.vmCredential),
+          ),
+        );
+      } else if (active.assistantError === "authentication_failed" || AUTH_RE.test(detail)) {
         active.reject(new ProviderError("auth_required", authMessage("claude", detail)));
       } else {
-        active.reject(new Error(detail || `claude turn failed (${String(m.subtype)})`));
+        active.reject(
+          new Error(
+            redactCredential(
+              detail || `claude turn failed (${String(m.subtype)})`,
+              this.vmCredential,
+            ),
+          ),
+        );
       }
       return;
     }
@@ -430,6 +457,8 @@ export class ClaudeDriver implements ProviderDriver {
         : [];
     const { bin, args } = providerCommand("claude", remote);
     const sessionId = resumeSessionId ?? crypto.randomUUID();
+    const vmCredential =
+      remote?.credentials.ANTHROPIC_API_KEY ?? remote?.credentials.CLAUDE_CODE_OAUTH_TOKEN ?? null;
     const proc = spawnProvider(
       bin,
       [
@@ -451,7 +480,13 @@ export class ClaudeDriver implements ProviderDriver {
       undefined,
       remote,
     );
-    const session = new ClaudeSession(proc, hooks, sessionId, resumeSessionId !== null);
+    const session = new ClaudeSession(
+      proc,
+      hooks,
+      sessionId,
+      resumeSessionId !== null,
+      vmCredential,
+    );
     let init: Json;
     try {
       init = await withTimeout(
@@ -462,8 +497,16 @@ export class ClaudeDriver implements ProviderDriver {
     } catch (e) {
       proc.kill();
       const tail = proc.stderrTail();
+      const detail = tail || (e as Error).message;
+      if (vmCredential && isVmCredentialRejection(detail))
+        throw new ProviderError(
+          "auth_required",
+          vmCredentialRejectedMessage("claude", detail, vmCredential),
+        );
       if (AUTH_RE.test(tail)) throw new ProviderError("auth_required", authMessage("claude", tail));
-      const msg = `claude failed to start${tail ? `: ${tail}` : `: ${(e as Error).message}`}`;
+      const safeTail = redactCredential(tail, vmCredential);
+      const safeError = redactCredential((e as Error).message, vmCredential);
+      const msg = `claude failed to start${safeTail ? `: ${safeTail}` : `: ${safeError}`}`;
       throw new ProviderError(resumeSessionId ? "internal" : "provider_unavailable", msg);
     }
     const mode = str(init.current_permission_mode) ?? "default";

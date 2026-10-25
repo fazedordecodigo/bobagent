@@ -676,6 +676,7 @@ async function guestExec() {
   mkdirSync(spec.cwd, { recursive: true });
   const proxy = process.env.BOBAGENT_GUEST_PROXY;
   const env = buildGuestProviderEnv(process.env, spec.env ?? {}, proxy);
+  if (env.CODEX_HOME === "/run/bobagent/codex-home") mkdirSync(env.CODEX_HOME, { recursive: true });
   const [bin, ...args] = spec.cmd;
   const child = spawn(bin as string, args, {
     cwd: spec.cwd,

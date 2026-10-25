@@ -306,7 +306,13 @@ claude `oauth_token` -> `CLAUDE_CODE_OAUTH_TOKEN`, `api_key` -> `ANTHROPIC_API_K
 `api_key` -> `OPENAI_API_KEY` + `CODEX_API_KEY`. `HostStore.launchFor` adds them to
 `RemoteLaunch.credentials` and the RunSpec env only for `firecracker` placements; when Codex
 reports signed out and a key is present the driver calls `account/login/start {type:"apiKey"}`.
-Tests: `test/vm-credentials.test.ts`.
+Credentialed Codex sessions set `CODEX_HOME=/run/bobagent/codex-home` on guest tmpfs; fake-key
+runs found no `/root/.codex/auth.json` on the persistent workspace. Fake `OPENAI_API_KEY` or
+`CODEX_API_KEY` alone left `account/read` signed out. Rejected credentials surface a redacted
+provider detail and a Settings → Hosts prompt. Tests: `test/vm-credentials.test.ts` and
+`bun run test:firecracker:providers` (real SSH/Firecracker, fake Claude API/OAuth and Codex
+keys, persistence and leak checks). Codex's home/thread cache is ephemeral; the driver falls
+back to `thread/start` if a thread cannot be resumed.
 Guest image: `packages/host/rootfs/` (`bobagent-init`, `build-rootfs.sh`); run the real host and
 SSH integration tests with `bun run test:firecracker` on a Linux Firecracker host; signed-out
 real Claude/Codex flows use `bun run test:firecracker:providers`. `--base <image>` overrides

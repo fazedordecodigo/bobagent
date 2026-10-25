@@ -20,17 +20,33 @@ process.stdin.on("data", (chunk: Buffer) => {
         const spec = JSON.parse(firstLine.subarray(0, newline).toString("utf8")) as {
           agentId?: string;
           cmd?: string[];
+          isolation?: string;
           env?: Record<string, string>;
         };
         if (spec.agentId && Array.isArray(spec.cmd)) {
           const env = spec.env ?? {};
           const entries = Object.entries(env);
+          const credentialKeys = [
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "OPENAI_API_KEY",
+            "CODEX_API_KEY",
+          ];
           appendFileSync(
             logPath,
             `${JSON.stringify({
               agentId: spec.agentId,
               command: spec.cmd[0],
+              isolation: spec.isolation,
               envKeys: entries.map(([key]) => key).sort(),
+              credentialKeys: entries
+                .map(([key]) => key)
+                .filter((key) => credentialKeys.includes(key))
+                .sort(),
+              hasFakeCredential: entries.some(
+                ([key, value]) =>
+                  credentialKeys.includes(key) && /^sk-(?:ant-|proj-).*fake-/.test(value),
+              ),
               bobagentKeys: entries
                 .map(([key]) => key)
                 .filter((key) => key.startsWith("BOBAGENT_")),
