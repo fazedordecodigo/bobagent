@@ -10,6 +10,7 @@ export const MOBILE_HTML = `<!doctype html>
 <title>BobAgent</title>
 <style>
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; font: 15px -apple-system, system-ui, sans-serif; background: #09090b; color: #f4f4f5; height: 100dvh; display: flex; flex-direction: column; }
   header { padding: 12px 16px; border-bottom: 1px solid #27272a; display: flex; align-items: center; gap: 8px; padding-top: max(12px, env(safe-area-inset-top)); }
   header button { background: none; border: 0; color: #38bdf8; font-size: 15px; }
