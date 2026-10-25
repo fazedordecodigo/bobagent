@@ -25,15 +25,24 @@ const enabled = process.env.UPBOT_REAL_FIRECRACKER === "1" && existsSync("/usr/s
 const providersRequested =
   process.env.UPBOT_REAL_FIRECRACKER === "1" && process.env.UPBOT_REAL_PROVIDERS === "1";
 const artifacts = resolve(process.env.UPBOT_FC_ARTIFACTS ?? join(homedir(), ".upbot/firecracker"));
+const providerCliPaths = {
+  claude: "/usr/local/bin/claude",
+  codex: "/usr/local/bin/codex",
+  gemini: "/usr/local/bin/gemini",
+  opencode: "/usr/local/bin/opencode",
+  cursor: "/opt/cursor-agent-home/.local/bin/agent",
+};
 const missingProviderClis = providersRequested
-  ? ["claude", "codex"].filter((cli) => {
-      const rootfs = join(artifacts, "rootfs.ext4");
-      if (!existsSync(rootfs)) return true;
-      const result = spawnSync("debugfs", ["-R", `stat /usr/local/bin/${cli}`, rootfs], {
-        encoding: "utf8",
-      });
-      return result.status !== 0 || !/Inode:\s+\d+/.test(result.stdout);
-    })
+  ? Object.entries(providerCliPaths)
+      .filter(([, path]) => {
+        const rootfs = join(artifacts, "rootfs.ext4");
+        if (!existsSync(rootfs)) return true;
+        const result = spawnSync("debugfs", ["-R", `stat ${path}`, rootfs], {
+          encoding: "utf8",
+        });
+        return result.status !== 0 || !/Inode:\s+\d+/.test(result.stdout);
+      })
+      .map(([cli]) => cli)
   : [];
 if (providersRequested && missingProviderClis.length)
   console.log(
@@ -42,6 +51,7 @@ if (providersRequested && missingProviderClis.length)
 const realProvidersEnabled = enabled && providersRequested && missingProviderClis.length === 0;
 const TOKEN = `firecracker-ssh-${crypto.randomUUID()}`;
 const FAKE_AGENT = join(REPO_ROOT, "packages/daemon/test/fixtures/fake-acp-agent.ts");
+const REAL_ACP_PROBE = join(REPO_ROOT, "packages/daemon/test/fixtures/real-acp-probe.ts");
 const HOST_MAIN = join(REPO_ROOT, "packages/host/src/main.ts");
 const SSH_RUN_SPEC_WRAPPER = join(
   REPO_ROOT,
@@ -87,6 +97,7 @@ async function runGuest(
   cmd: string[],
   env: Record<string, string>,
   input: string,
+  inputWaitMs = 3000,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   const guestHostEnv = { ...process.env };
   for (const name of [
@@ -94,6 +105,8 @@ async function runGuest(
     "CLAUDE_CODE_OAUTH_TOKEN",
     "OPENAI_API_KEY",
     "CODEX_API_KEY",
+    "GEMINI_API_KEY",
+    "CURSOR_API_KEY",
   ])
     delete guestHostEnv[name];
   const proc = Bun.spawn(["bun", HOST_MAIN, "run"], {
@@ -115,7 +128,7 @@ async function runGuest(
   if (input) {
     await Bun.sleep(2500);
     proc.stdin.write(input);
-    await Bun.sleep(3000);
+    await Bun.sleep(inputWaitMs);
   }
   proc.stdin.end();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -164,8 +177,8 @@ async function waitForSsh(port: number) {
   throw new Error("private sshd did not accept connections");
 }
 
-async function waitForPidExit(pid: number) {
-  const deadline = Date.now() + 15000;
+async function waitForPidExit(pid: number, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
       const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
@@ -182,8 +195,8 @@ async function waitForPidExit(pid: number) {
   throw new Error(`firecracker pid ${pid} is still alive: ${command}`);
 }
 
-async function waitForRunDirsRemoved(root: string, agentId: string) {
-  const deadline = Date.now() + 15000;
+async function waitForRunDirsRemoved(root: string, agentId: string, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (!firecrackerRunDirs(root, agentId).length) return;
     await Bun.sleep(50);
@@ -229,9 +242,13 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
     sshDir = tmp("fc-sshd-");
     const bundle = join(sshDir, "fake-acp-agent.js");
     run("bun", ["build", FAKE_AGENT, "--target=bun", "--outfile", bundle]);
-    root = makeFirecrackerHostRoot([
-      { source: bundle, destination: "/opt/upbot/fake-acp-agent.js" },
-    ]);
+    const extraFiles = [{ source: bundle, destination: "/opt/upbot/fake-acp-agent.js" }];
+    if (providersRequested) {
+      const probe = join(sshDir, "real-acp-probe.js");
+      run("bun", ["build", REAL_ACP_PROBE, "--target=bun", "--outfile", probe]);
+      extraFiles.push({ source: probe, destination: "/opt/upbot/real-acp-probe.js" });
+    }
+    root = makeFirecrackerHostRoot(extraFiles);
     username = userInfo().username;
     port = await freePort();
     const hostKey = join(sshDir, "host_key");
@@ -294,8 +311,14 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
             OPENAI_API_KEY: "sk-sentinel-leak",
             UPBOT_PROVIDER_COMMAND_CLAUDE: "",
             UPBOT_PROVIDER_COMMAND_CODEX: "",
+            UPBOT_PROVIDER_COMMAND_GEMINI: "",
+            UPBOT_PROVIDER_COMMAND_OPENCODE: "",
+            UPBOT_PROVIDER_COMMAND_CURSOR: "",
             UPBOT_ACP_COMMAND_CLAUDE: "",
             UPBOT_ACP_COMMAND_CODEX: "",
+            UPBOT_ACP_COMMAND_GEMINI: "",
+            UPBOT_ACP_COMMAND_OPENCODE: "",
+            UPBOT_ACP_COMMAND_CURSOR: "",
           }
         : {}),
     });
@@ -462,7 +485,151 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
     expect(vms.some((entry) => entry.isDirectory())).toBe(true);
   }, 240000);
 
-  describe.skipIf(!realProvidersEnabled)("real Claude and Codex providers", () => {
+  describe.skipIf(!realProvidersEnabled)("real providers in Firecracker", () => {
+    test("runs all five installed provider CLIs in a real guest", async () => {
+      const result = await runGuest(
+        root,
+        `cli-versions-${crypto.randomUUID()}`,
+        [
+          "sh",
+          "-c",
+          "claude --version && codex --version && gemini --version && opencode --version && agent --version",
+        ],
+        {},
+        "",
+      );
+      expect(result.code).toBe(0);
+      console.log(`Guest CLI versions:\n${result.stdout.trim()}`);
+    }, 90000);
+
+    test("surfaces signed-out Gemini, OpenCode, and Cursor ACP errors and cleans up VMs", async () => {
+      host = (await client.request("hosts.install", { id: host.id })) as RemoteHost;
+      host = (await client.request("hosts.check", { id: host.id })) as RemoteHost;
+      expect(host.preflight?.firecrackerReady).toBe(true);
+      expect(host.preflight?.guestHelperCurrent).toBe(true);
+      const runSpecEnvLogPath = providerRunSpecEnvLog;
+      if (runSpecEnvLogPath === null) throw new Error("RunSpec env log path is unavailable");
+
+      const providerAgentIds: Record<string, string> = {};
+      const loginCommands = {
+        gemini: "gemini",
+        opencode: "opencode auth login",
+        cursor: "agent login",
+      } as const;
+      for (const provider of ["gemini", "opencode", "cursor"] as const) {
+        const probe = await runGuest(
+          root,
+          `acp-probe-${provider}-${crypto.randomUUID()}`,
+          ["bun", "/opt/upbot/real-acp-probe.js", provider],
+          {},
+          "\n",
+          26000,
+        );
+        expect(probe.code).toBe(0);
+        const rawText =
+          probe.stdout
+            .trim()
+            .split("\n")
+            .findLast((line) => line.startsWith("{")) ?? "";
+        if (rawText) {
+          const raw = JSON.parse(rawText) as {
+            initialize: { authMethods?: unknown } | null;
+            sessionNew: unknown;
+            prompt: unknown;
+            failedAt: string | null;
+            error: string | null;
+            stderr: string;
+          };
+          console.log(`${provider} raw ACP behavior: ${JSON.stringify(raw)}`);
+        } else {
+          console.log(
+            `${provider} ACP probe emitted no response JSON (exit=${probe.code}; stderr=${probe.stderr.slice(-2000)})`,
+          );
+        }
+
+        const agent = (await client.request("agents.create", {
+          name: `real-${provider}`,
+          provider,
+          instructions: "",
+        })) as Agent;
+        providerAgentIds[provider] = agent.id;
+        await client.request("placements.set", {
+          agentId: agent.id,
+          hostId: host.id,
+          isolation: "firecracker",
+          vcpus: 1,
+          memMib: 512,
+        });
+
+        const observedPids = new Set<number>();
+        const collectPids = () => {
+          for (const runDir of firecrackerRunDirs(root, agent.id)) {
+            const pidFile = join(runDir, "firecracker.pid");
+            if (existsSync(pidFile)) observedPids.add(recordedFirecrackerPid(runDir));
+          }
+        };
+        const pidPoll = setInterval(collectPids, 10);
+        collectPids();
+        const startedAt = Date.now();
+        let turn: Turn;
+        try {
+          const queue = (await client.request("chat.send", {
+            agentId: agent.id,
+            text: "Reply with READY.",
+          })) as { queueId: string };
+          turn = await waitForEvent(client, agent.id, queue.queueId, 30000);
+        } finally {
+          clearInterval(pidPoll);
+          collectPids();
+        }
+
+        const durationMs = Date.now() - startedAt;
+        const errorText = turn.error ?? "";
+        expect(turn.status).toBe("failed");
+        expect(errorText).toContain("requires sign-in");
+        expect(errorText).toContain(loginCommands[provider]);
+        const history = (await client.request("chat.history", {
+          agentId: agent.id,
+        })) as { items: ChatItem[] };
+        const errorItem = history.items.filter((item) => item.kind === "error").at(-1);
+        expect(errorItem?.kind).toBe("error");
+        if (errorItem?.kind === "error") expect(errorItem.message).toBe(errorText);
+        console.log(`${provider} signed-out chat error (${durationMs} ms): ${errorText}`);
+
+        expect(observedPids.size).toBeGreaterThan(0);
+        for (const pid of observedPids) await waitForPidExit(pid, 30000);
+        await waitForRunDirsRemoved(root, agent.id, 30000);
+        expect(firecrackerRunDirs(root, agent.id)).toHaveLength(0);
+        const proxyLogPath = join(root, "vms", agent.id, "proxy.log");
+        const proxyLog = existsSync(proxyLogPath) ? readFileSync(proxyLogPath, "utf8").trim() : "";
+        console.log(`${provider} proxy activity:\n${proxyLog || "(no CONNECT requests)"}`);
+        await client.request("agents.delete", { id: agent.id });
+      }
+
+      const runSpecs = readFileSync(runSpecEnvLogPath, "utf8")
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map(
+          (line) =>
+            JSON.parse(line) as {
+              agentId: string;
+              command: string;
+              credentialKeys: string[];
+              upbotKeys: string[];
+            },
+        );
+      for (const provider of ["gemini", "opencode", "cursor"] as const) {
+        const specEnvs = runSpecs.filter((entry) => entry.agentId === providerAgentIds[provider]);
+        expect(specEnvs.length).toBeGreaterThan(0);
+        for (const entry of specEnvs) {
+          expect(entry.command).toBe(provider === "cursor" ? "agent" : provider);
+          expect(entry.credentialKeys).toEqual([]);
+          expect(entry.upbotKeys).toEqual([]);
+        }
+      }
+    }, 300000);
+
     test("probes real Codex account/read with API-key environment alone", async () => {
       const version = await runGuest(root, "codex-version", ["codex", "--version"], {}, "");
       console.log(`Codex guest version command (${version.code}): ${version.stdout.trim()}`);
@@ -543,6 +710,7 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
         ["sh", "-c", 'mkdir -p "$CODEX_HOME" && exec codex app-server --listen stdio://'],
         { OPENAI_API_KEY: key, CODEX_HOME: "/run/upbot/codex-home" },
         `${rpc}\n`,
+        8000,
       );
       const messages = result.stdout.split(/\r?\n/).flatMap((line) => {
         try {
@@ -557,6 +725,11 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
       const account = messages.find((message) => message.id === 2)?.result as
         | Record<string, unknown>
         | undefined;
+      if (!account) {
+        console.log(
+          `Codex tmpfs home raw response: stdout=${result.stdout.replaceAll(key, "<redacted>")} stderr=${result.stderr.replaceAll(key, "<redacted>")}`,
+        );
+      }
       expect(initialized?.codexHome).toBe("/run/upbot/codex-home");
       expect(account?.account).toBeNull();
       expect(account?.requiresOpenaiAuth).toBe(true);
@@ -690,7 +863,7 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
           );
 
       const runCredentialed = async (
-        provider: "claude" | "codex",
+        provider: "claude" | "codex" | "gemini" | "cursor",
         kind: "api_key" | "oauth_token",
         key: string,
         envKeys: string[],
@@ -755,7 +928,9 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
         const message = turn.error ?? "";
         expect(turn.status).toBe("failed");
         if (!message.includes("the saved microVM credential was rejected"))
-          throw new Error(`${provider} did not report a rejected saved microVM credential`);
+          throw new Error(
+            `${provider} did not report a rejected saved microVM credential: ${message.replaceAll(key, "<redacted>")}`,
+          );
         if (!message.includes("Update it in Settings → Hosts."))
           throw new Error(`${provider} credential rejection did not direct the user to Settings`);
         if (message.includes(key)) throw new Error(`${provider} chat exposed the fake credential`);
@@ -788,7 +963,7 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
         expect(specEnvs.length).toBeGreaterThan(0);
         for (const entry of specEnvs) {
           expect(entry.isolation).toBe("firecracker");
-          expect(entry.command).toBe(provider);
+          expect(entry.command).toBe(provider === "cursor" ? "agent" : provider);
           expect(entry.credentialKeys).toEqual(envKeys);
           expect(entry.hasFakeCredential).toBe(true);
           expect(entry.upbotKeys).toEqual([]);
@@ -815,6 +990,37 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
           `${provider} credential proxy activity:\n${proxyLog || "(no CONNECT requests)"}`,
         );
         return agent.id;
+      };
+
+      const runNonePlacement = async (provider: "gemini" | "cursor", key: string) => {
+        const agent = (await client.request("agents.create", {
+          name: `credential-none-${provider}`,
+          provider,
+          instructions: "",
+        })) as Agent;
+        await client.request("placements.set", {
+          agentId: agent.id,
+          hostId: host.id,
+          isolation: "none",
+        });
+        const queue = (await client.request("chat.send", {
+          agentId: agent.id,
+          text: "Reply with READY.",
+        })) as { queueId: string };
+        await waitForEvent(client, agent.id, queue.queueId, 30000);
+        const entries = runSpecs().filter((entry) => entry.agentId === agent.id);
+        expect(entries.length).toBeGreaterThan(0);
+        for (const entry of entries) {
+          expect(entry.isolation).toBe("none");
+          expect(entry.credentialKeys).toEqual([]);
+          expect(entry.hasFakeCredential).toBe(false);
+          expect(entry.upbotKeys).toEqual([]);
+          expect(entry.hasSentinelValue).toBe(false);
+          expect(JSON.stringify(entry)).not.toContain(key);
+        }
+        await client.request("agents.delete", { id: agent.id });
+        expect(firecrackerRunDirs(root, agent.id)).toHaveLength(0);
+        console.log(`${provider} isolation:none RunSpec evidence: ${JSON.stringify(entries[0])}`);
       };
 
       const claudeApiKey = `sk-ant-api03-fake-${crypto.randomUUID()}`;
@@ -853,11 +1059,43 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
       await runCredentialed("claude", "oauth_token", claudeOauth, ["CLAUDE_CODE_OAUTH_TOKEN"]);
       const codexKey = `sk-proj-fake-${crypto.randomUUID()}`;
       await runCredentialed("codex", "api_key", codexKey, ["CODEX_API_KEY", "OPENAI_API_KEY"]);
+      const geminiKey = `AIzaSyFake-fake-${crypto.randomUUID()}`;
+      await runCredentialed("gemini", "api_key", geminiKey, ["GEMINI_API_KEY"]);
+      const geminiEnv = await runGuest(
+        root,
+        `gemini-env-${crypto.randomUUID()}`,
+        ["sh", "-c", 'test -n "$GEMINI_API_KEY" && echo GEMINI_API_KEY_PRESENT'],
+        { GEMINI_API_KEY: geminiKey },
+        "",
+      );
+      expect(geminiEnv.code).toBe(0);
+      expect(geminiEnv.stdout).toContain("GEMINI_API_KEY_PRESENT");
+      expect(geminiEnv.stdout).not.toContain(geminiKey);
+      expect(geminiEnv.stderr).not.toContain(geminiKey);
+      console.log("GEMINI_API_KEY reached a guest process through RunSpec env");
+      await runNonePlacement("gemini", geminiKey);
+      const cursorKey = `sk-cursor-fake-${crypto.randomUUID()}`;
+      await runCredentialed("cursor", "api_key", cursorKey, ["CURSOR_API_KEY"]);
+      const cursorEnv = await runGuest(
+        root,
+        `cursor-env-${crypto.randomUUID()}`,
+        ["sh", "-c", 'test -n "$CURSOR_API_KEY" && echo CURSOR_API_KEY_PRESENT'],
+        { CURSOR_API_KEY: cursorKey },
+        "",
+      );
+      expect(cursorEnv.code).toBe(0);
+      expect(cursorEnv.stdout).toContain("CURSOR_API_KEY_PRESENT");
+      expect(cursorEnv.stdout).not.toContain(cursorKey);
+      expect(cursorEnv.stderr).not.toContain(cursorKey);
+      console.log("CURSOR_API_KEY reached a guest process through RunSpec env");
+      await runNonePlacement("cursor", cursorKey);
 
       await Bun.sleep(100);
       expect(daemonStderrText.includes(claudeApiKey)).toBe(false);
       expect(daemonStderrText.includes(claudeOauth)).toBe(false);
       expect(daemonStderrText.includes(codexKey)).toBe(false);
+      expect(daemonStderrText.includes(geminiKey)).toBe(false);
+      expect(daemonStderrText.includes(cursorKey)).toBe(false);
       await assertNoPlaintext(
         daemonDirs.flatMap((dir) => filesUnder(dir)),
         fakeCredentials,
