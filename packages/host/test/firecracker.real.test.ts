@@ -173,6 +173,18 @@ describe.skipIf(!enabled)("real Firecracker host", () => {
     expect(existsSync(eofDir)).toBe(false);
   }, 90000);
 
+  test("bounds the run when the guest command ignores stdin EOF", async () => {
+    const run = hostRun(root, spec("ignored-eof", ["sleep", "600"]));
+    const runDir = await waitForRunDir(root, "ignored-eof");
+    const pid = recordedFirecrackerPid(runDir);
+    const started = Date.now();
+    const result = await waitForExit(run, 25000);
+    expect(result.code).toBe(0);
+    expect(Date.now() - started).toBeLessThan(25000);
+    await waitForPidExit(pid);
+    expect(existsSync(runDir)).toBe(false);
+  }, 45000);
+
   test("applies the requested vCPU and memory limits", async () => {
     const run = hostRun(
       root,

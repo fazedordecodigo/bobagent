@@ -158,13 +158,19 @@ async function pumpFramedStdin(rest: Buffer, sink: NodeJS.WritableStream) {
   await writeFrame(Buffer.alloc(0));
 }
 
-function pumpGuestStdin(rest: Buffer, source: NodeJS.ReadableStream, sink: NodeJS.WritableStream) {
+function pumpGuestStdin(
+  rest: Buffer,
+  source: NodeJS.ReadableStream,
+  sink: NodeJS.WritableStream,
+  onEnd: () => void,
+) {
   let buffer = rest;
   let ended = false;
   const finish = () => {
     if (ended) return;
     ended = true;
     sink.end();
+    onEnd();
   };
   const onData = (chunk: Buffer) => {
     if (ended) return;
@@ -490,6 +496,7 @@ async function runFirecracker(spec: RunSpec, rest: Buffer) {
   writeFileSync(pidFile, String(vm.pid ?? ""));
   let vmAlive = true;
   let cleaned = false;
+  let eofBackstop: ReturnType<typeof setTimeout> | undefined;
   let cleanup = () => {};
   const onSignal = () => {
     cleanup();
@@ -510,6 +517,7 @@ async function runFirecracker(spec: RunSpec, rest: Buffer) {
   cleanup = () => {
     if (cleaned) return;
     cleaned = true;
+    if (eofBackstop) clearTimeout(eofBackstop);
     vmAlive = false;
     vm.removeListener("exit", onVmExit);
     process.off("SIGTERM", onSignal);
@@ -552,7 +560,16 @@ async function runFirecracker(spec: RunSpec, rest: Buffer) {
   guest.pipe(process.stdout);
   guest.resume();
   guest.on("error", () => {});
-  void pumpFramedStdin(rest, guest).catch(() => {});
+  void pumpFramedStdin(rest, guest)
+    .then(() => {
+      if (cleaned) return;
+      eofBackstop = setTimeout(() => {
+        cleanup();
+        finish(0);
+      }, 15000);
+      eofBackstop.unref();
+    })
+    .catch(() => {});
   guest.on("close", () => {
     cleanup();
     finish(0);
@@ -588,11 +605,16 @@ async function guestExec() {
     env,
     stdio: ["pipe", "pipe", "inherit"],
   });
+  let inputEofTimer: ReturnType<typeof setTimeout> | undefined;
   child.on("error", (e) => die(`cannot start ${bin}: ${e.message}`, 127));
   child.stdout.pipe(process.stdout);
   child.stdin.on("error", () => {});
-  pumpGuestStdin(rest, process.stdin, child.stdin);
+  pumpGuestStdin(rest, process.stdin, child.stdin, () => {
+    inputEofTimer = setTimeout(() => child.kill("SIGKILL"), 5000);
+    inputEofTimer.unref();
+  });
   child.on("close", (code, signal) => {
+    if (inputEofTimer) clearTimeout(inputEofTimer);
     spawnSync("sync");
     finish(code ?? (signal ? 1 : 0));
   });
