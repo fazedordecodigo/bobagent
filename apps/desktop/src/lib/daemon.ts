@@ -16,10 +16,23 @@ export class DaemonClient {
   private reconnectDelay = 500;
   private closed = false;
   private connection: DaemonConnection | null = null;
+  private everConnected = false;
+  private reconnectCbs = new Set<() => void>();
 
   async connect(): Promise<void> {
-    this.connection = await invoke<DaemonConnection>("daemon_connection");
+    // Dev-only browser path: vite dev server outside Tauri has no invoke bridge.
+    if (!("__TAURI_INTERNALS__" in window) && import.meta.env.DEV) {
+      const p = new URLSearchParams(location.hash.slice(1));
+      this.connection = { port: Number(p.get("port")), token: p.get("token") ?? "" };
+    } else {
+      this.connection = await invoke<DaemonConnection>("daemon_connection");
+    }
     await this.openSocket();
+  }
+
+  onReconnect(cb: () => void): () => void {
+    this.reconnectCbs.add(cb);
+    return () => this.reconnectCbs.delete(cb);
   }
 
   private openSocket(): Promise<void> {
@@ -29,6 +42,10 @@ export class DaemonClient {
       this.ws = ws;
       ws.onopen = () => {
         this.reconnectDelay = 500;
+        if (this.everConnected) {
+          for (const cb of this.reconnectCbs) cb();
+        }
+        this.everConnected = true;
         resolve();
       };
       ws.onerror = () => {

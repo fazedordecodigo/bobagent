@@ -11,7 +11,8 @@ talks to it.
   (`methodMap`) shared by daemon and UI. Single source of truth for the wire contract.
 - `packages/daemon` — `@openagent/daemon`: `src/main.ts` is the sidecar entry.
   Args: `--data-dir <path>` (required), `--agents-root <path>` (default `~/OpenAgent/agents`).
-  Token comes from `OPENAGENT_TOKEN` (required). Prints `OPENAGENT_READY {"port":N}` on
+  The auth token is the first line on stdin (required; never via env, so agent CLIs can't
+  read it). Prints `OPENAGENT_READY {"port":N}` on
   stdout when listening on 127.0.0.1; all other logs go to stderr.
   Exits on SIGTERM/SIGINT and on stdin EOF. Migrations live in `src/db/migrations.ts`
   (ordered SQL array, tracked in `schema_migrations`). Agent delete is a soft delete;
@@ -21,6 +22,38 @@ talks to it.
   `{port, token}`. Frontend WS client: `src/lib/daemon.ts`.
 - `spikes` — `acp-probe.ts` probes agent CLIs for ACP support:
   `bun spikes/acp-probe.ts <name> -- <cmd...>` writes `spikes/out/acp-<name>.json`.
+- `scripts/smoke-acp-real.ts` — runs the compiled daemon with a Finder-like PATH
+  and drives devin/cursor/grok/opencode through a real prompt + restart + session
+  resume: `bun scripts/smoke-acp-real.ts` -> `spikes/out/phase2-real-smoke.json`.
+
+## Chat runtime (Phase 2)
+
+Each agent gets a lazy `AgentRuntime` (`packages/daemon/src/runtime/`) that owns one
+provider session at a time. Turns stream ACP updates into `items` rows; permission
+requests pause in `awaiting_permission` until `permissions.respond`. Cancel sends
+`session/cancel` and hard-kills after `OPENAGENT_CANCEL_GRACE_MS` (default 10000).
+On daemon start, turns left `running` are marked `interrupted`. Provider CLIs are
+found via a login-shell PATH merge (`src/env/login-path.ts`) — spawned agents get
+`NO_COLOR=1` and a resolved absolute binary path.
+
+Daemon auth: the token is delivered on the FIRST STDIN LINE (never env — provider
+children must not see it). Missing/empty token or no line within 10 s -> exit 2.
+stdin EOF afterwards = shutdown. `spawnEnv` strips all `OPENAGENT_*` vars.
+
+Env vars (daemon):
+- `OPENAGENT_ACP_COMMAND_<PROVIDER>` — JSON array overriding the spawn command per
+  provider (e.g. `OPENAGENT_ACP_COMMAND_DEVIN='["bun","path/to/agent.ts"]'`).
+- `OPENAGENT_CANCEL_GRACE_MS` — ms after `chat.cancel` before the process is killed.
+
+Sign-in commands surfaced on auth errors: `devin auth login`, `agent login`,
+`grok login`, `opencode auth login` (all verified via --help). Gemini: `gemini`
+interactive sign-in — UNVERIFIED, CLI not installed.
+
+`bun run smoke:ui` — real-Chrome UI smoke (playwright-core, dev-only
+`location.hash` connect path in daemon.ts — dead code in prod builds).
+
+Tests drive `packages/daemon/test/fixtures/fake-acp-agent.ts` (an ACP-speaking fake
+that logs requests to `$FAKE_ACP_STATE_DIR/log.jsonl` and its pid to `pids.txt`).
 
 ## Verified commands (run from repo root)
 

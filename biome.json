@@ -1,7 +1,7 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
   "files": {
-    "includes": ["**/*.ts", "**/*.tsx", "**/*.json", "!**/gen/**", "!**/dist/**"],
+    "includes": ["**/*.ts", "**/*.tsx", "**/*.json", "!**/gen", "!**/dist"],
     "ignoreUnknown": true
   },
   "vcs": {

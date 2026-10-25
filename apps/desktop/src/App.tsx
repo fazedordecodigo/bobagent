@@ -1,28 +1,35 @@
-import type { Agent, ProviderId } from "@openagent/protocol";
+import type { Agent, AgentStatusInfo, PendingPermission, ProviderId } from "@openagent/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AgentSettings, btnCls, inputCls, PROVIDERS } from "./components/AgentSettings";
+import { ChatView } from "./components/ChatView";
 import { DaemonClient } from "./lib/daemon";
-
-const PROVIDERS: ProviderId[] = [
-  "devin",
-  "cursor",
-  "grok",
-  "opencode",
-  "gemini",
-  "claude",
-  "codex",
-  "openai-compatible",
-];
-
-const inputCls =
-  "w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-zinc-500 focus:outline-none";
-const btnCls = "rounded-md px-3 py-2 text-sm font-medium transition-colors disabled:opacity-50";
 
 export default function App() {
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [statuses, setStatuses] = useState<Record<string, AgentStatusInfo>>({});
+  const [pendingCounts, setPendingCounts] = useState<Record<string, number>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const clientRef = useRef<DaemonClient | null>(null);
+  const [clientReady, setClientReady] = useState(false);
+
+  const refreshAll = useCallback(async (client: DaemonClient, openAgentId: string | null) => {
+    const [list, st, perms] = await Promise.all([
+      client.request("agents.list", {}),
+      client.request("agents.statuses", {}),
+      client.request("permissions.list", {}),
+    ]);
+    setAgents(list);
+    setStatuses(st);
+    const counts: Record<string, number> = {};
+    for (const p of perms as PendingPermission[]) {
+      counts[p.agentId] = (counts[p.agentId] ?? 0) + 1;
+    }
+    setPendingCounts(counts);
+    void openAgentId;
+  }, []);
 
   useEffect(() => {
     const client = new DaemonClient();
@@ -30,13 +37,20 @@ export default function App() {
     let alive = true;
     client
       .connect()
-      .then(() => client.request("agents.list", {}))
-      .then((list) => {
-        if (alive) setAgents(list);
+      .then(() => refreshAll(client, null))
+      .then(() => {
+        if (alive) setClientReady(true);
       })
       .catch((e) => {
         if (alive) setError(String(e));
       });
+
+    const bump = (agentId: string, delta: number) =>
+      setPendingCounts((prev) => ({
+        ...prev,
+        [agentId]: Math.max(0, (prev[agentId] ?? 0) + delta),
+      }));
+
     const offs = [
       client.on("agent.created", (a) => setAgents((prev) => [...prev, a])),
       client.on("agent.updated", (a) =>
@@ -46,13 +60,24 @@ export default function App() {
         setAgents((prev) => prev.filter((p) => p.id !== id));
         setSelectedId((sel) => (sel === id ? null : sel));
       }),
+      client.on("agent.status", ({ agentId, status, error }) =>
+        setStatuses((prev) => ({ ...prev, [agentId]: { status, error } })),
+      ),
+      client.on("permission.requested", (p) => bump(p.agentId, +1)),
+      client.on("permission.resolved", (p) => bump(p.agentId, -1)),
+      client.onReconnect(() => {
+        refreshAll(client, selectedIdRef.current).catch(() => {});
+      }),
     ];
     return () => {
       alive = false;
       for (const off of offs) off();
       client.close();
     };
-  }, []);
+  }, [refreshAll]);
+
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
 
   const selected = agents.find((a) => a.id === selectedId) ?? null;
 
@@ -68,6 +93,7 @@ export default function App() {
       });
       setCreating(false);
       setSelectedId(agent.id);
+      setSettingsOpen(false);
     },
     [],
   );
@@ -75,7 +101,12 @@ export default function App() {
   const updateAgent = useCallback(
     async (
       id: string,
-      patch: { name?: string; instructions?: string; model?: string | null; provider?: ProviderId },
+      patch: {
+        name?: string;
+        instructions?: string;
+        model?: string | null;
+        provider?: ProviderId;
+      },
     ) => {
       const client = clientRef.current;
       if (!client) return;
@@ -87,7 +118,6 @@ export default function App() {
   const deleteAgent = useCallback(async (id: string) => {
     const client = clientRef.current;
     if (!client) return;
-    if (!window.confirm("Delete this agent? Its workspace folder is kept.")) return;
     await client.request("agents.delete", { id });
   }, []);
 
@@ -110,45 +140,79 @@ export default function App() {
             onClick={() => {
               setCreating(true);
               setSelectedId(null);
+              setSettingsOpen(false);
             }}
           >
             New agent
           </button>
         </div>
         <ul className="flex-1 overflow-y-auto">
-          {agents.map((a) => (
-            <li key={a.id}>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedId(a.id);
-                  setCreating(false);
-                }}
-                className={`w-full px-4 py-2 text-left text-sm hover:bg-zinc-900 ${
-                  a.id === selectedId ? "bg-zinc-900" : ""
-                }`}
-              >
-                <div className="truncate font-medium">{a.name}</div>
-                <div className="text-xs text-zinc-500">{a.provider}</div>
-              </button>
-            </li>
-          ))}
+          {agents.map((a) => {
+            const st = statuses[a.id]?.status ?? "idle";
+            const pending = pendingCounts[a.id] ?? 0;
+            return (
+              <li key={a.id}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedId(a.id);
+                    setCreating(false);
+                    setSettingsOpen(false);
+                  }}
+                  className={`w-full px-4 py-2 text-left text-sm hover:bg-zinc-900 ${
+                    a.id === selectedId ? "bg-zinc-900" : ""
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <StatusDot status={st} />
+                    <span className="truncate font-medium">{a.name}</span>
+                    {pending > 0 && (
+                      <span className="ml-auto rounded-full bg-amber-600 px-1.5 text-[10px] font-bold text-white">
+                        {pending}
+                      </span>
+                    )}
+                  </div>
+                  <div className="pl-4 text-xs text-zinc-500">{a.provider}</div>
+                </button>
+              </li>
+            );
+          })}
           {agents.length === 0 && (
             <li className="px-4 py-6 text-sm text-zinc-500">No agents yet.</li>
           )}
         </ul>
       </aside>
-      <main className="flex-1 overflow-y-auto p-6">
+      <main className="flex-1 overflow-hidden">
         {creating ? (
           <CreateForm onSubmit={createAgent} onCancel={() => setCreating(false)} />
-        ) : selected ? (
-          <Detail agent={selected} onUpdate={updateAgent} onDelete={deleteAgent} />
+        ) : selected && settingsOpen ? (
+          <div className="h-full overflow-y-auto">
+            <AgentSettings agent={selected} onUpdate={updateAgent} onDelete={deleteAgent} />
+          </div>
+        ) : selected && clientReady ? (
+          <ChatView
+            client={clientRef.current!}
+            agent={selected}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
         ) : (
-          <p className="text-sm text-zinc-500">Select an agent or create a new one.</p>
+          <p className="p-6 text-sm text-zinc-500">Select an agent or create a new one.</p>
         )}
       </main>
     </div>
   );
+}
+
+function StatusDot({ status }: { status: AgentStatusInfo["status"] }) {
+  const cls =
+    status === "running" || status === "starting"
+      ? "bg-emerald-400 animate-pulse"
+      : status === "awaiting_permission"
+        ? "bg-amber-400"
+        : status === "error"
+          ? "bg-red-500"
+          : "bg-zinc-600";
+  return <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${cls}`} />;
 }
 
 function CreateForm({
@@ -171,7 +235,7 @@ function CreateForm({
 
   return (
     <form
-      className="mx-auto max-w-lg space-y-4"
+      className="mx-auto max-w-lg space-y-4 p-6"
       onSubmit={async (e) => {
         e.preventDefault();
         setBusy(true);
@@ -225,96 +289,6 @@ function CreateForm({
         >
           Cancel
         </button>
-      </div>
-    </form>
-  );
-}
-
-function Detail({
-  agent,
-  onUpdate,
-  onDelete,
-}: {
-  agent: Agent;
-  onUpdate: (
-    id: string,
-    patch: { name?: string; instructions?: string; model?: string | null; provider?: ProviderId },
-  ) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
-}) {
-  const [name, setName] = useState(agent.name);
-  const [provider, setProvider] = useState<ProviderId>(agent.provider);
-  const [instructions, setInstructions] = useState(agent.instructions);
-  const [model, setModel] = useState(agent.model ?? "");
-  const [saved, setSaved] = useState(false);
-
-  useEffect(() => {
-    setName(agent.name);
-    setProvider(agent.provider);
-    setInstructions(agent.instructions);
-    setModel(agent.model ?? "");
-  }, [agent.name, agent.provider, agent.instructions, agent.model]);
-
-  return (
-    <form
-      className="mx-auto max-w-lg space-y-4"
-      onSubmit={async (e) => {
-        e.preventDefault();
-        await onUpdate(agent.id, {
-          name,
-          provider,
-          instructions,
-          model: model || null,
-        });
-        setSaved(true);
-        setTimeout(() => setSaved(false), 1500);
-      }}
-    >
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Agent</h2>
-        <button
-          type="button"
-          onClick={() => onDelete(agent.id)}
-          className={`${btnCls} bg-red-900/60 text-red-300 hover:bg-red-900`}
-        >
-          Delete
-        </button>
-      </div>
-      <input
-        className={inputCls}
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        required
-        maxLength={80}
-      />
-      <select
-        className={inputCls}
-        value={provider}
-        onChange={(e) => setProvider(e.target.value as ProviderId)}
-      >
-        {PROVIDERS.map((p) => (
-          <option key={p} value={p}>
-            {p}
-          </option>
-        ))}
-      </select>
-      <textarea
-        className={`${inputCls} min-h-32`}
-        value={instructions}
-        onChange={(e) => setInstructions(e.target.value)}
-      />
-      <input
-        className={inputCls}
-        placeholder="Model (optional)"
-        value={model}
-        onChange={(e) => setModel(e.target.value)}
-      />
-      <div className="text-xs text-zinc-500">Workspace: {agent.workspacePath}</div>
-      <div className="flex items-center gap-3">
-        <button type="submit" className={`${btnCls} bg-sky-600 hover:bg-sky-500`}>
-          Save
-        </button>
-        {saved && <span className="text-xs text-emerald-400">Saved</span>}
       </div>
     </form>
   );

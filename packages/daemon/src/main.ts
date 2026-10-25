@@ -1,9 +1,13 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { type MethodName, methodMap } from "@openagent/protocol";
+import { createInterface } from "node:readline";
 import { AgentStore } from "./agents";
+import { ChatStore } from "./chat-store";
 import { openDatabase } from "./db";
+import { mergedPath } from "./env/login-path";
+import { Rpc } from "./rpc";
+import { RuntimeManager } from "./runtime/runtime-manager";
 
 const VERSION = "0.1.0";
 const ORIGIN_ALLOWLIST = new Set([
@@ -40,15 +44,62 @@ function log(...args: unknown[]) {
   console.error("[openagentd]", ...args);
 }
 
+/** Reads the auth token from the first stdin line; refuses to start without one. */
+function readTokenFromStdin(): Promise<string | null> {
+  return new Promise((resolve) => {
+    const rl = createInterface({ input: process.stdin, terminal: false });
+    let done = false;
+    const finish = (v: string | null) => {
+      if (done) return;
+      done = true;
+      resolve(v);
+    };
+    const timer = setTimeout(() => finish(null), 10_000);
+    rl.once("line", (line) => {
+      clearTimeout(timer);
+      finish(line.trim() || null);
+      // keep watching stdin for EOF (parent death)
+      rl.on("close", () => shutdown(0));
+    });
+    rl.once("close", () => finish(null));
+    void timer;
+  });
+}
+
+let shuttingDown = false;
+let dbRef: { close(): void } | null = null;
+let serverRef: { stop(): void } | null = null;
+let runtimesRef: { closeAll(): Promise<void> } | null = null;
+
+function shutdown(code: number) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  const done = () => {
+    try {
+      serverRef?.stop();
+    } catch {}
+    try {
+      dbRef?.close();
+    } catch {}
+    process.exit(code);
+  };
+  const p = runtimesRef?.closeAll() ?? Promise.resolve();
+  p.catch(() => {}).finally(() => setTimeout(done, 50));
+  setTimeout(() => process.exit(code), 4000).unref();
+}
+
 async function main() {
   const { dataDir, agentsRoot } = parseArgs(process.argv.slice(2));
-  const token = process.env.OPENAGENT_TOKEN;
+  const token = await readTokenFromStdin();
   if (!token) {
-    console.error("openagentd: OPENAGENT_TOKEN env var is required");
+    console.error("openagentd: no auth token on stdin (first line required)");
     process.exit(2);
   }
 
   const db = openDatabase(dataDir);
+  dbRef = db;
+  const chat = new ChatStore(db);
+  chat.interruptRunningTurns();
   const store = new AgentStore(db, agentsRoot);
   const sockets = new Set<import("bun").ServerWebSocket<unknown>>();
 
@@ -61,74 +112,20 @@ async function main() {
     }
   }
 
-  function checkAuth(req: Request): Response | null {
+  const runtimes = new RuntimeManager(store, chat, broadcast);
+  runtimesRef = runtimes;
+  const rpc = new Rpc(store, chat, runtimes, broadcast);
+
+  // warm the login-shell PATH cache so provider CLIs resolve like in a terminal
+  const path = mergedPath();
+  log(`PATH resolved (${path.split(":").length} entries)`);
+
+  function checkOrigin(req: Request): Response | null {
     const origin = req.headers.get("origin");
     if (origin !== null && !ORIGIN_ALLOWLIST.has(origin)) {
       return new Response("forbidden origin", { status: 403 });
     }
     return null;
-  }
-
-  function handleMessage(raw: string): string {
-    let parsed: { id?: unknown; method?: unknown; params?: unknown };
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      return JSON.stringify({ id: "", error: { code: "bad_request", message: "invalid JSON" } });
-    }
-    const id = typeof parsed.id === "string" ? parsed.id : "";
-    const method = parsed.method;
-    if (typeof method !== "string" || !(method in methodMap)) {
-      return JSON.stringify({
-        id,
-        error: { code: "bad_request", message: `unknown method: ${String(method)}` },
-      });
-    }
-    const def = methodMap[method as MethodName];
-    const paramsRes = def.params.safeParse(parsed.params ?? {});
-    if (!paramsRes.success) {
-      return JSON.stringify({
-        id,
-        error: {
-          code: "bad_request",
-          message: paramsRes.error.issues[0]?.message ?? "invalid params",
-        },
-      });
-    }
-    try {
-      switch (method as MethodName) {
-        case "agents.list": {
-          const result = store.list();
-          return JSON.stringify({ id, result });
-        }
-        case "agents.create": {
-          const agent = store.create(paramsRes.data as Parameters<typeof store.create>[0]);
-          queueMicrotask(() => broadcast("agent.created", agent));
-          return JSON.stringify({ id, result: agent });
-        }
-        case "agents.update": {
-          const agent = store.update(paramsRes.data as Parameters<typeof store.update>[0]);
-          if (!agent) {
-            return JSON.stringify({ id, error: { code: "not_found", message: "agent not found" } });
-          }
-          queueMicrotask(() => broadcast("agent.updated", agent));
-          return JSON.stringify({ id, result: agent });
-        }
-        case "agents.delete": {
-          const p = paramsRes.data as { id: string };
-          const ok = store.softDelete(p.id);
-          if (!ok) {
-            return JSON.stringify({ id, error: { code: "not_found", message: "agent not found" } });
-          }
-          queueMicrotask(() => broadcast("agent.deleted", { id: p.id }));
-          return JSON.stringify({ id, result: { ok: true } });
-        }
-      }
-    } catch (e) {
-      log("handler error", e);
-      return JSON.stringify({ id, error: { code: "internal", message: "internal error" } });
-    }
-    return JSON.stringify({ id, error: { code: "bad_request", message: "unhandled method" } });
   }
 
   const server = Bun.serve({
@@ -137,7 +134,7 @@ async function main() {
     fetch(req, srv) {
       const url = new URL(req.url);
       if (url.pathname === "/ws") {
-        const denied = checkAuth(req);
+        const denied = checkOrigin(req);
         if (denied) return denied;
         const reqToken = url.searchParams.get("token") ?? "";
         if (!tokenEqual(reqToken, token)) {
@@ -147,7 +144,7 @@ async function main() {
         return new Response("upgrade failed", { status: 400 });
       }
       if (url.pathname === "/health") {
-        const denied = checkAuth(req);
+        const denied = checkOrigin(req);
         if (denied) return denied;
         const auth = req.headers.get("authorization") ?? "";
         const reqToken = auth.startsWith("Bearer ") ? auth.slice(7) : "";
@@ -165,34 +162,23 @@ async function main() {
       close(ws) {
         sockets.delete(ws);
       },
-      message(ws, msg) {
+      async message(ws, msg) {
         const text = typeof msg === "string" ? msg : Buffer.from(msg).toString("utf8");
-        ws.send(handleMessage(text));
+        try {
+          ws.send(await rpc.handle(text));
+        } catch (e) {
+          log("rpc error", e);
+        }
       },
     },
   });
 
+  serverRef = server;
   console.log(`OPENAGENT_READY {"port":${server.port}}`);
   log(`listening on 127.0.0.1:${server.port}, data dir ${dataDir}`);
 
-  let shuttingDown = false;
-  function shutdown(code: number) {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    try {
-      server.stop();
-    } catch {}
-    try {
-      db.close();
-    } catch {}
-    process.exit(code);
-  }
-
   process.on("SIGTERM", () => shutdown(0));
   process.on("SIGINT", () => shutdown(0));
-  process.stdin.resume();
-  process.stdin.on("end", () => shutdown(0));
-  process.stdin.on("close", () => shutdown(0));
 }
 
 main().catch((e) => {

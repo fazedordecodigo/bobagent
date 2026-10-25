@@ -5,7 +5,8 @@
   "type": "module",
   "main": "./src/main.ts",
   "dependencies": {
-    "@openagent/protocol": "workspace:*"
+    "@openagent/protocol": "workspace:*",
+    "@agentclientprotocol/sdk": "1.9.0"
   },
   "devDependencies": {
     "@types/bun": "1.4.3"

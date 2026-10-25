@@ -50,11 +50,14 @@ fn spawn_daemon(app: &tauri::App) -> Result<(), String> {
         .shell()
         .sidecar("openagentd")
         .map_err(|e| format!("sidecar: {e}"))?;
-    let (mut rx, child) = sidecar
+    let (mut rx, mut child) = sidecar
         .args([OsStr::new("--data-dir"), data_dir.as_os_str()])
-        .env("OPENAGENT_TOKEN", &token)
         .spawn()
         .map_err(|e| format!("spawn openagentd: {e}"))?;
+    // deliver the auth token on the daemon's first stdin line
+    child
+        .write(format!("{token}\n").as_bytes())
+        .map_err(|e| format!("write token to openagentd stdin: {e}"))?;
 
     {
         let mut inner = state.inner.lock().unwrap();

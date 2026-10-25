@@ -109,12 +109,14 @@ type DaemonHandle = {
 
 async function startDaemon(dataDir: string, agentsRoot: string): Promise<DaemonHandle> {
   const proc = Bun.spawn(["bun", DAEMON, "--data-dir", dataDir, "--agents-root", agentsRoot], {
-    env: { ...process.env, OPENAGENT_TOKEN: TOKEN },
+    env: { ...process.env },
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
     cwd: ROOT,
   });
+  (proc.stdin as { write: (s: string) => void; flush: () => void }).write(`${TOKEN}\n`);
+  (proc.stdin as { flush: () => void }).flush();
   const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
   const decoder = new TextDecoder();
   let buf = "";
@@ -293,8 +295,19 @@ describe("daemon e2e", () => {
 
     const db = new Database(join(dataDir, "openagent.db"), { readonly: true });
     const rows = db.query("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number };
-    expect(rows.n).toBe(1);
+    expect(rows.n).toBe(2);
     db.close();
+  });
+
+  test("daemon without a stdin token exits non-zero", async () => {
+    const d = mkdtempSync(join(tmpdir(), "openagentd-notok-"));
+    const proc = Bun.spawn(
+      ["bun", DAEMON, "--data-dir", d, "--agents-root", mkdtempSync(join(tmpdir(), "oa-nt-"))],
+      { env: { ...process.env }, stdin: "pipe", stdout: "pipe", stderr: "pipe", cwd: ROOT },
+    );
+    (proc.stdin as { end: () => void }).end(); // EOF before any token line
+    const code = await waitForExit(proc, 8000);
+    expect(code).not.toBe(0);
   });
 
   test("closing stdin makes the daemon exit", async () => {

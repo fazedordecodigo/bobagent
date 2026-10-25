@@ -12,11 +12,13 @@
     "build:app": "bun run build:daemon && bun run --cwd apps/desktop tauri build --debug --bundles app",
     "test": "bun test packages/daemon",
     "lint": "biome check .",
-    "typecheck": "tsc -p packages/protocol/tsconfig.json && tsc -p packages/daemon/tsconfig.json && tsc -p apps/desktop/tsconfig.json"
+    "typecheck": "tsc -p packages/protocol/tsconfig.json && tsc -p packages/daemon/tsconfig.json && tsc -p apps/desktop/tsconfig.json",
+    "smoke:ui": "bun scripts/ui-smoke.ts"
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "1.9.0",
     "@biomejs/biome": "2.5.15",
+    "playwright-core": "1.64.1",
     "typescript": "7.0.2"
   }
 }
