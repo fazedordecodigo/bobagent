@@ -13,7 +13,7 @@
 // has no network device; outbound traffic goes through this proxy).
 
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import {
   accessSync,
@@ -101,6 +101,31 @@ export function firecrackerBin(): string | null {
   return process.env.BOBAGENT_FIRECRACKER_BIN || (existsSync(local) ? local : which("firecracker"));
 }
 
+export function matchesGuestHelperStamp(stamp: string | null, helper: Buffer): boolean | null {
+  if (stamp === null) return null;
+  return stamp.trim() === createHash("sha256").update(helper).digest("hex");
+}
+
+export function isFirecrackerReady(report: {
+  os: string;
+  kvm: boolean;
+  firecrackerVersion: string | null;
+  kernelImage: string | null;
+  rootfs: string | null;
+  mkfsExt4: string | null;
+  guestHelperCurrent: boolean | null;
+}): boolean {
+  return (
+    report.os === "linux" &&
+    report.kvm &&
+    !!report.firecrackerVersion &&
+    !!report.kernelImage &&
+    !!report.rootfs &&
+    !!report.mkfsExt4 &&
+    report.guestHelperCurrent !== false
+  );
+}
+
 function preflight() {
   let kvm = false;
   try {
@@ -115,6 +140,21 @@ function preflight() {
   }
   const kernel = join(ROOT, "firecracker", "vmlinux");
   const rootfs = join(ROOT, "firecracker", "rootfs.ext4");
+  const kernelImage = existsSync(kernel) ? kernel : null;
+  const rootfsImage = existsSync(rootfs) ? rootfs : null;
+  const mkfsExt4 = which("mkfs.ext4");
+  let guestHelperCurrent: boolean | null = null;
+  const helperStampPath = join(ROOT, "firecracker", "guest-helper.sha256");
+  if (existsSync(helperStampPath)) {
+    try {
+      guestHelperCurrent = matchesGuestHelperStamp(
+        readFileSync(helperStampPath, "utf8"),
+        readFileSync(process.argv[1] || import.meta.path),
+      );
+    } catch {
+      guestHelperCurrent = false;
+    }
+  }
   const providers: Record<string, string | null> = {};
   for (const c of PROVIDER_CLIS) providers[c] = which(c);
   const report = {
@@ -125,17 +165,20 @@ function preflight() {
     bun: Bun.version,
     kvm,
     firecracker: fc ? { path: fc, version: fcVersion } : null,
-    kernelImage: existsSync(kernel) ? kernel : null,
-    rootfs: existsSync(rootfs) ? rootfs : null,
-    mkfsExt4: which("mkfs.ext4"),
+    kernelImage,
+    rootfs: rootfsImage,
+    mkfsExt4,
+    guestHelperCurrent,
     providers,
-    firecrackerReady:
-      platform() === "linux" &&
-      kvm &&
-      !!fcVersion &&
-      existsSync(kernel) &&
-      existsSync(rootfs) &&
-      !!which("mkfs.ext4"),
+    firecrackerReady: isFirecrackerReady({
+      os: platform(),
+      kvm,
+      firecrackerVersion: fcVersion,
+      kernelImage,
+      rootfs: rootfsImage,
+      mkfsExt4,
+      guestHelperCurrent,
+    }),
   };
   process.stdout.write(`${JSON.stringify(report)}\n`);
 }

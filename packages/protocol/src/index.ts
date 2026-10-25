@@ -417,6 +417,7 @@ export const HostPreflight = z
     kernelImage: z.string().nullable(),
     rootfs: z.string().nullable(),
     mkfsExt4: z.string().nullable(),
+    guestHelperCurrent: z.boolean().nullable(),
     providers: z.record(z.string(), z.string().nullable()),
     firecrackerReady: z.boolean(),
   })

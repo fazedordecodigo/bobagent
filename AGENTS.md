@@ -283,7 +283,8 @@ the driver: the provider command is spawned as `ssh -R <sock>:127.0.0.1:<daemon 
 bobagent-host run` (first stdin line = RunSpec JSON), and the `bobagent` MCP server becomes
 `bobagent-host bridge` on the host (POSTs `/bridge` through the forwarded socket). Changing a
 placement drops the provider session. Firecracker placement requires a host whose preflight
-says `firecrackerReady` (Linux + /dev/kvm + firecracker + vmlinux + rootfs.ext4 + `mkfs.ext4`);
+says `firecrackerReady` (Linux + /dev/kvm + firecracker + vmlinux + rootfs.ext4 + `mkfs.ext4`,
+with no stale guest helper);
 there is no fallback. Build the guest from a checkout with
 `bash packages/host/rootfs/build-rootfs.sh`; the host needs Docker, curl, sudo and e2fsprogs,
 and the user needs `/dev/kvm` access (`sudo usermod -aG kvm "$USER"`, then re-login).
@@ -298,7 +299,8 @@ per-run root disk on session end. With `setpriv` installed, Firecracker runs wit
 seconds. The proxy resolves DNS once, rejects a hostname if any IPv4 answer is non-public, and
 connects to the approved address.
 Guest image: `packages/host/rootfs/` (`bobagent-init`, `build-rootfs.sh`); run the real host and
-SSH integration tests with `bun run test:firecracker` on a Linux Firecracker host.
+SSH integration tests with `bun run test:firecracker` on a Linux Firecracker host. Re-run the
+build after updating or reinstalling the helper; preflight reports `guestHelperCurrent`.
 Subagents (`src/subagents.ts`): bridge `spawn_subagents {tasks:[{task,name?}], provider?,
 keep?}` (max 8 per call, `BOBAGENT_MAX_SUBAGENTS` running per parent, default 8, depth 2)
 creates child agents that inherit the parent's placement, sends each its task, and when the

@@ -7,6 +7,8 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import {
   blockedHost,
+  isFirecrackerReady,
+  matchesGuestHelperStamp,
   proxyServer,
   proxyTarget,
   type RunSpec,
@@ -123,7 +125,35 @@ describe("bobagent-host", () => {
     expect(pre.root).toBe(root);
     expect(pre.kernelImage).toBeNull();
     expect(pre.rootfs).toBeNull();
+    expect(pre.guestHelperCurrent).toBeNull();
     expect(pre.firecrackerReady).toBe(false);
+  });
+
+  test("a stale guest helper stamp blocks Firecracker readiness", () => {
+    const guestHelperCurrent = matchesGuestHelperStamp("stale", Buffer.from("current helper"));
+    expect(guestHelperCurrent).toBe(false);
+    expect(
+      isFirecrackerReady({
+        os: "linux",
+        kvm: true,
+        firecrackerVersion: "Firecracker v1.12.1",
+        kernelImage: "/root/firecracker/vmlinux",
+        rootfs: "/root/firecracker/rootfs.ext4",
+        mkfsExt4: "/usr/sbin/mkfs.ext4",
+        guestHelperCurrent,
+      }),
+    ).toBe(false);
+    expect(
+      isFirecrackerReady({
+        os: "linux",
+        kvm: true,
+        firecrackerVersion: "Firecracker v1.12.1",
+        kernelImage: "/root/firecracker/vmlinux",
+        rootfs: "/root/firecracker/rootfs.ext4",
+        mkfsExt4: "/usr/sbin/mkfs.ext4",
+        guestHelperCurrent: null,
+      }),
+    ).toBe(true);
   });
 
   test("firecracker run fails clearly when prerequisites are missing", () => {

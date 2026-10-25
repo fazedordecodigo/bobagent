@@ -51,6 +51,8 @@ bash packages/host/rootfs/build-rootfs.sh
 The build downloads a checksummed Firecracker release and guest kernel and creates
 `~/.bobagent/firecracker/` with the rootfs. For a custom host root, set
 `BOBAGENT_HOST_ROOT` in the remote SSH environment; install and check use that same root.
+Re-run the build after updating or reinstalling the host helper; preflight reports
+`guestHelperCurrent`.
 Firecracker placement requires `/dev/kvm`, the image, and `mkfs.ext4`. Each session gets a
 fresh root disk and an agent-persistent `workspace.ext4`, mounted at `/persist` with
 `/workspace` and `/root` backed by it. The workspace image is sparse and defaults to 8192 MiB;

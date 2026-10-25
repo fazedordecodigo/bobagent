@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   copyFileSync,
   existsSync,
@@ -8,6 +9,7 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -61,6 +63,8 @@ export function makeFirecrackerHostRoot(
     if (cp.status !== 0) copyFileSync(baseRootfs, rootfs);
     injectGuestFile(rootfs, HOST_MAIN, "/opt/bobagent/bobagent-host.ts");
     injectGuestFile(rootfs, HOST_INIT, "/usr/sbin/bobagent-init", "0100755");
+    const helperHash = createHash("sha256").update(readFileSync(HOST_MAIN)).digest("hex");
+    writeFileSync(join(firecracker, "guest-helper.sha256"), `${helperHash}\n`);
     for (const file of extraFiles)
       injectGuestFile(rootfs, file.source, file.destination, file.mode);
     return root;

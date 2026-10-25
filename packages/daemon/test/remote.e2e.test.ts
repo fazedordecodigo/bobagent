@@ -111,7 +111,8 @@ describe("remote hosts + subagents e2e", () => {
         !!pre?.kvm &&
         !!pre.firecracker?.version &&
         !!pre.kernelImage &&
-        !!pre.rootfs,
+        !!pre.rootfs &&
+        pre.guestHelperCurrent !== false,
     );
     const call = sshCalls().at(-1)!;
     expect(call.target).toBe("bob@vps.example.com");
