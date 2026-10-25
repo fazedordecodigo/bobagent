@@ -11,6 +11,7 @@ import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Agent } from "@upbot/protocol";
 import { ProviderId } from "@upbot/protocol";
 import type { AgentStore } from "./agents";
+import type { ApprovalService } from "./approvals";
 import type { AppsService } from "./apps";
 import type { BrowserService } from "./browser";
 import type { ChannelService } from "./channels";
@@ -219,6 +220,32 @@ export const BRIDGE_TOOLS = [
     },
   },
   {
+    name: "request_secret",
+    description:
+      "Ask the user for a password, API key or token through a secure form. The value goes straight to the vault (never into the chat); you get access to it under `name`. Never ask for secrets in chat.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Vault name, e.g. stripe.key" },
+        label: { type: "string", description: "What the user should enter" },
+        reason: { type: "string", description: "Why you need it" },
+      },
+      required: ["name", "reason"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "request_takeover",
+    description:
+      "Ask the user to take over the UpBot browser window for sign-in, 2FA, CAPTCHA, payment or identity checks. Blocks until the user clicks Done.",
+    inputSchema: {
+      type: "object",
+      properties: { reason: { type: "string" } },
+      required: ["reason"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "email_accounts",
     description: "List the email accounts the user connected that you may use.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -402,6 +429,7 @@ export class Bridge {
   vault: Vault | null = null;
   email: EmailService | null = null;
   apps: AppsService | null = null;
+  approvals: ApprovalService | null = null;
   connectors: Connectors | null = null;
   computer: ComputerUse | null = null;
   skills: SkillLibrary | null = null;
@@ -456,7 +484,11 @@ export class Bridge {
     let r: ToolResult;
     try {
       const name = String(params.name);
-      r = (await this.apps?.call(agentId, name, args)) ?? (await this.call(agentId, name, args));
+      const isApp = this.apps?.isAppTool(name) ?? false;
+      await this.approvals?.gate(agentId, name, args, isApp);
+      r =
+        (isApp ? await this.apps!.call(agentId, name, args) : null) ??
+        (await this.call(agentId, name, args));
     } catch (e) {
       r = { text: (e as Error).message, isError: true };
     }
@@ -615,6 +647,17 @@ export class Bridge {
         this.broadcast?.("agent.created", created);
         return { text: `created agent ${created.name} (${created.id}, ${created.provider})` };
       }
+      case "request_secret":
+        return {
+          text: await this.approvals!.requestSecret(
+            me.id,
+            String(args.name ?? ""),
+            String(args.label ?? ""),
+            String(args.reason ?? ""),
+          ),
+        };
+      case "request_takeover":
+        return { text: await this.approvals!.requestTakeover(me.id, String(args.reason ?? "")) };
       case "email_accounts":
         return {
           text: JSON.stringify(

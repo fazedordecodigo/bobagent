@@ -93,6 +93,7 @@ export class AgentRuntime {
   private cancelTimer: ReturnType<typeof setTimeout> | null = null;
   private draining = false;
   private turnHops = 0;
+  private turnBackground = false;
   private turnChannelId: string | null = null;
   private compacting = false;
   private capture: string[] | null = null;
@@ -113,6 +114,11 @@ export class AgentRuntime {
   /** Agent-to-agent hop count of the running turn (0 when idle or user-initiated). */
   currentHops(): number {
     return this.turn ? this.turnHops : 0;
+  }
+
+  /** The running turn and whether it was started by background work (not the user). */
+  currentTurn(): { id: string; background: boolean } | null {
+    return this.turn ? { id: this.turn.id, background: this.turnBackground } : null;
   }
 
   currentChannelId(): string | null {
@@ -202,6 +208,10 @@ export class AgentRuntime {
       this.openTextItem = null;
       this.turnHops = next.hops ?? 0;
       this.turnChannelId = next.channel_id ?? null;
+      const meta = next.meta_json ? (JSON.parse(next.meta_json) as Record<string, unknown>) : {};
+      this.turnBackground = Boolean(
+        next.from_agent_id || next.channel_id || meta.routine || meta.gateway || meta.team,
+      );
       const sender = next.from_agent_id
         ? {
             agentId: next.from_agent_id,

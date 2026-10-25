@@ -549,6 +549,32 @@ export const EmailDraft = z.object({
 export type EmailDraft = z.infer<typeof EmailDraft>;
 const EmailAddressList = z.array(z.string().trim().email().max(320)).max(50);
 
+export const ApprovalRule = z.object({
+  id: z.string(),
+  pattern: z.string().trim().min(1).max(200),
+  action: z.enum(["ask", "allow"]),
+  /** null = every bot */
+  agentId: z.string().nullable(),
+});
+export type ApprovalRule = z.infer<typeof ApprovalRule>;
+export const ApprovalDecision = z.enum(["approve", "always", "deny", "done"]);
+export type ApprovalDecision = z.infer<typeof ApprovalDecision>;
+export const Approval = z.object({
+  id: z.string(),
+  agentId: z.string(),
+  turnId: z.string().nullable(),
+  kind: z.enum(["tool", "secret", "takeover"]),
+  title: z.string(),
+  detail: z.string(),
+  tool: z.string().nullable(),
+  secretName: z.string().nullable(),
+  background: z.boolean(),
+  status: z.enum(["pending", "approved", "denied", "expired", "done"]),
+  createdAt: z.number(),
+  expiresAt: z.number(),
+});
+export type Approval = z.infer<typeof Approval>;
+
 export const AppSecretSpec = z.object({
   key: z.string(),
   label: z.string(),
@@ -901,6 +927,25 @@ export const methodMap = {
     params: z.object({ id: z.string() }).strict(),
     result: z.object({ ok: z.literal(true) }),
   },
+  "approvals.list": {
+    params: z.object({ agentId: z.string().optional() }).strict(),
+    result: z.array(Approval),
+  },
+  "approvals.respond": {
+    params: z
+      .object({
+        id: z.string(),
+        decision: ApprovalDecision,
+        value: z.string().max(20_000).optional(),
+      })
+      .strict(),
+    result: Approval,
+  },
+  "approvals.rules": { params: z.object({}).strict(), result: z.array(ApprovalRule) },
+  "approvals.setRules": {
+    params: z.object({ rules: z.array(ApprovalRule).max(500) }).strict(),
+    result: z.array(ApprovalRule),
+  },
   "apps.catalog": { params: z.object({}).strict(), result: z.array(AppCatalogEntry) },
   "apps.list": { params: z.object({}).strict(), result: z.array(ConnectedApp) },
   "apps.connect": {
@@ -1119,6 +1164,8 @@ export type DaemonEventMap = {
   "gateway.updated": Gateway;
   "email.accounts.changed": Record<string, never>;
   "apps.changed": Record<string, never>;
+  "approval.updated": Approval;
+  "approvals.rulesChanged": Record<string, never>;
   "email.draft.updated": EmailDraft;
   "team.updated": TeamStatus;
   "team.message": TeamMessage;

@@ -106,7 +106,7 @@ describe("connected apps (MCP) e2e", () => {
       await Bun.sleep(100);
     }
     expect(list[0]).toMatchObject({ status: "ready", secretKeys: ["FAKE_APP_TOKEN"] });
-    expect(list[0]!.tools.map((t) => t.name)).toEqual(["echo", "whoami"]);
+    expect(list[0]!.tools.map((t) => t.name)).toEqual(["echo", "whoami", "create_note"]);
     expect(JSON.stringify(list)).not.toContain(APP_SECRET);
     const vault = (await c.request("vault.list", {})) as { name: string }[];
     expect(vault.some((v) => v.name.startsWith("app."))).toBe(false);

@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { AgentStore } from "./agents";
+import { ApprovalService } from "./approvals";
 import { AppsService } from "./apps";
 import { Bridge } from "./bridge";
 import { BrowserService } from "./browser";
@@ -123,6 +124,7 @@ async function main() {
     process.exit(2);
   }
 
+  let approvalsRef: ApprovalService | null = null;
   const db = openDatabase(dataDir);
   dbRef = db;
   const chat = new ChatStore(db);
@@ -148,6 +150,7 @@ async function main() {
       const turn = data as import("@upbot/protocol").Turn;
       queueMicrotask(() => {
         void (async () => {
+          approvalsRef?.onTurnEnded(turn.agentId, turn.id);
           const row = turn.queueId ? queue.row(turn.queueId) : null;
           channels.onTurnEnded(turn, row);
           gateways.onTurnEnded(turn, row);
@@ -193,6 +196,9 @@ async function main() {
   bridge.email = email;
   const apps = new AppsService(db, vault, broadcast);
   bridge.apps = apps;
+  const approvals = new ApprovalService(db, vault, () => runtimes, broadcast);
+  bridge.approvals = approvals;
+  approvalsRef = approvals;
   bridge.connectors = new Connectors(vault);
   bridge.computer = computer;
   const mobile = new MobileServer(db);
@@ -217,6 +223,7 @@ async function main() {
       gateways,
       email,
       apps,
+      approvals,
       marketplace: new Marketplace(db, skills, store),
       mobile,
       team,

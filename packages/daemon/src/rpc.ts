@@ -1,5 +1,7 @@
+import type { ApprovalRule } from "@upbot/protocol";
 import { type MethodName, methodMap } from "@upbot/protocol";
 import type { AgentStore } from "./agents";
+import type { ApprovalService } from "./approvals";
 import type { AppsService } from "./apps";
 import { attachmentsBlock, saveAttachments } from "./attachments";
 import { type BrowserService, findBrowser } from "./browser";
@@ -46,6 +48,7 @@ export class Rpc {
       gateways: GatewayService;
       email: EmailService;
       apps: AppsService;
+      approvals: ApprovalService;
       marketplace: Marketplace;
       mobile: MobileServer;
       team: TeamClient;
@@ -333,6 +336,14 @@ export class Rpc {
       case "gateways.delete":
         this.extras.gateways.delete((params as { id: string }).id);
         return { ok: true };
+      case "approvals.list":
+        return this.extras.approvals.list((params as { agentId?: string }).agentId);
+      case "approvals.respond":
+        return this.extras.approvals.respond(params as Parameters<ApprovalService["respond"]>[0]);
+      case "approvals.rules":
+        return this.extras.approvals.rules();
+      case "approvals.setRules":
+        return this.extras.approvals.setRules((params as { rules: ApprovalRule[] }).rules);
       case "apps.catalog":
         return this.extras.apps.catalog();
       case "apps.list":

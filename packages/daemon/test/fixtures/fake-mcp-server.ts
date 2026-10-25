@@ -28,6 +28,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             inputSchema: { type: "object", properties: { text: { type: "string" } } },
           },
           { name: "whoami", description: "Token check", inputSchema: { type: "object" } },
+          { name: "create_note", description: "Create a note", inputSchema: { type: "object" } },
         ],
       },
     });
@@ -36,7 +37,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     const text =
       p.name === "echo"
         ? `echo:${p.arguments.text}`
-        : `token-present:${Boolean(process.env.FAKE_APP_TOKEN)} token:${process.env.FAKE_APP_TOKEN}`;
+        : p.name === "create_note"
+          ? "note-created"
+          : `token-present:${Boolean(process.env.FAKE_APP_TOKEN)} token:${process.env.FAKE_APP_TOKEN}`;
     return send({ jsonrpc: "2.0", id: m.id, result: { content: [{ type: "text", text }] } });
   }
   send({ jsonrpc: "2.0", id: m.id, error: { code: -32601, message: "method not found" } });

@@ -67,6 +67,10 @@ export class RuntimeManager {
     }
   }
 
+  currentTurn(agentId: string): { id: string; background: boolean } | null {
+    return this.runtimes.get(agentId)?.currentTurn() ?? null;
+  }
+
   currentHops(agentId: string): number {
     return this.runtimes.get(agentId)?.currentHops() ?? 0;
   }

@@ -547,7 +547,8 @@ export class CodexDriver implements ProviderDriver {
               config: Object.fromEntries(
                 mcp.map((m) => [
                   `mcp_servers.${m.name}`,
-                  { command: m.command, args: m.args, env: m.env },
+                  // approvals can keep a tool call waiting for the user
+                  { command: m.command, args: m.args, env: m.env, tool_timeout_sec: 3600 },
                 ]),
               ),
             }

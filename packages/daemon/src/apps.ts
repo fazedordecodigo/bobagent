@@ -428,6 +428,13 @@ export class AppsService {
     return out;
   }
 
+  isAppTool(name: string): boolean {
+    const i = name.indexOf("__");
+    if (i <= 0) return false;
+    const slug = name.slice(0, i);
+    return this.rows().some((x) => slugFor(this.config(x).name) === slug);
+  }
+
   /** Runs `<slug>__<tool>`; null when the name is not an app tool. */
   async call(
     agentId: string,

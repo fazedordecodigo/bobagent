@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useChat } from "../hooks/useChat";
 import type { DaemonClient } from "../lib/daemon";
 import { PermissionNotice } from "./AgentSettings";
+import { ApprovalCards } from "./ApprovalsView";
 import { Composer } from "./Composer";
 import { DraftCards } from "./EmailView";
 import { MessageList } from "./MessageList";
@@ -157,6 +158,7 @@ export function ChatView({
           </div>
         </div>
       )}
+      <ApprovalCards client={client} agentId={agent.id} />
       <DraftCards client={client} agentId={agent.id} />
       <Composer
         onTranscribe={

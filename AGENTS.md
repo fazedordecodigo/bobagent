@@ -41,6 +41,21 @@ The bridge appends app tools to `tools/list` as `<slug>__<tool>` and routes call
 (`agentIds` empty = every bot). RPC `apps.catalog/list/connect/update/refresh/delete`, event
 `apps.changed`; UI Settings → Apps. Tests: `test/apps.e2e.test.ts` + `fixtures/fake-mcp-server.ts`.
 
+## Approvals (UpBot)
+
+`src/approvals.ts` (`ApprovalService`): every bridge tool call passes `gate()`. Rules
+(`settings.approval_rules`, glob on tool names, per bot or `agentId: null`): "ask" beats
+"allow"; with no rule, connected-app tools whose operation looks like a write ask first.
+A pending approval blocks the call; background turns (from another bot, routine, gateway,
+team or group chat — `AgentRuntime.currentTurn().background`) expire after
+`UPBOT_APPROVAL_BACKGROUND_TTL_MS` (10 min), others after `UPBOT_APPROVAL_TTL_MS` (60 min);
+a finished turn expires its approvals. Bridge `request_secret` (masked form, value goes to the
+vault allowlisted to the bot) and `request_takeover` (user uses the bot browser, clicks Done).
+RPC `approvals.list/respond/rules/setRules` (also allowed for mobile), events
+`approval.updated`, `approvals.rulesChanged`. Codex gets `tool_timeout_sec = 3600` for MCP
+servers so waits do not time out. UI: `ApprovalCards` above the composer, Settings →
+Approvals. Tests: `test/approvals.e2e.test.ts`.
+
 ## Layout
 
 - `packages/protocol` — `@upbot/protocol`: zod 4 schemas + the typed method map

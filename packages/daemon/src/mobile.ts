@@ -18,8 +18,11 @@ const ALLOWED_METHODS = new Set([
   "queue.get",
   "permissions.list",
   "permissions.respond",
+  "approvals.list",
+  "approvals.respond",
 ]);
 const FORWARDED_EVENTS = new Set([
+  "approval.updated",
   "agent.created",
   "agent.updated",
   "agent.deleted",
