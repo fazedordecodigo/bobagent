@@ -6,16 +6,25 @@
 # Requires: docker, curl, mkfs.ext4, sudo (for loop mounts). No credentials go into the
 # image; sign in to provider CLIs inside a microVM or pass API keys via the BobAgent vault.
 #
-# usage: build-rootfs.sh [--size-mib 4096] [--providers "claude codex"]
+# usage: build-rootfs.sh [--size-mib 4096] [--providers "claude codex"] [--base image]
 set -euo pipefail
 FC_VERSION="${FC_VERSION:-v1.12.1}"
 KERNEL_URL="${KERNEL_URL:-https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.12/$(uname -m)/vmlinux-6.1.128}"
 SIZE_MIB=4096
 PROVIDERS="claude codex"
+BASE="${BOBAGENT_ROOTFS_BASE:-}"
+BASE_EXPLICIT=0
+[ -n "$BASE" ] && BASE_EXPLICIT=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --size-mib) SIZE_MIB="$2"; shift 2 ;;
     --providers) PROVIDERS="$2"; shift 2 ;;
+    --base)
+      [ $# -ge 2 ] && [ -n "$2" ] || { echo "--base requires an image reference" >&2; exit 2; }
+      BASE="$2"
+      BASE_EXPLICIT=1
+      shift 2
+      ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -30,6 +39,37 @@ fi
 [ -e /dev/kvm ] || echo "warning: /dev/kvm missing; microVMs will not boot on this host" >&2
 mkdir -p "$OUT"
 ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64) NODE_ARCH=x64 ;;
+  aarch64|arm64) NODE_ARCH=arm64 ;;
+  *) echo "unsupported architecture for Node.js guest: $ARCH" >&2; exit 1 ;;
+esac
+
+if [ "$BASE_EXPLICIT" -eq 0 ]; then
+  candidates=(
+    "debian:bookworm-slim"
+    "mirror.gcr.io/library/debian:bookworm-slim"
+    "public.ecr.aws/docker/library/debian:bookworm-slim"
+  )
+  for candidate in "${candidates[@]}"; do
+    if docker image inspect "$candidate" >/dev/null 2>&1 || docker pull "$candidate"; then
+      BASE="$candidate"
+      break
+    fi
+  done
+  if [ -z "$BASE" ]; then
+    printf 'failed to find or pull a rootfs base image; tried:\n' >&2
+    printf '  %s\n' "${candidates[@]}" >&2
+    exit 1
+  fi
+elif ! docker image inspect "$BASE" >/dev/null 2>&1 && ! docker pull "$BASE"; then
+  echo "failed to pull explicit rootfs base image $BASE" >&2
+  exit 1
+fi
+case "$BASE" in
+  *[[:space:]]*) echo "invalid base image reference: whitespace is not allowed" >&2; exit 2 ;;
+esac
+echo "using base image $BASE" >&2
 
 if [ ! -x "$OUT/firecracker" ]; then
   tmp="$(mktemp -d)"
@@ -47,9 +87,19 @@ trap 'sudo umount "$work/mnt" 2>/dev/null || true; rm -rf "$work"' EXIT
 cp "$HELPER" "$work/bobagent-host.ts"
 cp "$HERE/bobagent-init" "$work/bobagent-init" 2>/dev/null || cp "$ROOT/bin/bobagent-init" "$work/bobagent-init"
 cat > "$work/Dockerfile" <<DOCKER
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git socat iproute2 unzip nodejs npm \
+FROM ${BASE}
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git socat iproute2 unzip xz-utils \
  && rm -rf /var/lib/apt/lists/*
+RUN set -eu; \
+ mkdir -p /tmp/node-dist; \
+ curl -fsSL https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt -o /tmp/node-dist/SHASUMS256.txt; \
+ tarball="\$(awk -v arch="${NODE_ARCH}" '\$2 ~ "^node-v[0-9.]+-linux-" arch "\\\\.tar\\\\.xz$" {print \$2; exit}' /tmp/node-dist/SHASUMS256.txt)"; \
+ test -n "\$tarball"; \
+ grep " \$tarball\\$" /tmp/node-dist/SHASUMS256.txt > /tmp/node-dist/node.sha256; \
+ curl -fsSL "https://nodejs.org/dist/latest-v22.x/\$tarball" -o "/tmp/node-dist/\$tarball"; \
+ (cd /tmp/node-dist && sha256sum -c node.sha256); \
+ tar -xJf "/tmp/node-dist/\$tarball" -C /usr/local --strip-components=1; \
+ rm -rf /tmp/node-dist
 RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
 COPY bobagent-host.ts /opt/bobagent/bobagent-host.ts
 COPY bobagent-init /sbin/bobagent-init

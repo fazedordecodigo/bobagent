@@ -13,6 +13,7 @@
     "build:app": "bun run build:daemon && bun run --cwd apps/desktop tauri build --debug --bundles app",
     "test": "bun test packages/daemon packages/host",
     "test:firecracker": "BOBAGENT_REAL_FIRECRACKER=1 bun test packages/host/test/firecracker.real.test.ts packages/daemon/test/firecracker-ssh.real.test.ts",
+    "test:firecracker:providers": "BOBAGENT_REAL_FIRECRACKER=1 BOBAGENT_REAL_PROVIDERS=1 bun test packages/host/test/firecracker.real.test.ts packages/daemon/test/firecracker-ssh.real.test.ts",
     "lint": "biome check .",
     "typecheck": "tsc -p packages/protocol/tsconfig.json && tsc -p packages/daemon/tsconfig.json && tsc -p packages/relay/tsconfig.json && tsc -p packages/host/tsconfig.json && tsc -p apps/desktop/tsconfig.json",
     "smoke:ui": "bun scripts/ui-smoke.ts",

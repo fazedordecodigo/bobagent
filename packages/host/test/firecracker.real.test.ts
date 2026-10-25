@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   assertGuestInitExecutable,
@@ -258,6 +258,14 @@ describe.skipIf(!enabled)("real Firecracker host", () => {
     }
   }, 90000);
 
+  test("does not expose internal BobAgent variables to guest commands", async () => {
+    const result = await waitForExit(hostRun(root, spec("guest-env", ["env"])));
+    expect(result.code).toBe(0);
+    expect(result.stdout).not.toMatch(/^BOBAGENT_/m);
+    expect(result.stdout).toContain("HTTPS_PROXY=http://127.0.0.1:3128");
+    expect(result.stdout).toContain("NO_COLOR=1");
+  }, 90000);
+
   test("allows public HTTPS and denies private destinations through the CONNECT proxy", async () => {
     const blocked = [
       "https://127.0.0.1:443",
@@ -276,7 +284,7 @@ describe.skipIf(!enabled)("real Firecracker host", () => {
       spec("proxy", [
         "sh",
         "-c",
-        `set -e; status="$(curl -sS -o /dev/null -w '%{http_code}' https://example.com)"; echo "public:$status"; test "$status" = 200; ${checks}; echo proxy-blocked`,
+        `set -e; status="$(curl -sS -o /dev/null -w '%{http_code}' https://example.com)"; echo "public:$status"; test "$status" = 200; for host in api.anthropic.com api.openai.com; do status="$(curl -sS --connect-timeout 10 --max-time 30 -o /dev/null -w '%{http_code}' "https://$host/")"; test "$status" != 000; echo "$host:$status"; done; ${checks}; echo proxy-blocked`,
       ]),
     );
     const runDir = await waitForRunDir(root, "proxy");
@@ -284,7 +292,23 @@ describe.skipIf(!enabled)("real Firecracker host", () => {
     const result = await waitForExit(run, 90000);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("public:200");
+    expect(result.stdout).toContain("api.anthropic.com:");
+    expect(result.stdout).toContain("api.openai.com:");
     expect(result.stdout).toContain("proxy-blocked");
+    const proxyLog = readFileSync(join(root, "vms", "proxy", "proxy.log"), "utf8");
+    expect(proxyLog).toMatch(/api\.anthropic\.com:443 allowed \d+\.\d+\.\d+\.\d+/);
+    expect(proxyLog).toMatch(/api\.openai\.com:443 allowed \d+\.\d+\.\d+\.\d+/);
+    expect(
+      proxyLog.match(/127\.0\.0\.1:443 denied blocked or unresolved destination/g),
+    ).toHaveLength(2);
+    expect(proxyLog).toMatch(/127\.0\.0\.1:443 denied blocked or unresolved destination/);
+    console.log(
+      result.stdout
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith("api."))
+        .join("\n"),
+    );
+    console.log(`proxy audit log:\n${proxyLog.trim()}`);
     await waitForPidExit(pid);
   }, 120000);
 

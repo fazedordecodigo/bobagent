@@ -2,8 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection, createServer } from "node:net";
-import { userInfo } from "node:os";
-import { join } from "node:path";
+import { homedir, userInfo } from "node:os";
+import { join, resolve } from "node:path";
 import type { Agent, ChatItem, RemoteHost, Subagent, Turn } from "@bobagent/protocol";
 import {
   firecrackerRunDirs,
@@ -15,8 +15,32 @@ import {
 import { DaemonClient, type DaemonHandle, readPids, startDaemon, tmp } from "./helpers";
 
 const enabled = process.env.BOBAGENT_REAL_FIRECRACKER === "1" && existsSync("/usr/sbin/sshd");
+const providersRequested =
+  process.env.BOBAGENT_REAL_FIRECRACKER === "1" && process.env.BOBAGENT_REAL_PROVIDERS === "1";
+const artifacts = resolve(
+  process.env.BOBAGENT_FC_ARTIFACTS ?? join(homedir(), ".bobagent/firecracker"),
+);
+const missingProviderClis = providersRequested
+  ? ["claude", "codex"].filter((cli) => {
+      const rootfs = join(artifacts, "rootfs.ext4");
+      if (!existsSync(rootfs)) return true;
+      const result = spawnSync("debugfs", ["-R", `stat /usr/local/bin/${cli}`, rootfs], {
+        encoding: "utf8",
+      });
+      return result.status !== 0 || !/Inode:\s+\d+/.test(result.stdout);
+    })
+  : [];
+if (providersRequested && missingProviderClis.length)
+  console.log(
+    `Skipping real-provider Firecracker test: guest image is missing ${missingProviderClis.join(", ")}`,
+  );
+const realProvidersEnabled = enabled && providersRequested && missingProviderClis.length === 0;
 const TOKEN = `firecracker-ssh-${crypto.randomUUID()}`;
 const FAKE_AGENT = join(REPO_ROOT, "packages/daemon/test/fixtures/fake-acp-agent.ts");
+const SSH_RUN_SPEC_WRAPPER = join(
+  REPO_ROOT,
+  "packages/daemon/test/fixtures/ssh-run-spec-wrapper.ts",
+);
 
 function run(command: string, args: string[], cwd = REPO_ROOT) {
   const result = spawnSync(command, args, { cwd, encoding: "utf8" });
@@ -109,6 +133,7 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
   let knownHosts: string;
   let username: string;
   let port: number;
+  let providerRunSpecEnvLog: string | null = null;
 
   beforeAll(async () => {
     sshDir = tmp("fc-sshd-");
@@ -163,10 +188,26 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
     const dataDir = tmp("fc-ssh-data-");
     const agentsRoot = tmp("fc-ssh-agents-");
     daemonDirs = [stateDir, dataDir, agentsRoot];
+    providerRunSpecEnvLog = providersRequested ? join(sshDir, "provider-run-spec-env.jsonl") : null;
+    const sshCommand =
+      providersRequested && providerRunSpecEnvLog
+        ? [process.execPath, SSH_RUN_SPEC_WRAPPER, providerRunSpecEnvLog]
+        : ["ssh", "-o", `UserKnownHostsFile=${knownHosts}`];
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
       FAKE_ACP_STATE_DIR: stateDir,
       BOBAGENT_PROVIDER_COMMAND_DEVIN: JSON.stringify(["bun", "/opt/bobagent/fake-acp-agent.js"]),
-      BOBAGENT_SSH_COMMAND: JSON.stringify(["ssh", "-o", `UserKnownHostsFile=${knownHosts}`]),
+      BOBAGENT_SSH_COMMAND: JSON.stringify(sshCommand),
+      ...(providersRequested
+        ? {
+            BOBAGENT_SENTINEL_TEST: "leak",
+            ANTHROPIC_API_KEY: "sk-sentinel-leak",
+            OPENAI_API_KEY: "sk-sentinel-leak",
+            BOBAGENT_PROVIDER_COMMAND_CLAUDE: "",
+            BOBAGENT_PROVIDER_COMMAND_CODEX: "",
+            BOBAGENT_ACP_COMMAND_CLAUDE: "",
+            BOBAGENT_ACP_COMMAND_CODEX: "",
+          }
+        : {}),
     });
     client = await DaemonClient.connect(daemon.port, TOKEN);
     boss = (await client.request("agents.create", {
@@ -316,4 +357,102 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
     const vms = readdirSync(join(root, "vms"), { withFileTypes: true });
     expect(vms.some((entry) => entry.isDirectory())).toBe(true);
   }, 240000);
+
+  describe.skipIf(!realProvidersEnabled)("real Claude and Codex providers", () => {
+    test("surfaces sign-in errors, keeps daemon sentinels out of RunSpec env, and cleans up VMs", async () => {
+      host = (await client.request("hosts.install", { id: host.id })) as RemoteHost;
+      host = (await client.request("hosts.check", { id: host.id })) as RemoteHost;
+      expect(host.preflight?.firecrackerReady).toBe(true);
+      const runSpecEnvLogPath = providerRunSpecEnvLog;
+      if (runSpecEnvLogPath === null) throw new Error("RunSpec env log path is unavailable");
+
+      const providerAgentIds: Record<string, string> = {};
+      for (const provider of ["claude", "codex"] as const) {
+        const agent = (await client.request("agents.create", {
+          name: `real-${provider}`,
+          provider,
+          instructions: "",
+        })) as Agent;
+        providerAgentIds[provider] = agent.id;
+        await client.request("placements.set", {
+          agentId: agent.id,
+          hostId: host.id,
+          isolation: "firecracker",
+          vcpus: 1,
+          memMib: 512,
+        });
+
+        const observedPids = new Set<number>();
+        const collectPids = () => {
+          for (const runDir of firecrackerRunDirs(root, agent.id)) {
+            const pidFile = join(runDir, "firecracker.pid");
+            if (existsSync(pidFile)) observedPids.add(recordedFirecrackerPid(runDir));
+          }
+        };
+        const pidPoll = setInterval(collectPids, 10);
+        collectPids();
+        const startedAt = Date.now();
+        let turn: Turn;
+        try {
+          const queue = (await client.request("chat.send", {
+            agentId: agent.id,
+            text: "Reply with READY.",
+          })) as { queueId: string };
+          turn = await waitForEvent(client, agent.id, queue.queueId);
+        } finally {
+          clearInterval(pidPoll);
+          collectPids();
+        }
+
+        const durationMs = Date.now() - startedAt;
+        const loginCommand = provider === "claude" ? "claude auth login" : "codex login";
+        const errorText = turn.error ?? "";
+        expect(turn.status).toBe("failed");
+        expect(turn.error).not.toBeNull();
+        expect(errorText).toContain(loginCommand);
+        const history = (await client.request("chat.history", {
+          agentId: agent.id,
+        })) as { items: ChatItem[] };
+        const errorItem = history.items.filter((item) => item.kind === "error").at(-1);
+        expect(errorItem?.kind).toBe("error");
+        if (errorItem?.kind === "error") expect(errorItem.message).toBe(errorText);
+        console.log(`${provider} auth error (${durationMs} ms): ${errorText}`);
+
+        expect(observedPids.size).toBeGreaterThan(0);
+        for (const pid of observedPids) await waitForPidExit(pid);
+        await waitForRunDirsRemoved(root, agent.id);
+        expect(firecrackerRunDirs(root, agent.id)).toHaveLength(0);
+
+        const proxyLogPath = join(root, "vms", agent.id, "proxy.log");
+        const proxyLog = existsSync(proxyLogPath) ? readFileSync(proxyLogPath, "utf8").trim() : "";
+        console.log(`${provider} proxy activity:\n${proxyLog || "(no CONNECT requests)"}`);
+      }
+
+      const runSpecs = readFileSync(runSpecEnvLogPath, "utf8")
+        .trim()
+        .split("\n")
+        .map(
+          (line) =>
+            JSON.parse(line) as {
+              agentId: string;
+              command: string;
+              envKeys: string[];
+              bobagentKeys: string[];
+              apiKeyKeys: string[];
+              hasSentinelValue: boolean;
+            },
+        );
+      for (const provider of ["claude", "codex"] as const) {
+        const specEnvs = runSpecs.filter((entry) => entry.agentId === providerAgentIds[provider]);
+        expect(specEnvs.length).toBeGreaterThan(0);
+        for (const entry of specEnvs) {
+          expect(entry.command).toBe(provider);
+          expect(entry.bobagentKeys).toEqual([]);
+          expect(entry.apiKeyKeys).toEqual([]);
+          expect(entry.hasSentinelValue).toBe(false);
+          console.log(`${provider} RunSpec env evidence: ${JSON.stringify(entry)}`);
+        }
+      }
+    }, 240000);
+  });
 });

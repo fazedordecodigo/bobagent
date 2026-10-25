@@ -17,6 +17,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import {
   accessSync,
+  appendFileSync,
   closeSync,
   constants,
   copyFileSync,
@@ -25,7 +26,9 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { createConnection, createServer, isIP, type Server, type Socket } from "node:net";
@@ -99,6 +102,24 @@ function which(cmd: string): string | null {
 export function firecrackerBin(): string | null {
   const local = join(ROOT, "firecracker", "firecracker");
   return process.env.BOBAGENT_FIRECRACKER_BIN || (existsSync(local) ? local : which("firecracker"));
+}
+
+export function buildGuestProviderEnv(
+  inherited: NodeJS.ProcessEnv,
+  specEnv: Record<string, string>,
+  proxy: string | undefined,
+): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(inherited)) {
+    if (!key.startsWith("BOBAGENT_")) env[key] = value;
+  }
+  Object.assign(env, specEnv);
+  env.NO_COLOR = "1";
+  if (proxy) {
+    env.HTTPS_PROXY = env.https_proxy = env.HTTP_PROXY = env.http_proxy = proxy;
+    env.NO_PROXY = env.no_proxy = "localhost,127.0.0.1";
+  }
+  return env;
 }
 
 export function matchesGuestHelperStamp(stamp: string | null, helper: Buffer): boolean | null {
@@ -298,8 +319,21 @@ export async function proxyTarget(host: string): Promise<string | null> {
   }
 }
 
+export function appendProxyLog(path: string, destination: string, decision: string): void {
+  try {
+    if (existsSync(path) && statSync(path).size > 1024 * 1024) {
+      rmSync(`${path}.1`, { force: true });
+      renameSync(path, `${path}.1`);
+    }
+    appendFileSync(path, `${new Date().toISOString()} ${destination} ${decision}\n`);
+  } catch {}
+}
+
 /** Minimal HTTP CONNECT proxy for the guest (public destinations only). */
-export function proxyServer(): Server {
+export function proxyServer(logPath?: string): Server {
+  const log = (destination: string, decision: string) => {
+    if (logPath) appendProxyLog(logPath, destination, decision);
+  };
   return createServer((conn) => {
     let head = Buffer.alloc(0);
     const onData = async (chunk: Buffer) => {
@@ -314,14 +348,18 @@ export function proxyServer(): Server {
         head.toString("latin1"),
       );
       if (!m) {
+        log("invalid request", "denied invalid CONNECT request");
         conn.end("HTTP/1.1 403 Forbidden\r\n\r\n");
         return;
       }
+      const destination = `${m[1]}:${m[2]}`;
       const target = await proxyTarget(m[1]!);
       if (!target) {
+        log(destination, "denied blocked or unresolved destination");
         conn.end("HTTP/1.1 403 Forbidden\r\n\r\n");
         return;
       }
+      log(destination, `allowed ${target}`);
       const upstream = createConnection({
         host: target,
         port: Number(m[2]),
@@ -503,7 +541,7 @@ async function runFirecracker(spec: RunSpec, rest: Buffer) {
     );
   }
   const servers: Server[] = [];
-  const proxy = proxyServer();
+  const proxy = proxyServer(join(agentDir, "proxy.log"));
   servers.push(proxy);
   try {
     await listenUnix(proxy, `${uds}_${VSOCK_PROXY_PORT}`);
@@ -637,11 +675,7 @@ async function guestExec() {
   const spec = JSON.parse(line) as { cmd: string[]; env: Record<string, string>; cwd: string };
   mkdirSync(spec.cwd, { recursive: true });
   const proxy = process.env.BOBAGENT_GUEST_PROXY;
-  const env: Record<string, string | undefined> = { ...process.env, ...spec.env, NO_COLOR: "1" };
-  if (proxy) {
-    env.HTTPS_PROXY = env.https_proxy = env.HTTP_PROXY = env.http_proxy = proxy;
-    env.NO_PROXY = env.no_proxy = "localhost,127.0.0.1";
-  }
+  const env = buildGuestProviderEnv(process.env, spec.env ?? {}, proxy);
   const [bin, ...args] = spec.cmd;
   const child = spawn(bin as string, args, {
     cwd: spec.cwd,

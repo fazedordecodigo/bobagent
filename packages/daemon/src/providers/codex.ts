@@ -496,7 +496,7 @@ export class CodexDriver implements ProviderDriver {
       if (
         account.account == null &&
         account.requiresOpenaiAuth === true &&
-        !process.env.OPENAI_API_KEY
+        (opts.remote || !process.env.OPENAI_API_KEY)
       ) {
         throw new ProviderError("auth_required", authMessage("codex"));
       }

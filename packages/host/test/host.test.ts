@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import {
+  appendProxyLog,
   blockedHost,
+  buildGuestProviderEnv,
   isFirecrackerReady,
   matchesGuestHelperStamp,
   proxyServer,
@@ -59,11 +61,52 @@ describe("bobagent-host", () => {
     expect(await proxyTarget("8.8.8.8")).toBe("8.8.8.8");
   });
 
+  test("guest provider env strips inherited internal BobAgent values", () => {
+    const env = buildGuestProviderEnv(
+      {
+        BOBAGENT_GUEST_PROXY: "http://127.0.0.1:3128",
+        BOBAGENT_GUEST_BRIDGE_SOCKET: "/run/bobagent/bridge.sock",
+        BOBAGENT_SENTINEL_TEST: "leak",
+        HOME: "/root",
+        PATH: "/usr/bin",
+      },
+      { BOBAGENT_BRIDGE_TOKEN: "mcp-token", CUSTOM_VALUE: "kept" },
+      "http://127.0.0.1:3128",
+    );
+    expect(env.BOBAGENT_GUEST_PROXY).toBeUndefined();
+    expect(env.BOBAGENT_GUEST_BRIDGE_SOCKET).toBeUndefined();
+    expect(env.BOBAGENT_SENTINEL_TEST).toBeUndefined();
+    expect(env.BOBAGENT_BRIDGE_TOKEN).toBe("mcp-token");
+    expect(env.CUSTOM_VALUE).toBe("kept");
+    expect(env.HOME).toBe("/root");
+    expect(env.NO_COLOR).toBe("1");
+    expect(env.HTTPS_PROXY).toBe("http://127.0.0.1:3128");
+    expect(env.NO_PROXY).toBe("localhost,127.0.0.1");
+  });
+
+  test("proxy audit log rotates above one MiB before appending", () => {
+    const dir = mkdtempSync(join(tmpdir(), "proxy-log-test-"));
+    const path = join(dir, "proxy.log");
+    const large = Buffer.alloc(1024 * 1024 + 1, 0x61);
+    writeFileSync(path, large);
+    try {
+      appendProxyLog(path, "api.example.com:443", "allowed 203.0.113.1");
+      expect(readFileSync(`${path}.1`)).toEqual(large);
+      const line = readFileSync(path, "utf8").trim();
+      expect(line).toMatch(
+        /^\d{4}-\d\d-\d\dT[\d:.]+Z api\.example\.com:443 allowed 203\.0\.113\.1$/,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("proxy rejects a numeric hostname resolving to loopback", async () => {
     const dir = mkdtempSync(join(tmpdir(), "proxy-test-"));
     const socketPath = join(dir, "proxy.sock");
+    const logPath = join(dir, "proxy.log");
     const target = createServer((conn) => conn.destroy());
-    const proxy = proxyServer();
+    const proxy = proxyServer(logPath);
     await new Promise<void>((resolve) => target.listen(0, "127.0.0.1", resolve));
     await new Promise<void>((resolve) => proxy.listen(socketPath, resolve));
     try {
@@ -80,6 +123,9 @@ describe("bobagent-host", () => {
         );
       });
       expect(response).toStartWith("HTTP/1.1 403 Forbidden");
+      expect(readFileSync(logPath, "utf8")).toContain(
+        `2130706433:${port} denied blocked or unresolved destination`,
+      );
     } finally {
       await new Promise<void>((resolve) => proxy.close(() => resolve()));
       await new Promise<void>((resolve) => target.close(() => resolve()));
