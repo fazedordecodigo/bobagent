@@ -57,8 +57,8 @@ export function sshArgs(host: RemoteHost, extra: string[], remoteCmd: string): [
       "ExitOnForwardFailure=yes",
       "-o",
       "StreamLocalBindUnlink=yes",
-      "-p",
-      String(host.port),
+      // 22 is left to ~/.ssh/config so a Host alias with its own Port keeps working
+      ...(host.port !== 22 ? ["-p", String(host.port)] : []),
       ...(host.identityFile ? ["-i", expandHome(host.identityFile)] : []),
       ...extra,
       "--",
