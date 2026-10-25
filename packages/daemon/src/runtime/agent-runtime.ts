@@ -209,6 +209,7 @@ export class AgentRuntime {
         text: next.text,
         ...(sender ? { from: sender } : {}),
         ...(next.channel_id ? { channelId: next.channel_id } : {}),
+        ...(next.meta_json ? (JSON.parse(next.meta_json) as Record<string, unknown>) : {}),
       });
       this.setStatus("starting");
       this.broadcast("turn.started", turnRow);

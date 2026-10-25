@@ -146,10 +146,14 @@ export function ChatView({
       )}
       <Composer
         running={runningTurn !== null || sendBusy}
-        onSend={async (text) => {
+        onSend={async (text, attachments) => {
           setSendBusy(true);
           try {
-            await client.request("chat.send", { agentId: agent.id, text });
+            await client.request("chat.send", {
+              agentId: agent.id,
+              text,
+              ...(attachments.length ? { attachments } : {}),
+            });
           } finally {
             setSendBusy(false);
           }

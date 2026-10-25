@@ -127,7 +127,21 @@ export function MessageList({
                   {item.from && (
                     <div className="mb-1 text-xs text-violet-200">From agent {item.from.name}</div>
                   )}
+                  {item.routine && (
+                    <div className="mb-1 text-xs text-sky-200">
+                      ⏰ Routine {item.routine.name} ({item.routine.trigger})
+                    </div>
+                  )}
                   {item.text}
+                  {item.attachments && item.attachments.length > 0 && (
+                    <ul className="mt-1 space-y-0.5 text-xs text-sky-100/80">
+                      {item.attachments.map((a) => (
+                        <li key={a.path} title={a.path}>
+                          📎 {a.name} ({Math.max(1, Math.round(a.size / 1024))} KB)
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               </div>
             );

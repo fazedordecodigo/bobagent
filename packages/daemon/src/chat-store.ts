@@ -278,6 +278,7 @@ export type QueueRow = {
   hops: number;
   channel_id: string | null;
   prompt: string | null;
+  meta_json: string | null;
 };
 
 export type QueueItemLite = {
@@ -294,6 +295,8 @@ export type QueueSource = {
   channelId?: string | null;
   /** Provider prompt when it differs from the displayed text. */
   prompt?: string;
+  /** Extra fields stored on the user_message item (routine, attachments). */
+  meta?: Record<string, unknown>;
 };
 
 function rowToQueueItem(r: QueueRow): QueueItemLite {
@@ -314,7 +317,7 @@ export class QueueStore {
     const now = Date.now();
     this.db
       .query(
-        "INSERT INTO queue (id, agent_id, text, status, created_at, from_agent_id, hops, channel_id, prompt) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?)",
+        "INSERT INTO queue (id, agent_id, text, status, created_at, from_agent_id, hops, channel_id, prompt, meta_json) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)",
       )
       .run(
         id,
@@ -325,6 +328,7 @@ export class QueueStore {
         from?.hops ?? 0,
         from?.channelId ?? null,
         from?.prompt ?? null,
+        from?.meta ? JSON.stringify(from.meta) : null,
       );
     return { id, agentId, text, createdAt: now, fromAgentId: from?.agentId ?? null };
   }

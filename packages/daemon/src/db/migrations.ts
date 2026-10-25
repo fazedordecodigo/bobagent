@@ -107,4 +107,28 @@ export const migrations: string[] = [
     deleted_at INTEGER
   );
   CREATE INDEX memories_agent ON memories(agent_id, created_at)`,
+  // 9: routines + queue metadata (routine/attachments shown on the user message)
+  `ALTER TABLE queue ADD COLUMN meta_json TEXT;
+  CREATE TABLE routines (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES agents(id),
+    name TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    schedule TEXT,
+    webhook_token TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_run_at INTEGER,
+    next_run_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    deleted_at INTEGER
+  );
+  CREATE TABLE routine_runs (
+    id TEXT PRIMARY KEY,
+    routine_id TEXT NOT NULL REFERENCES routines(id),
+    trigger TEXT NOT NULL,
+    queue_id TEXT,
+    error TEXT,
+    created_at INTEGER NOT NULL
+  )`,
 ];

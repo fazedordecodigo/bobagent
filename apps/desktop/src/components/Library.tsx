@@ -1,4 +1,4 @@
-import type { Agent, AgentAvatar, Memory, Skill } from "@bobagent/protocol";
+import type { Agent, AgentAvatar, Memory, Routine, Skill } from "@bobagent/protocol";
 import { useCallback, useEffect, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
 import { btnCls, inputCls } from "./AgentSettings";
@@ -227,5 +227,139 @@ export function SkillsView({ client }: { client: DaemonClient }) {
         {skills.length === 0 && <li className="text-sm text-zinc-500">No skills yet.</li>}
       </ul>
     </div>
+  );
+}
+
+export function RoutinesPanel({ client, agentId }: { client: DaemonClient; agentId: string }) {
+  const [items, setItems] = useState<Routine[]>([]);
+  const [form, setForm] = useState({ name: "", prompt: "", schedule: "", webhook: false });
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => {
+    client
+      .request("routines.list", { agentId })
+      .then(setItems)
+      .catch(() => {});
+  }, [client, agentId]);
+  useEffect(() => {
+    load();
+    const offU = client.on("routine.updated", (r) => {
+      if (r.agentId === agentId) load();
+    });
+    const offD = client.on("routine.deleted", load);
+    return () => {
+      offU();
+      offD();
+    };
+  }, [client, agentId, load]);
+  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  return (
+    <section className="mx-auto max-w-lg space-y-2 px-6 pb-6">
+      <h3 className="text-sm font-semibold text-zinc-300">Routines</h3>
+      <p className="text-xs text-zinc-500">
+        Saved prompts sent on a schedule ("every 30m", "daily 09:00", "weekly mon 09:00"), by a
+        local webhook, or on demand.
+      </p>
+      <ul className="space-y-1">
+        {items.map((r) => (
+          <li key={r.id} className="space-y-1 rounded bg-zinc-900 px-2 py-1.5 text-sm">
+            <div className="flex items-center gap-2">
+              <span className="font-medium">{r.name}</span>
+              <span className="text-xs text-zinc-500">{r.schedule ?? "no schedule"}</span>
+              <label className="ml-auto flex items-center gap-1 text-xs text-zinc-400">
+                <input
+                  type="checkbox"
+                  checked={r.enabled}
+                  onChange={(e) =>
+                    client
+                      .request("routines.update", { id: r.id, enabled: e.target.checked })
+                      .catch(fail)
+                  }
+                />
+                on
+              </label>
+              <button
+                type="button"
+                className="text-xs text-sky-400 hover:text-sky-300"
+                onClick={() => client.request("routines.run", { id: r.id }).catch(fail)}
+              >
+                Run now
+              </button>
+              <button
+                type="button"
+                className="text-xs text-zinc-500 hover:text-red-400"
+                onClick={() => client.request("routines.delete", { id: r.id }).catch(fail)}
+              >
+                Delete
+              </button>
+            </div>
+            <div className="truncate text-xs text-zinc-400">{r.prompt}</div>
+            {r.nextRunAt && (
+              <div className="text-xs text-zinc-500">
+                Next: {new Date(r.nextRunAt).toLocaleString()}
+              </div>
+            )}
+            {r.webhookUrl && (
+              <code className="block text-[10px] break-all text-zinc-500 select-all">
+                curl -X POST -H "Authorization: Bearer {r.webhookToken}" {r.webhookUrl}
+              </code>
+            )}
+          </li>
+        ))}
+      </ul>
+      <form
+        className="space-y-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setError(null);
+          client
+            .request("routines.create", {
+              agentId,
+              name: form.name,
+              prompt: form.prompt,
+              schedule: form.schedule.trim() || null,
+              webhook: form.webhook,
+            })
+            .then(() => setForm({ name: "", prompt: "", schedule: "", webhook: false }))
+            .catch(fail);
+        }}
+      >
+        <div className="flex gap-2">
+          <input
+            className={inputCls}
+            placeholder="Routine name"
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            required
+          />
+          <input
+            className={inputCls}
+            placeholder="Schedule (optional)"
+            value={form.schedule}
+            onChange={(e) => setForm({ ...form, schedule: e.target.value })}
+          />
+        </div>
+        <textarea
+          className={inputCls}
+          placeholder="Prompt"
+          value={form.prompt}
+          onChange={(e) => setForm({ ...form, prompt: e.target.value })}
+          required
+        />
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-1 text-xs text-zinc-400">
+            <input
+              type="checkbox"
+              checked={form.webhook}
+              onChange={(e) => setForm({ ...form, webhook: e.target.checked })}
+            />
+            Webhook trigger
+          </label>
+          <button type="submit" className={`${btnCls} ml-auto bg-zinc-700 hover:bg-zinc-600`}>
+            Add routine
+          </button>
+        </div>
+        {error && <p className="text-xs text-red-400">{error}</p>}
+      </form>
+    </section>
   );
 }

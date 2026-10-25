@@ -10,7 +10,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AgentSettings, btnCls, inputCls, PROVIDERS } from "./components/AgentSettings";
 import { ChannelCreateForm, ChannelView } from "./components/ChannelView";
 import { ChatView } from "./components/ChatView";
-import { AvatarBadge, AvatarEditor, MemoriesPanel, SkillsView } from "./components/Library";
+import {
+  AvatarBadge,
+  AvatarEditor,
+  MemoriesPanel,
+  RoutinesPanel,
+  SkillsView,
+} from "./components/Library";
 import { DaemonClient } from "./lib/daemon";
 
 export default function App() {
@@ -295,6 +301,7 @@ export default function App() {
               onSave={(avatar) => updateAgent(selected.id, { avatar })}
             />
             <MemoriesPanel client={clientRef.current!} agentId={selected.id} />
+            <RoutinesPanel client={clientRef.current!} agentId={selected.id} />
           </div>
         ) : selected && clientReady ? (
           <ChatView

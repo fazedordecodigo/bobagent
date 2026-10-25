@@ -29,6 +29,17 @@ export const AgentAvatar = z.object({
 });
 export type AgentAvatar = z.infer<typeof AgentAvatar>;
 
+export const ChatAttachment = z.object({
+  name: z.string(),
+  mime: z.string(),
+  size: z.number(),
+  path: z.string(),
+  extractedTo: z.string().optional(),
+});
+export type ChatAttachment = z.infer<typeof ChatAttachment>;
+export const RoutineTrigger = z.enum(["schedule", "webhook", "manual"]);
+export type RoutineTrigger = z.infer<typeof RoutineTrigger>;
+
 export const Agent = z.object({
   id: z.string(),
   name: z.string().trim().min(1).max(80),
@@ -166,6 +177,11 @@ export const ChatItem = z.discriminatedUnion("kind", [
     text: z.string(),
     from: z.object({ agentId: z.string(), name: z.string() }).nullable().optional(),
     channelId: z.string().nullable().optional(),
+    routine: z
+      .object({ id: z.string(), name: z.string(), trigger: RoutineTrigger })
+      .nullable()
+      .optional(),
+    attachments: z.array(ChatAttachment).optional(),
   }),
   ChatItemBase.extend({ kind: z.literal("agent_message"), text: z.string() }),
   ChatItemBase.extend({ kind: z.literal("agent_thought"), text: z.string() }),
@@ -222,7 +238,20 @@ export const ChatHistoryResult = z.object({
 });
 
 export const ChatSendParams = z
-  .object({ agentId: z.string(), text: z.string().min(1).max(100000) })
+  .object({
+    agentId: z.string(),
+    text: z.string().min(1).max(100000),
+    attachments: z
+      .array(
+        z.object({
+          name: z.string().min(1).max(255),
+          mime: z.string().max(255),
+          dataBase64: z.string().max(36_000_000),
+        }),
+      )
+      .max(10)
+      .optional(),
+  })
   .strict();
 export type ChatSendParams = z.infer<typeof ChatSendParams>;
 export const ChatSendResult = z.object({ queueId: z.string() });
@@ -317,6 +346,41 @@ export const SkillSaveParams = z
     body: z.string().min(1).max(200_000),
   })
   .strict();
+
+// ---- Routines ----
+
+export const Routine = z.object({
+  id: z.string(),
+  agentId: z.string(),
+  name: z.string(),
+  prompt: z.string(),
+  schedule: z.string().nullable(),
+  webhook: z.boolean(),
+  webhookUrl: z.string().nullable(),
+  webhookToken: z.string().nullable(),
+  enabled: z.boolean(),
+  lastRunAt: z.number().nullable(),
+  nextRunAt: z.number().nullable(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+export type Routine = z.infer<typeof Routine>;
+export const RoutineRun = z.object({
+  id: z.string(),
+  routineId: z.string(),
+  trigger: RoutineTrigger,
+  queueId: z.string().nullable(),
+  error: z.string().nullable(),
+  createdAt: z.number(),
+});
+export type RoutineRun = z.infer<typeof RoutineRun>;
+const RoutineFields = {
+  name: z.string().trim().min(1).max(80),
+  prompt: z.string().trim().min(1).max(20_000),
+  schedule: z.string().max(64).nullable(),
+  webhook: z.boolean(),
+  enabled: z.boolean(),
+};
 
 // ---- Usage + compaction ----
 
@@ -415,6 +479,42 @@ export const methodMap = {
   "permissions.list": { params: PermissionsListParams, result: PermissionsListResult },
   "permissions.respond": { params: PermissionsRespondParams, result: PermissionsRespondResult },
   "agents.usage": { params: AgentsUsageParams, result: AgentUsage },
+  "routines.list": {
+    params: z.object({ agentId: z.string().optional() }).strict(),
+    result: z.array(Routine),
+  },
+  "routines.create": {
+    params: z
+      .object({
+        agentId: z.string(),
+        name: RoutineFields.name,
+        prompt: RoutineFields.prompt,
+        schedule: RoutineFields.schedule.optional(),
+        webhook: RoutineFields.webhook.optional(),
+        enabled: RoutineFields.enabled.optional(),
+      })
+      .strict(),
+    result: Routine,
+  },
+  "routines.update": {
+    params: z
+      .object({
+        id: z.string(),
+        name: RoutineFields.name.optional(),
+        prompt: RoutineFields.prompt.optional(),
+        schedule: RoutineFields.schedule.optional(),
+        webhook: RoutineFields.webhook.optional(),
+        enabled: RoutineFields.enabled.optional(),
+      })
+      .strict(),
+    result: Routine,
+  },
+  "routines.delete": {
+    params: z.object({ id: z.string() }).strict(),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  "routines.run": { params: z.object({ id: z.string() }).strict(), result: RoutineRun },
+  "routines.runs": { params: z.object({ id: z.string() }).strict(), result: z.array(RoutineRun) },
   "agents.draft": {
     params: z.object({ prompt: z.string().trim().min(1).max(4_000) }).strict(),
     result: z.object({ name: z.string(), instructions: z.string(), avatar: AgentAvatar }),
@@ -471,6 +571,8 @@ export type DaemonEventMap = {
   "queue.updated": QueueState;
   "agent.config": { agentId: string; configOptions: ConfigOption[] };
   "agent.usage": AgentUsage;
+  "routine.updated": Routine;
+  "routine.deleted": { id: string };
   "memories.changed": { agentId: string };
   "skills.changed": Record<string, never>;
   "channel.created": Channel;

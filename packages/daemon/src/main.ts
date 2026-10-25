@@ -10,6 +10,7 @@ import { openDatabase } from "./db";
 import { mergedPath } from "./env/login-path";
 import { runMcpBridge } from "./mcp-bridge";
 import { MemoryStore } from "./memories";
+import { RoutineService } from "./routines";
 import { Rpc } from "./rpc";
 import { RuntimeManager } from "./runtime/runtime-manager";
 import { SkillLibrary } from "./skills";
@@ -150,7 +151,18 @@ async function main() {
   bridge.memories = memories;
   bridge.skills = skills;
   bridge.broadcast = broadcast;
-  const rpc = new Rpc(store, chat, queue, runtimes, broadcast, channels, memories, skills);
+  const routines = new RoutineService(db, store, () => runtimes, broadcast);
+  const rpc = new Rpc(
+    store,
+    chat,
+    queue,
+    runtimes,
+    broadcast,
+    channels,
+    memories,
+    skills,
+    routines,
+  );
 
   // warm the login-shell PATH cache so provider CLIs resolve like in a terminal
   const path = mergedPath();
@@ -195,6 +207,26 @@ async function main() {
             (e) => new Response((e as Error).message, { status: 400 }),
           );
       }
+      const hook = /^\/hooks\/([\w-]+)$/.exec(url.pathname);
+      if (hook) {
+        // local webhook trigger for a routine (curl, scripts); never from a browser page
+        if (req.method !== "POST" || req.headers.get("origin") !== null) {
+          return new Response("forbidden", { status: 403 });
+        }
+        const auth = req.headers.get("authorization") ?? "";
+        const id = routines.webhookRoutine(
+          hook[1]!,
+          auth.startsWith("Bearer ") ? auth.slice(7) : "",
+        );
+        if (!id) return new Response("unauthorized", { status: 401 });
+        return req.text().then(
+          (payload) => {
+            const run = routines.run(id, "webhook", payload);
+            return Response.json(run, { status: run.error ? 409 : 202 });
+          },
+          () => new Response("bad request", { status: 400 }),
+        );
+      }
       if (url.pathname === "/health") {
         const denied = checkOrigin(req);
         if (denied) return denied;
@@ -208,6 +240,7 @@ async function main() {
       return new Response("not found", { status: 404 });
     },
     websocket: {
+      maxPayloadLength: 48 * 1024 * 1024,
       open(ws) {
         sockets.add(ws);
       },
@@ -228,6 +261,8 @@ async function main() {
   serverRef = server;
   bridge.port = server.port ?? 0;
   runtimes.resumeAllQueues();
+  routines.baseUrl = `http://127.0.0.1:${server.port}`;
+  routines.start();
   console.log(`BOBAGENT_READY {"port":${server.port}}`);
   log(`listening on 127.0.0.1:${server.port}, data dir ${dataDir}`);
 

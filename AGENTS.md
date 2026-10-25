@@ -158,6 +158,20 @@ Bridge tools: `remember`, `forget`, `list_memories`, `list_skills`, `read_skill`
 prefixed with `<agent_memories>` and `<skills_library>` (index only). UI:
 `components/Library.tsx`. Tests: `test/phase8.e2e.test.ts`.
 
+## Routines + attachments (Phase 9)
+
+Routines (`src/routines.ts`, migration 9: `routines`, `routine_runs`) are saved prompts sent
+to an agent with `trigger` schedule|webhook|manual. Schedules: `every <n>m|h|d`, `daily HH:MM`,
+`weekly <day> HH:MM` (local time); the scheduler ticks every `BOBAGENT_ROUTINE_TICK_MS`
+(default 30000) and collapses missed runs into one. Webhooks: `POST /hooks/<routineId>` with
+`Authorization: Bearer <webhookToken>` (per-routine token; Origin rejected), body passed as
+`<webhook_payload>` (20 KB cap). RPC `routines.list/create/update/delete/run/runs`, events
+`routine.updated`/`routine.deleted`. The prompt is wrapped in `<routine name trigger>`;
+`queue.meta_json` puts `routine`/`attachments` on the user_message item.
+Attachments: `chat.send {attachments:[{name,mime,dataBase64}]}` (max 10, 25 MB total) are
+written to `<workspace>/attachments/<id>/` (`src/attachments.ts`, basename-sanitized, ZIPs
+extracted with `unzip`) and listed in an `<attachments>` block. Tests: `test/phase9.e2e.test.ts`.
+
 ## Permissions
 
 Provider agents ask for approval only when THEIR OWN config says so

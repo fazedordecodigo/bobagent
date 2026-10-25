@@ -1,10 +1,12 @@
 import { type MethodName, methodMap } from "@bobagent/protocol";
 import type { AgentStore } from "./agents";
+import { attachmentsBlock, saveAttachments } from "./attachments";
 import type { ChannelService } from "./channels";
 import type { ChatStore, QueueStore } from "./chat-store";
 import { draftAgent } from "./draft";
 import type { MemoryStore } from "./memories";
 import { ProviderError } from "./providers/types";
+import type { RoutineService } from "./routines";
 import { RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
 import type { SkillLibrary } from "./skills";
@@ -21,6 +23,7 @@ export class Rpc {
     private channels: ChannelService,
     private memories: MemoryStore,
     private skills: SkillLibrary,
+    private routines: RoutineService,
   ) {}
 
   /** Returns the response payload string for one raw incoming message. */
@@ -100,8 +103,21 @@ export class Rpc {
         return { items, turns: this.chat.turnsByIds(turnIds), hasMore };
       }
       case "chat.send": {
-        const p = params as { agentId: string; text: string };
-        return this.runtimes.send(p.agentId, p.text);
+        const p = params as {
+          agentId: string;
+          text: string;
+          attachments?: { name: string; mime: string; dataBase64: string }[];
+        };
+        if (!p.attachments?.length) return this.runtimes.send(p.agentId, p.text);
+        const agent = this.agents.get(p.agentId);
+        if (!agent) throw new RpcError("not_found", "agent not found");
+        const saved = saveAttachments(agent.workspacePath, p.attachments);
+        return this.runtimes.sendFrom(p.agentId, p.text, {
+          agentId: null,
+          hops: 0,
+          prompt: attachmentsBlock(saved) + p.text,
+          meta: { attachments: saved },
+        });
       }
       case "queue.get": {
         const p = params as { agentId: string };
@@ -147,6 +163,20 @@ export class Rpc {
       case "agents.compact":
         await this.runtimes.compact((params as { agentId: string }).agentId);
         return { ok: true };
+      case "routines.list":
+        return this.routines.list((params as { agentId?: string }).agentId);
+      case "routines.create":
+        return this.routines.create(params as Parameters<RoutineService["create"]>[0]);
+      case "routines.update":
+        return this.routines.update(params as Parameters<RoutineService["update"]>[0]);
+      case "routines.delete":
+        this.routines.delete((params as { id: string }).id);
+        return { ok: true };
+      case "routines.run":
+        return this.routines.run((params as { id: string }).id, "manual");
+      case "routines.runs":
+        this.routines.get((params as { id: string }).id);
+        return this.routines.runs((params as { id: string }).id);
       case "agents.draft":
         return draftAgent((params as { prompt: string }).prompt);
       case "memories.list": {
