@@ -11,7 +11,7 @@
     "@upbot/protocol": "workspace:*",
     "imapflow": "1.7.6",
     "mailparser": "3.9.16",
-    "nodemailer": "9.0.5"
+    "nodemailer": "10.1.4"
   },
   "devDependencies": {
     "@types/bun": "1.4.3",
