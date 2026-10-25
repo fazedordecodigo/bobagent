@@ -3,6 +3,7 @@ import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import type { ConfigOption, ProviderId } from "@bobagent/protocol";
 import { resolveCommand, spawnEnv } from "../env/login-path";
+import { AUTH_RE, authMessage, commandFor, redactSecrets, STDERR_TAIL_LINES } from "./process";
 import {
   type NormalizedUpdate,
   type ProviderDriver,
@@ -11,65 +12,10 @@ import {
   type ProviderSession,
 } from "./types";
 
-const ACP_COMMANDS: Partial<Record<ProviderId, string[]>> = {
-  devin: ["devin", "acp"],
-  cursor: ["agent", "acp"],
-  grok: ["grok", "agent", "stdio"],
-  opencode: ["opencode", "acp"],
-  gemini: ["gemini", "--experimental-acp"],
-};
-
-const STDERR_TAIL_LINES = 50;
-
-// Task A probe result: the default mode per provider (never bypass/auto-approve).
-export const DEFAULT_MODE: Partial<Record<ProviderId, string>> = {
-  devin: "accept-edits",
-  cursor: "agent",
-  opencode: "build",
-};
-
-function redactSecrets(s: string): string {
-  return s
-    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, "$1<redacted>")
-    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, "<jwt-redacted>")
-    .replace(
-      /\b(sk-[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,})\b/g,
-      "<redacted>",
-    );
-}
-
-function commandFor(provider: ProviderId): string[] | null {
-  const override = process.env[`BOBAGENT_ACP_COMMAND_${provider.toUpperCase().replace(/-/g, "_")}`];
-  if (override) {
-    try {
-      const parsed = JSON.parse(override);
-      if (Array.isArray(parsed) && parsed.every((s) => typeof s === "string")) return parsed;
-    } catch {}
-  }
-  return ACP_COMMANDS[provider] ?? null;
-}
-
-const AUTH_RE =
-  /\b(auth(entication)?[ _-]?required|unauthori[sz]ed|not (logged|signed) in|log ?in required|sign ?in required)\b/i;
-
-const LOGIN_COMMANDS: Partial<Record<ProviderId, string>> = {
-  devin: "devin auth login",
-  cursor: "agent login",
-  grok: "grok login",
-  opencode: "opencode auth login",
-  gemini: "gemini",
-};
-
 function isAuthError(e: unknown): boolean {
   const err = e as { code?: number; message?: string };
   if (err?.code === -32000) return true;
   return AUTH_RE.test(err?.message ?? "");
-}
-
-function authMessage(provider: ProviderId, e: unknown): string {
-  const detail = (e as { message?: string })?.message ?? "";
-  const loginCmd = LOGIN_COMMANDS[provider] ?? "its login command";
-  return `${provider} requires sign-in. Run \`${loginCmd}\` in a terminal.${detail ? ` (${detail})` : ""}`;
 }
 
 type RawConfigOption = {
@@ -344,7 +290,11 @@ export class AcpDriver implements ProviderDriver {
           agentCapabilities?: { loadSession?: boolean };
         };
       } catch (e) {
-        if (isAuthError(e)) throw new ProviderError("auth_required", authMessage(this.provider, e));
+        if (isAuthError(e))
+          throw new ProviderError(
+            "auth_required",
+            authMessage(this.provider, (e as { message?: string })?.message ?? ""),
+          );
         throw e;
       }
     };
@@ -410,23 +360,5 @@ export class AcpDriver implements ProviderDriver {
       await origClose();
     };
     return session;
-  }
-}
-
-export function getDriver(provider: ProviderId): ProviderDriver {
-  if (provider === "claude" || provider === "codex" || provider === "openai-compatible") {
-    throw new ProviderError("provider_unavailable", `${provider} is not supported yet`);
-  }
-  return new AcpDriver(provider);
-}
-
-export function checkProviderAvailable(provider: ProviderId): void {
-  getDriver(provider); // throws provider_unavailable for non-ACP providers
-  const cmd = commandFor(provider);
-  if (!cmd || !resolveCommand(cmd[0]!)) {
-    throw new ProviderError(
-      "provider_unavailable",
-      `\`${cmd?.[0] ?? provider}\` not found in PATH (provider: ${provider})`,
-    );
   }
 }

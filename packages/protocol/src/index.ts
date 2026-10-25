@@ -6,8 +6,8 @@ export const PROVIDER_PERMISSION_CONFIG: Record<string, string | null> = {
   grok: "~/.grok/config.toml",
   opencode: "~/.config/opencode/opencode.json",
   gemini: "~/.gemini/settings.json",
-  claude: null,
-  codex: null,
+  claude: "~/.claude/settings.json",
+  codex: "~/.codex/config.toml",
   "openai-compatible": null,
 };
 

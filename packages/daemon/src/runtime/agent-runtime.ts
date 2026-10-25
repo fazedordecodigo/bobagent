@@ -10,7 +10,7 @@ import type {
 } from "@bobagent/protocol";
 import type { AgentStore } from "../agents";
 import type { ChatStore, QueueStore } from "../chat-store";
-import { checkProviderAvailable, DEFAULT_MODE, getDriver } from "../providers/acp";
+import { checkProviderAvailable, DEFAULT_MODE, getDriver } from "../providers";
 import { ProviderError, type ProviderHooks, type ProviderSession } from "../providers/types";
 import { buildHandoff } from "./handoff";
 

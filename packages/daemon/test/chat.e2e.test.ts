@@ -632,11 +632,11 @@ describe("chat e2e (fake acp agent)", () => {
     expect(interrupted).toBeTruthy();
   });
 
-  test("provider_unavailable: claude unsupported, missing CLI binary", async () => {
-    const claude = await newAgent("Claude", "claude");
-    await expect(
-      c.request("chat.send", { agentId: claude.id, text: "echo:x" }),
-    ).rejects.toMatchObject({ code: "provider_unavailable" });
+  test("provider_unavailable: openai-compatible unsupported, missing CLI binary", async () => {
+    const oai = await newAgent("OAI", "openai-compatible");
+    await expect(c.request("chat.send", { agentId: oai.id, text: "echo:x" })).rejects.toMatchObject(
+      { code: "provider_unavailable" },
+    );
 
     const gemini = await newAgent("Gemini", "gemini");
     await expect(

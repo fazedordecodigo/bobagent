@@ -46,7 +46,7 @@ Env vars (daemon):
 - `BOBAGENT_CANCEL_GRACE_MS` — ms after `chat.cancel` before the process is killed.
 
 Sign-in commands surfaced on auth errors: `devin auth login`, `agent login`,
-`grok login`, `opencode auth login` (all verified via --help). Gemini: `gemini`
+`grok login`, `opencode auth login`, `claude auth login`, `codex login` (all verified via --help). Gemini: `gemini`
 interactive sign-in — UNVERIFIED, CLI not installed.
 
 `bun run smoke:ui` — real-Chrome UI smoke (playwright-core, dev-only
@@ -72,6 +72,29 @@ New (non-resumed) sessions with prior history get a `<conversation_history>` blo
 `spikes/mode-probe.ts` — per provider x mode permission probe -> `spikes/out/mode-probe.json`.
 - `BOBAGENT_DEBUG_PROMPTS_DIR` — when set, the daemon writes every outgoing prompt to
   `<dir>/<agentId>-<turnId>.txt` (debugging only).
+
+## Native Claude + Codex (Phase 4)
+
+`src/providers/index.ts` routes providers: `claude` -> `ClaudeDriver` (`claude.ts`),
+`codex` -> `CodexDriver` (`codex.ts`), everything else -> ACP (`acp.ts`). Shared spawn,
+stderr tail, JSONL and auth helpers live in `process.ts`.
+- Claude: `claude --output-format stream-json --input-format stream-json --verbose
+  --include-partial-messages --permission-prompt-tool stdio --permission-mode default`
+  plus `--session-id <uuid>` (new) or `--resume <id>`; a failed resume falls back to a
+  new session. Approvals arrive as `can_use_tool` control requests; cancel sends an
+  `interrupt` control request. Config: `mode` (default/acceptEdits/plan, never bypass) and
+  `model` (from the initialize response), applied via `set_permission_mode`/`set_model`.
+- Codex: `codex app-server --listen stdio://` (JSON-RPC lines, no `jsonrpc` field):
+  `initialize` -> `initialized` -> `account/read` (signed out -> `auth_required`) ->
+  `thread/resume` or `thread/start` -> `model/list`. Turns are `turn/start`, cancel is
+  `turn/interrupt`; command/file approvals map to accept/acceptForSession/decline/cancel.
+  Config: `mode` (auto = workspace-write, read-only; both `on-request`), `model`, `effort`,
+  sent with each `turn/start`.
+- Verified against real CLIs (signed out) on the VM: claude 2.1.310, codex-cli 0.164.0.
+- `BOBAGENT_PROVIDER_COMMAND_<PROVIDER>` overrides any provider's spawn command
+  (`BOBAGENT_ACP_COMMAND_<PROVIDER>` still works). Tests use
+  `test/fixtures/fake-claude.ts` / `fake-codex.ts` (`$FAKE_CLAUDE_STATE_DIR`,
+  `$FAKE_CODEX_STATE_DIR`, `FAKE_CODEX_NO_AUTH=1`) from `test/native.e2e.test.ts`.
 
 ## Permissions
 
