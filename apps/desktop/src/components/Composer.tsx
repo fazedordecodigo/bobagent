@@ -192,7 +192,9 @@ export function Composer({
           )}
           <span className="ctx" id="ctxChip">
             <Icon name={contextIcon} size={14} />
-            {toolCount === 0 ? "Sem ferramentas" : `${toolCount} ferramenta${toolCount > 1 ? "s" : ""}`}
+            {toolCount === 0
+              ? "Sem ferramentas"
+              : `${toolCount} ferramenta${toolCount > 1 ? "s" : ""}`}
           </span>
           <span className="grow" />
           {running && (
