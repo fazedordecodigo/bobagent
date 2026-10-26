@@ -86,6 +86,8 @@ export function MessageList({
   onPermissionRespond,
   onSpeak,
   onRetry,
+  canRetry,
+  retryHasAttachments,
   onSuggestion,
 }: {
   agent: Agent;
@@ -99,6 +101,8 @@ export function MessageList({
   onPermissionRespond: (requestId: string, optionId: string | null) => void;
   onSpeak?: ((text: string) => void) | undefined;
   onRetry: () => void;
+  canRetry: boolean;
+  retryHasAttachments: boolean;
   onSuggestion: (text: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -262,18 +266,25 @@ export function MessageList({
                         <h3>Algo deu errado</h3>
                       </div>
                       <div className="errlog">{item.message}</div>
-                      {index === items.length - 1 && (
-                        <div className="approval-actions">
-                          <button
-                            type="button"
-                            className="btn btn-primary"
-                            data-od-id="error-retry"
-                            onClick={onRetry}
-                          >
-                            Tentar de novo
-                          </button>
-                        </div>
-                      )}
+                      {index === items.length - 1 &&
+                        (retryHasAttachments ? (
+                          <p className="meta" style={{ padding: "0 16px 12px" }}>
+                            Reenvie a mensagem manualmente para incluir os anexos.
+                          </p>
+                        ) : (
+                          canRetry && (
+                            <div className="approval-actions">
+                              <button
+                                type="button"
+                                className="btn btn-primary"
+                                data-od-id="error-retry"
+                                onClick={onRetry}
+                              >
+                                Tentar de novo
+                              </button>
+                            </div>
+                          )
+                        ))}
                     </div>
                   </div>
                 </div>

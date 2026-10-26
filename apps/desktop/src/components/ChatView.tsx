@@ -82,6 +82,14 @@ export function ChatView({
     return "plug";
   }, [overview]);
   const latestUser = [...items].reverse().find((item) => item.kind === "user_message");
+  const retryHasAttachments =
+    latestUser?.kind === "user_message" && Boolean(latestUser.attachments?.length);
+  const canRetry =
+    latestUser?.kind === "user_message" &&
+    !retryHasAttachments &&
+    !latestUser.from &&
+    !latestUser.gateway &&
+    !latestUser.routine;
 
   const setMode = async (value: string) => {
     setModeError(null);
@@ -138,7 +146,7 @@ export function ChatView({
         {supportsModes && (
           <>
             {/* biome-ignore lint/a11y/useSemanticElements: Required by the mockup's div role group. */}
-            <div className="seg" role="group" aria-label="Modo do agente">
+            <div className="seg" role="group" aria-label="Modo do bot">
               <button
                 type="button"
                 aria-pressed={isAsking}
@@ -159,7 +167,7 @@ export function ChatView({
         <button
           type="button"
           className="icon-btn"
-          aria-label="Configurações do agente"
+          aria-label="Configurar bot"
           onClick={onOpenSettings}
         >
           <Icon name="gear" />
@@ -194,6 +202,8 @@ export function ChatView({
             : undefined
         }
         onRetry={retry}
+        canRetry={canRetry}
+        retryHasAttachments={retryHasAttachments}
         onSuggestion={setComposerText}
       />
       <Composer

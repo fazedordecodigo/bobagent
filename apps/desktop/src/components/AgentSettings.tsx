@@ -103,7 +103,7 @@ export function AgentSettings({
       }}
     >
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Configurações do agente</h2>
+        <h2 className="text-lg font-semibold">Configurações do bot</h2>
         <button
           type="button"
           onClick={() => setConfirming(true)}
@@ -179,7 +179,7 @@ export function AgentSettings({
       </div>
       {confirming && (
         <ConfirmDialog
-          title="Excluir agente"
+          title="Excluir bot"
           body={`Excluir "${agent.name}"? A pasta de trabalho e o histórico de conversa serão mantidos.`}
           confirmLabel="Excluir"
           onCancel={() => setConfirming(false)}

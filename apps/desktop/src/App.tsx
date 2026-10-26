@@ -1,11 +1,18 @@
-import type { Agent, AgentStatusInfo, ApprovalRule, Channel, ProviderId } from "@upbot/protocol";
+import type {
+  Agent,
+  AgentAvatar,
+  AgentStatusInfo,
+  ApprovalRule,
+  Channel,
+  ProviderId,
+} from "@upbot/protocol";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentSettings, PROVIDERS } from "./components/AgentSettings";
 import { ChannelCreateForm, ChannelView } from "./components/ChannelView";
 import { ChatView } from "./components/ChatView";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
 import { Icon } from "./components/icons";
-import { ComputerUsePanel, MemoriesPanel, RoutinesPanel } from "./components/Library";
+import { AvatarEditor, ComputerUsePanel, MemoriesPanel, RoutinesPanel } from "./components/Library";
 import { PagesView } from "./components/PagesView";
 import { RunPanel } from "./components/RunPanel";
 import { TABS, ToolBody, type ToolTab } from "./components/ToolsView";
@@ -116,6 +123,7 @@ export default function App() {
   const [clientReady, setClientReady] = useState(false);
   const [noPanel, setNoPanel] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [sideOpen, setSideOpen] = useState(false);
 
   const refreshAll = useCallback(async () => {
     const [list, nextStatuses, nextChannels] = await Promise.all([
@@ -183,6 +191,7 @@ export default function App() {
 
   const navigate = useCallback((next: View) => {
     setView(next);
+    setSideOpen(false);
     if (RAIL_VIEWS.includes(next as RailView)) writeStorage("upbot.view", next);
     setCreating(false);
   }, []);
@@ -210,10 +219,14 @@ export default function App() {
 
   const shortcutsRef = useRef<(e: KeyboardEvent) => void>(() => {});
   shortcutsRef.current = (e) => {
+    if (e.key === "Escape" && sideOpen) {
+      setSideOpen(false);
+      return;
+    }
     if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
     const key = e.key.toLowerCase();
     if (key === "k") setPalette({});
-    else if (key === "f" && e.shiftKey) setPalette({ group: "Agentes" });
+    else if (key === "f" && e.shiftKey) setPalette({ group: "Bots" });
     else if (key === "n" && !e.shiftKey) {
       navigate("chat");
       setSelectedId(null);
@@ -241,7 +254,7 @@ export default function App() {
     const base: PaletteItem[] = [
       ...agents.map((agent) => ({
         id: `agent:${agent.id}`,
-        group: "Agentes",
+        group: "Bots",
         label: agent.name,
         hint: statusProvider(agent.provider),
         run: () => openAgent(agent.id),
@@ -269,7 +282,7 @@ export default function App() {
       {
         id: "new-agent",
         group: "Ações",
-        label: "Criar agente",
+        label: "Criar bot",
         run: () => {
           navigate("chat");
           setCreating(true);
@@ -315,11 +328,13 @@ export default function App() {
       provider: ProviderId;
       instructions: string;
       autonomy: Autonomy;
+      avatar: AgentAvatar | null;
     }) => {
       const agent = await client.request("agents.create", {
         name: form.name,
         provider: form.provider,
         instructions: form.instructions,
+        avatar: form.avatar,
       });
       setAgents((prev) => (prev.some((item) => item.id === agent.id) ? prev : [...prev, agent]));
       setSelectedId(agent.id);
@@ -337,7 +352,7 @@ export default function App() {
           await client.request("approvals.setRules", { rules: [...rules, rule] });
         } catch (e) {
           setNotice(
-            `Agente criado, mas não foi possível salvar a regra de autonomia: ${
+            `Bot criado, mas não foi possível salvar a regra de autonomia: ${
               e instanceof Error ? e.message : String(e)
             }`,
           );
@@ -348,7 +363,15 @@ export default function App() {
   );
 
   const updateAgent = useCallback(
-    async (id: string, patch: { name?: string; instructions?: string; provider?: ProviderId }) => {
+    async (
+      id: string,
+      patch: {
+        name?: string;
+        instructions?: string;
+        provider?: ProviderId;
+        avatar?: AgentAvatar | null;
+      },
+    ) => {
       await client.request("agents.update", { id, ...patch });
     },
     [client],
@@ -377,6 +400,7 @@ export default function App() {
     `view-${appView}`,
     noPanel && view === "chat" ? "no-panel" : "",
     panelOpen && view === "chat" ? "panel-open" : "",
+    sideOpen ? "side-open" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -418,7 +442,7 @@ export default function App() {
         {(
           [
             ["chat", "Conversas"],
-            ["agents", "Agentes"],
+            ["agents", "Bots"],
             ["tasks", "Tarefas"],
           ] as const
         ).map(([railView, label]) => (
@@ -429,7 +453,15 @@ export default function App() {
             data-view={railView}
             aria-label={label}
             aria-current={view === railView ? "page" : undefined}
-            onClick={() => navigate(railView)}
+            onClick={() => {
+              if (
+                railView === "chat" &&
+                view === "chat" &&
+                window.matchMedia("(max-width: 860px)").matches
+              ) {
+                setSideOpen((open) => !open);
+              } else navigate(railView);
+            }}
           >
             <Icon name={railView} />
             {railView === "chat" && pendingCount > 0 && (
@@ -456,14 +488,14 @@ export default function App() {
         </div>
       </nav>
 
-      <aside className="side" aria-label="Agentes e tarefas">
+      <aside className="side" aria-label="Bots e tarefas">
         <div className="side-head">
           <div className="row">
             <span className="brand">UpBot</span>
             <button
               type="button"
               className="icon-btn"
-              aria-label="Criar agente"
+              aria-label="Criar bot"
               onClick={() => {
                 setSelectedId(null);
                 setCreating(true);
@@ -473,18 +505,18 @@ export default function App() {
             </button>
           </div>
           <label className="search">
-            <span className="sr">Buscar agentes e tarefas</span>
+            <span className="sr">Buscar bots e tarefas</span>
             <Icon name="search" />
             <input
               type="search"
-              placeholder="Buscar agentes e tarefas"
+              placeholder="Buscar bots e tarefas"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
           </label>
         </div>
         <div className="side-scroll">
-          <p className="eyebrow side-label">Seus agentes</p>
+          <p className="eyebrow side-label">Seus bots</p>
           <div id="agentList">
             {filteredAgents.map((agent) => {
               const item = overview[agent.id];
@@ -511,7 +543,7 @@ export default function App() {
             })}
             {filteredAgents.length === 0 && (
               <p className="meta" style={{ padding: 8 }}>
-                {agents.length === 0 ? "Nenhum agente ainda." : "Nada encontrado."}
+                {agents.length === 0 ? "Nenhum bot ainda." : "Nada encontrado."}
               </p>
             )}
           </div>
@@ -588,6 +620,15 @@ export default function App() {
         </div>
       </aside>
 
+      {sideOpen && (
+        <button
+          type="button"
+          className="side-scrim"
+          aria-label="Fechar painel de bots"
+          onClick={() => setSideOpen(false)}
+        />
+      )}
+
       <main className="main">
         {error ? (
           <section className="view on">
@@ -605,6 +646,7 @@ export default function App() {
         ) : view === "chat" ? (
           selected ? (
             <ChatView
+              key={selected.id}
               client={client}
               agent={selected}
               overview={selectedOverview}
@@ -620,9 +662,9 @@ export default function App() {
           ) : (
             <section className="view on">
               <div className="empty">
-                <h2>Escolha um agente ou crie um novo.</h2>
+                <h2>Escolha um bot ou crie um novo.</h2>
                 <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
-                  Criar agente
+                  Criar bot
                 </button>
               </div>
             </section>
@@ -666,7 +708,7 @@ export default function App() {
                 <div className="page-top">
                   <div>
                     <h1>{selected.name}</h1>
-                    <p>Configurações do agente</p>
+                    <p>Configurações do bot</p>
                   </div>
                   <button
                     type="button"
@@ -676,6 +718,10 @@ export default function App() {
                     Voltar à conversa
                   </button>
                 </div>
+                <AvatarEditor
+                  agent={selected}
+                  onSave={(avatar) => updateAgent(selected.id, { avatar })}
+                />
                 <AgentSettings
                   key={selected.id}
                   client={client}
@@ -692,7 +738,7 @@ export default function App() {
         ) : (
           <section className="view on">
             <div className="empty">
-              <h2>Escolha um agente ou crie um novo.</h2>
+              <h2>Escolha um bot ou crie um novo.</h2>
             </div>
           </section>
         )}
@@ -711,7 +757,13 @@ export default function App() {
         />
       )}
 
-      {creating && <CreateAgentDialog onSubmit={createAgent} onCancel={() => setCreating(false)} />}
+      {creating && (
+        <CreateAgentDialog
+          client={client}
+          onSubmit={createAgent}
+          onCancel={() => setCreating(false)}
+        />
+      )}
       {palette && (
         <CommandPalette
           items={paletteItems}
@@ -743,18 +795,18 @@ function AgentsView({
         <div className="page-inner">
           <div className="page-top">
             <div>
-              <h1>Agentes</h1>
+              <h1>Bots</h1>
               <p>
-                Cada agente tem uma função, as ferramentas que pode usar e o quanto pode agir sem
+                Cada bot tem uma função, as ferramentas que pode usar e o quanto pode agir sem
                 perguntar.
               </p>
             </div>
             <button type="button" className="btn btn-primary" onClick={onCreate}>
-              Criar agente
+              Criar bot
             </button>
           </div>
           <fieldset className="filters">
-            <legend className="sr">Filtrar agentes</legend>
+            <legend className="sr">Filtrar bots</legend>
             <button
               type="button"
               className="chip"
@@ -818,7 +870,7 @@ function AgentsView({
             })}
             <button type="button" className="a-card new" onClick={onCreate}>
               <Icon name="plus" />
-              <h3>Novo agente</h3>
+              <h3>Novo bot</h3>
               <span style={{ fontSize: 13 }}>Defina função, ferramentas e autonomia</span>
             </button>
           </div>
@@ -851,7 +903,7 @@ function TasksView({
             <div>
               <h1>Tarefas</h1>
               <p>
-                Tudo o que seus agentes estão fazendo, em um só lugar. O que espera por você vem
+                Tudo o que seus bots estão fazendo, em um só lugar. O que espera por você vem
                 primeiro.
               </p>
             </div>
@@ -860,7 +912,7 @@ function TasksView({
             <thead>
               <tr>
                 <th>Tarefa</th>
-                <th>Agente</th>
+                <th>Bot</th>
                 <th>Status</th>
                 <th className="hide-sm">Atualizado</th>
               </tr>
@@ -934,7 +986,7 @@ function SettingsView({
           <div className="page-top">
             <div>
               <h1>Configurações</h1>
-              <p>Preferências desta conta, aplicadas em todos os seus agentes.</p>
+              <p>Preferências desta conta, aplicadas em todos os seus bots.</p>
             </div>
           </div>
           <div className="filters" role="tablist" aria-label="Configurações">
@@ -1121,14 +1173,17 @@ function ThemeOption({
 }
 
 function CreateAgentDialog({
+  client,
   onSubmit,
   onCancel,
 }: {
+  client: DaemonClient;
   onSubmit: (form: {
     name: string;
     provider: ProviderId;
     instructions: string;
     autonomy: Autonomy;
+    avatar: AgentAvatar | null;
   }) => Promise<void>;
   onCancel: () => void;
 }) {
@@ -1136,10 +1191,28 @@ function CreateAgentDialog({
   const [name, setName] = useState("");
   const [provider, setProvider] = useState<ProviderId>("claude");
   const [instructions, setInstructions] = useState("");
+  const [avatar, setAvatar] = useState<AgentAvatar | null>(null);
   const [autonomy, setAutonomy] = useState<Autonomy>("ask");
   const [nameError, setNameError] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [drafting, setDrafting] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+
+  const suggest = async () => {
+    setDraftError(null);
+    setDrafting(true);
+    try {
+      const proposal = await client.request("agents.draft", { prompt: instructions.trim() });
+      setName(proposal.name);
+      setInstructions(proposal.instructions);
+      setAvatar(proposal.avatar);
+    } catch (e) {
+      setDraftError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDrafting(false);
+    }
+  };
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -1171,6 +1244,7 @@ function CreateAgentDialog({
               provider,
               instructions: instructions.trim(),
               autonomy,
+              avatar,
             });
           } catch (e) {
             setSubmitError(e instanceof Error ? e.message : String(e));
@@ -1179,7 +1253,7 @@ function CreateAgentDialog({
         }}
       >
         <div className="dlg-head">
-          <h2 id="dlgTitle">Criar agente</h2>
+          <h2 id="dlgTitle">Criar bot</h2>
           <button
             type="button"
             className="icon-btn"
@@ -1207,12 +1281,22 @@ function CreateAgentDialog({
             />
             {nameError && (
               <span className="err" id="fNameErr">
-                Dê um nome ao agente.
+                Dê um nome ao bot.
               </span>
             )}
           </div>
           <div className="field">
-            <label htmlFor="fRole">O que ele faz</label>
+            <div className="flex items-center justify-between gap-2">
+              <label htmlFor="fRole">O que ele faz</label>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                disabled={!instructions.trim() || drafting}
+                onClick={() => void suggest()}
+              >
+                {drafting ? "Sugerindo…" : "Sugerir nome e instruções"}
+              </button>
+            </div>
             <input
               className="input"
               id="fRole"
@@ -1220,6 +1304,7 @@ function CreateAgentDialog({
               value={instructions}
               onChange={(event) => setInstructions(event.target.value)}
             />
+            {draftError && <span className="err">{draftError}</span>}
           </div>
           <fieldset className="field">
             <legend>Provedor</legend>
@@ -1276,7 +1361,10 @@ function CreateAgentDialog({
               />
               <span>
                 Autônomo
-                <small>Executa do início ao fim e envia um resumo.</small>
+                <small>
+                  Executa do início ao fim e envia um resumo. Pagamentos, envios e exclusões ainda
+                  pedem aprovação.
+                </small>
               </span>
             </label>
           </fieldset>

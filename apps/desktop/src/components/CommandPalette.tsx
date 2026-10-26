@@ -8,7 +8,7 @@ export type PaletteItem = {
   run: () => void;
 };
 
-/** Cmd/Ctrl+K search palette over agents, group chats, pages, settings and actions. */
+/** Cmd/Ctrl+K search palette over bots, group chats, pages, settings and actions. */
 export function CommandPalette({
   items,
   initialGroup,
@@ -51,7 +51,7 @@ export function CommandPalette({
         className="w-[32rem] overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl"
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
-        aria-label="Search"
+        aria-label="Buscar"
       >
         <input
           ref={inputRef}
@@ -59,7 +59,7 @@ export function CommandPalette({
           placeholder={
             initialGroup
               ? `Buscar ${initialGroup.toLowerCase()}…`
-              : "Buscar agentes, conversas, páginas, configurações…"
+              : "Buscar bots, conversas, páginas, configurações…"
           }
           value={q}
           onChange={(e) => {
@@ -102,8 +102,7 @@ export function CommandPalette({
           )}
         </ul>
         <div className="border-t border-zinc-800 px-4 py-2 text-[11px] text-zinc-500">
-          ⌘K buscar · ⌘⇧F agentes · ⌘N novo agente · ⌘1–9 trocar agente · ⌘, configurações · ⌘P
-          páginas
+          ⌘K buscar · ⌘⇧F bots · ⌘N novo bot · ⌘1–9 trocar de bot · ⌘, configurações · ⌘P páginas
         </div>
       </div>
     </div>

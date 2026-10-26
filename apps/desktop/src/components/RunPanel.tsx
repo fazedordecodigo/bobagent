@@ -1,4 +1,4 @@
-import type { Agent, ApprovalRule } from "@upbot/protocol";
+import type { Agent, AgentPlacement, ApprovalRule } from "@upbot/protocol";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useChat } from "../hooks/useChat";
 import type { AgentOverview } from "../hooks/useOverview";
@@ -40,6 +40,7 @@ export function RunPanel({
 }) {
   const chat = useChat(client, agent.id);
   const [rules, setRules] = useState<ApprovalRule[]>([]);
+  const [placement, setPlacement] = useState<AgentPlacement | null>(null);
   const [memories, setMemories] = useState<{ id: string; text: string }[]>([]);
   const [rulesError, setRulesError] = useState<string | null>(null);
   const [rulesBusy, setRulesBusy] = useState(false);
@@ -70,6 +71,29 @@ export function RunPanel({
     };
   }, [agent.id, client, loadMemories, loadRules]);
 
+  useEffect(() => {
+    let alive = true;
+    let receivedEvent = false;
+    setPlacement(null);
+    const off = client.on("placement.updated", (next) => {
+      if (next.agentId !== agent.id) return;
+      receivedEvent = true;
+      setPlacement(next);
+    });
+    client
+      .request("placements.list", {})
+      .then((placements) => {
+        if (alive && !receivedEvent) {
+          setPlacement(placements.find((item) => item.agentId === agent.id) ?? null);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+      off();
+    };
+  }, [agent.id, client]);
+
   const currentTurnId = chat.runningTurn?.id ?? overview.latestTurn?.id;
   const turns = chat.items.filter(
     (item) => item.kind === "tool_call" && item.turnId === currentTurnId,
@@ -81,6 +105,8 @@ export function RunPanel({
   const globalRule = rules.find((rule) => rule.pattern === "*" && rule.agentId === agent.id);
   const specificRules = rules.filter((rule) => rule.agentId === agent.id && rule.pattern !== "*");
   const busy = chat.status.status === "running" || chat.status.status === "starting";
+  const microVm = placement?.isolation === "firecracker";
+  const vmActive = microVm && (overview.status === "run" || overview.status === "wait");
 
   const saveRules = async (next: ApprovalRule[]) => {
     setRulesBusy(true);
@@ -194,17 +220,30 @@ export function RunPanel({
       </div>
       <div className="panel-sec" data-od-id="panel-vm">
         <div className="vm-head">
-          <p className="eyebrow">Computador do agente</p>
+          <p className="eyebrow">Computador do bot</p>
           <span className="vm-live">
-            <i className="dot s-idle" />
-            Desligado
+            <i className={`dot ${vmActive ? "s-run" : "s-idle"}`} />
+            {vmActive ? "Ligado" : "Desligado"}
           </span>
         </div>
         <div className="vm-off">
           <span>
-            <b>Nenhuma VM ligada</b>
-            {agent.name} usa só integrações por enquanto. A VM liga quando uma tarefa precisa de
-            navegador ou terminal.
+            {microVm ? (
+              <>
+                <b>
+                  MicroVM isolada · {placement.vcpus} vCPU · {placement.memMib} MiB
+                </b>
+                {!vmActive && <span>Liga quando o bot começa uma tarefa.</span>}
+              </>
+            ) : (
+              <>
+                <b>Nenhuma VM ligada</b>
+                <span>
+                  O bot {agent.name} usa só integrações por enquanto. A VM liga quando uma tarefa
+                  precisa de navegador ou terminal.
+                </span>
+              </>
+            )}
           </span>
         </div>
       </div>
@@ -237,7 +276,9 @@ export function RunPanel({
           <span>
             Agir sem perguntar
             <small>
-              {globalRule?.action === "allow" ? "Autônomo" : "Pede aprovação em ações sensíveis"}
+              {globalRule?.action === "allow"
+                ? "Autônomo · ações sensíveis ainda pedem aprovação"
+                : "Pede aprovação em ações sensíveis"}
             </small>
           </span>
           <button

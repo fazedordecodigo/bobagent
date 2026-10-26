@@ -20,7 +20,7 @@ export function role(agent: Pick<Agent, "instructions" | "provider">) {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .find(Boolean);
-  return first ? first.slice(0, 80) : `Agente ${agent.provider}`;
+  return first ? first.slice(0, 80) : `Bot ${agent.provider}`;
 }
 
 export function fmtTime(ms: number | null | undefined, now = Date.now()) {
@@ -61,14 +61,21 @@ export function MonoAv({
   lg = false,
   dot = true,
 }: {
-  agent: Pick<Agent, "name">;
+  agent: Pick<Agent, "name" | "avatar">;
   status?: UiStatus;
   lg?: boolean;
   dot?: boolean;
 }) {
   return (
-    <span className={`mono-av${lg ? " lg" : ""}`}>
-      {mono(agent.name)}
+    <span
+      className={`mono-av${lg ? " lg" : ""}`}
+      style={
+        agent.avatar
+          ? { background: `color-mix(in oklab, ${agent.avatar.color} 15%, var(--surface))` }
+          : undefined
+      }
+    >
+      {agent.avatar?.emoji ?? mono(agent.name)}
       {dot && st && <i className={`dot s-${st}`} />}
     </span>
   );

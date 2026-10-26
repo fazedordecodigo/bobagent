@@ -133,6 +133,32 @@ describe("approvals e2e", () => {
     await c.request("approvals.setRules", { rules: [] });
   });
 
+  test("wildcard allow keeps sensitive app writes gated", async () => {
+    await c.request("approvals.setRules", {
+      rules: [{ id: "wildcard-allow", pattern: "*", action: "allow", agentId: null }],
+    });
+    const write = await withApproval("notes__create_note", {}, (ap) =>
+      c.request("approvals.respond", { id: ap.id, decision: "approve" }),
+    );
+    expect(write.approval.tool).toBe("notes__create_note");
+    expect(write.text).toBe("tool-ok:note-created");
+    expect(await tool(a, "notes__echo", { text: "read" })).toBe("tool-ok:echo:read");
+    expect(await tool(a, "list_agents")).toContain("A");
+
+    await c.request("approvals.setRules", {
+      rules: [
+        {
+          id: "explicit-write-allow",
+          pattern: "notes__create_note",
+          action: "allow",
+          agentId: null,
+        },
+      ],
+    });
+    expect(await tool(a, "notes__create_note")).toBe("tool-ok:note-created");
+    await c.request("approvals.setRules", { rules: [] });
+  });
+
   test("unanswered approvals expire and tell the bot not to retry", async () => {
     const pending = c.waitForEventWhere(
       "approval.updated",

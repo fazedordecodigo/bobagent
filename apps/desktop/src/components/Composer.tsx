@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "./icons";
 
 export type OutgoingAttachment = { name: string; mime: string; dataBase64: string };
@@ -48,7 +48,23 @@ export function Composer({
   const [recording, setRecording] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const recorder = useRef<MediaRecorder | null>(null);
+  const activeStream = useRef<MediaStream | null>(null);
+  const unmounted = useRef(false);
   const textRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    unmounted.current = false;
+    return () => {
+      unmounted.current = true;
+      const activeRecorder = recorder.current;
+      recorder.current = null;
+      if (activeRecorder && activeRecorder.state !== "inactive") activeRecorder.stop();
+      activeStream.current?.getTracks().forEach((track) => {
+        track.stop();
+      });
+      activeStream.current = null;
+    };
+  }, []);
 
   const toggleMic = async () => {
     if (!onTranscribe) return;
@@ -58,13 +74,22 @@ export function Composer({
     }
     setError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      const mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (unmounted.current) {
+        mediaStream.getTracks().forEach((track) => {
+          track.stop();
+        });
+        return;
+      }
+      activeStream.current = mediaStream;
+      const mediaRecorder = new MediaRecorder(mediaStream);
       const chunks: Blob[] = [];
       mediaRecorder.ondataavailable = (event) => chunks.push(event.data);
       mediaRecorder.onstop = async () => {
-        for (const track of stream.getTracks()) track.stop();
+        for (const track of mediaStream.getTracks()) track.stop();
+        activeStream.current = null;
         recorder.current = null;
+        if (unmounted.current) return;
         setRecording(false);
         const blob = new Blob(chunks, { type: mediaRecorder.mimeType });
         try {
@@ -130,7 +155,7 @@ export function Composer({
       )}
       <form className="composer" onSubmit={(event) => void submit(event)}>
         <label className="sr" htmlFor="prompt">
-          Mensagem para o agente
+          Mensagem para o bot
         </label>
         <textarea
           ref={textRef}
