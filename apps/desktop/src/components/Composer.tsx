@@ -46,9 +46,11 @@ export function Composer({
   const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
+  const [micPending, setMicPending] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const recorder = useRef<MediaRecorder | null>(null);
   const activeStream = useRef<MediaStream | null>(null);
+  const micPendingRef = useRef(false);
   const unmounted = useRef(false);
   const textRef = useRef<HTMLTextAreaElement>(null);
 
@@ -67,11 +69,13 @@ export function Composer({
   }, []);
 
   const toggleMic = async () => {
-    if (!onTranscribe) return;
+    if (!onTranscribe || micPendingRef.current) return;
     if (recorder.current) {
       recorder.current.stop();
       return;
     }
+    micPendingRef.current = true;
+    setMicPending(true);
     setError(null);
     try {
       const mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -107,7 +111,10 @@ export function Composer({
       mediaRecorder.start();
       setRecording(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (!unmounted.current) setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      micPendingRef.current = false;
+      if (!unmounted.current) setMicPending(false);
     }
   };
 
@@ -209,6 +216,8 @@ export function Composer({
               className="icon-btn"
               aria-label={recording ? "Parar gravação" : "Ditado por voz"}
               title={recording ? "Parar e transcrever" : "Ditado por voz"}
+              disabled={micPending}
+              aria-busy={micPending}
               style={recording ? { color: "var(--st-err)" } : undefined}
               onClick={() => void toggleMic()}
             >

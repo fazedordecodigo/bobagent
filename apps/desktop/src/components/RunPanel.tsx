@@ -223,7 +223,7 @@ export function RunPanel({
           <p className="eyebrow">Computador do bot</p>
           <span className="vm-live">
             <i className={`dot ${vmActive ? "s-run" : "s-idle"}`} />
-            {vmActive ? "Ligado" : "Desligado"}
+            {microVm ? (vmActive ? "Em uso" : "Ociosa") : "Desligado"}
           </span>
         </div>
         <div className="vm-off">
@@ -233,7 +233,7 @@ export function RunPanel({
                 <b>
                   MicroVM isolada · {placement.vcpus} vCPU · {placement.memMib} MiB
                 </b>
-                {!vmActive && <span>Liga quando o bot começa uma tarefa.</span>}
+                {!vmActive && <span>A sessão pode manter a VM ligada entre tarefas.</span>}
               </>
             ) : (
               <>

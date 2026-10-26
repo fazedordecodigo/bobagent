@@ -82,14 +82,22 @@ export function ChatView({
     return "plug";
   }, [overview]);
   const latestUser = [...items].reverse().find((item) => item.kind === "user_message");
-  const retryHasAttachments =
-    latestUser?.kind === "user_message" && Boolean(latestUser.attachments?.length);
-  const canRetry =
+  const isDirectMessage =
     latestUser?.kind === "user_message" &&
-    !retryHasAttachments &&
     !latestUser.from &&
     !latestUser.gateway &&
-    !latestUser.routine;
+    !latestUser.routine &&
+    !latestUser.channelId &&
+    !latestUser.team;
+  const retryHasAttachments =
+    latestUser?.kind === "user_message" &&
+    isDirectMessage &&
+    Boolean(latestUser.attachments?.length);
+  const canRetry =
+    latestUser?.kind === "user_message" &&
+    isDirectMessage &&
+    !retryHasAttachments &&
+    !latestUser.attachments?.length;
 
   const setMode = async (value: string) => {
     setModeError(null);
