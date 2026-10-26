@@ -1,7 +1,7 @@
 export function ConfirmDialog({
   title,
   body,
-  confirmLabel = "Confirm",
+  confirmLabel = "Confirmar",
   onConfirm,
   onCancel,
 }: {
@@ -22,7 +22,7 @@ export function ConfirmDialog({
             onClick={onCancel}
             className="rounded-md bg-zinc-800 px-3 py-1.5 text-sm hover:bg-zinc-700"
           >
-            Cancel
+            Cancelar
           </button>
           <button
             type="button"

@@ -51,15 +51,15 @@ export function CommandPalette({
         className="w-[32rem] overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl"
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
-        aria-label="Search"
+        aria-label="Buscar"
       >
         <input
           ref={inputRef}
           className="w-full border-b border-zinc-800 bg-transparent px-4 py-3 text-sm outline-none"
           placeholder={
             initialGroup
-              ? `Search ${initialGroup.toLowerCase()}…`
-              : "Search bots, chats, pages, settings…"
+              ? `Buscar ${initialGroup.toLowerCase()}…`
+              : "Buscar bots, conversas, páginas, configurações…"
           }
           value={q}
           onChange={(e) => {
@@ -97,10 +97,12 @@ export function CommandPalette({
               </button>
             </li>
           ))}
-          {shown.length === 0 && <li className="px-4 py-3 text-sm text-zinc-500">No matches.</li>}
+          {shown.length === 0 && (
+            <li className="px-4 py-3 text-sm text-zinc-500">Nenhum resultado.</li>
+          )}
         </ul>
         <div className="border-t border-zinc-800 px-4 py-2 text-[11px] text-zinc-500">
-          ⌘K search · ⌘⇧F bots · ⌘N new bot · ⌘1–9 switch bot · ⌘, settings · ⌘P pages
+          ⌘K buscar · ⌘⇧F bots · ⌘N novo bot · ⌘1–9 trocar de bot · ⌘, configurações · ⌘P páginas
         </div>
       </div>
     </div>

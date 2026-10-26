@@ -1,37 +1,40 @@
 import type { Agent } from "@upbot/protocol";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useChat } from "../hooks/useChat";
+import type { AgentOverview } from "../hooks/useOverview";
 import type { DaemonClient } from "../lib/daemon";
+import { MonoAv, Pill, role } from "../lib/ui";
 import { PermissionNotice } from "./AgentSettings";
 import { ApprovalCards } from "./ApprovalsView";
 import { Composer } from "./Composer";
 import { DraftCards } from "./EmailView";
+import { Icon, type IconName } from "./icons";
 import { MessageList } from "./MessageList";
-import { UsageBar } from "./UsageBar";
-
-const dotCls: Record<string, string> = {
-  idle: "bg-zinc-500",
-  starting: "bg-sky-400 animate-pulse",
-  running: "bg-emerald-400 animate-pulse",
-  awaiting_permission: "bg-amber-400",
-  error: "bg-red-500",
-};
 
 export function ChatView({
   client,
   agent,
+  overview,
   onOpenSettings,
+  onOpenApps,
+  notice,
+  onNoticeDismiss,
+  onPanelToggle,
 }: {
   client: DaemonClient;
   agent: Agent;
+  overview: AgentOverview | undefined;
   onOpenSettings: () => void;
+  onOpenApps: () => void;
+  notice: string | null;
+  onNoticeDismiss: () => void;
+  onPanelToggle: () => void;
 }) {
   const {
     items,
     hasMore,
     runningTurn,
     loaded,
-    status,
     queue,
     loadEarlier,
     queuePause,
@@ -40,6 +43,10 @@ export function ChatView({
   } = useChat(client, agent.id);
   const [sendBusy, setSendBusy] = useState(false);
   const [voice, setVoice] = useState({ tts: false, stt: false });
+  const [composerText, setComposerText] = useState("");
+  const [modeError, setModeError] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
+
   useEffect(() => {
     client
       .request("voice.status", {})
@@ -47,141 +54,224 @@ export function ChatView({
       .catch(() => {});
   }, [client]);
 
+  const isClaude = agent.provider === "claude";
+  const isCodex = agent.provider === "codex";
+  const supportsModes = isClaude || isCodex;
+  const mode = agent.config?.mode ?? (isClaude ? "default" : "auto");
+  const safeMode = mode === "plan" || mode === "read-only";
+  const toolCount = useMemo(
+    () =>
+      overview
+        ? overview.apps.reduce((count, app) => count + app.tools.length, 0) +
+          (overview.emailAccounts.length ? 4 : 0)
+        : 0,
+    [overview],
+  );
+  const contextIcon = useMemo<IconName>(() => {
+    const name = overview?.apps[0]?.name.toLowerCase() ?? "";
+    if (name.includes("email") || name.includes("e-mail") || name.includes("gmail")) return "mail";
+    if (name.includes("github")) return "code";
+    if (name.includes("brave") || name.includes("web")) return "web";
+    if (name.includes("airtable") || name.includes("sheet") || name.includes("planilha"))
+      return "sheet";
+    if (name.includes("stripe") || name.includes("cartão")) return "card";
+    if (name.includes("agenda") || name.includes("calendar")) return "cal";
+    if (name.includes("notion")) return "doc";
+    if (name.includes("arquivo") || name.includes("file")) return "folder";
+    if (!name && overview?.emailAccounts.length) return "mail";
+    return "plug";
+  }, [overview]);
+  const latestUser = [...items].reverse().find((item) => item.kind === "user_message");
+  const isDirectMessage =
+    latestUser?.kind === "user_message" &&
+    !latestUser.from &&
+    !latestUser.gateway &&
+    !latestUser.routine &&
+    !latestUser.channelId &&
+    !latestUser.team;
+  const retryHasAttachments =
+    latestUser?.kind === "user_message" &&
+    isDirectMessage &&
+    Boolean(latestUser.attachments?.length);
+  const canRetry =
+    latestUser?.kind === "user_message" &&
+    isDirectMessage &&
+    !retryHasAttachments &&
+    !latestUser.attachments?.length;
+
+  const setMode = async (value: string) => {
+    setModeError(null);
+    try {
+      await client.request("agents.setConfig", { agentId: agent.id, configId: "mode", value });
+    } catch (e) {
+      setModeError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const send = async (
+    text: string,
+    attachments: { name: string; mime: string; dataBase64: string }[],
+  ) => {
+    setSendBusy(true);
+    setSendError(null);
+    try {
+      await client.request("chat.send", {
+        agentId: agent.id,
+        text,
+        ...(attachments.length ? { attachments } : {}),
+      });
+    } catch (e) {
+      setSendError(e instanceof Error ? e.message : String(e));
+      throw e;
+    } finally {
+      setSendBusy(false);
+    }
+  };
+
+  const retry = () => {
+    if (latestUser?.kind === "user_message") void send(latestUser.text, []);
+  };
+  const displayStatus = overview?.status ?? "idle";
+  const isAsking = supportsModes && safeMode;
+  const placeholder = isAsking
+    ? `Pergunte algo para ${agent.name}`
+    : `Peça uma tarefa para ${agent.name}`;
+  const hint = supportsModes
+    ? isAsking
+      ? "Modo Perguntar: responde e sugere um plano, sem executar nada."
+      : "Modo Agir: executa sozinho e pede aprovação em ações sensíveis."
+    : "Enter envia · Shift+Enter quebra linha";
+
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center gap-3 border-b border-zinc-800 px-4 py-3">
-        <span
-          className={`inline-block h-2.5 w-2.5 rounded-full ${dotCls[status.status] ?? dotCls.idle}`}
-          title={status.error ?? status.status}
-        />
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold">{agent.name}</div>
-          <div className="text-xs text-zinc-500">
-            {agent.provider}
-            {status.status !== "idle" ? ` · ${status.status}` : ""}
-          </div>
+    <div className="main" style={{ flex: 1 }} data-od-id="chat-view">
+      <header className="main-head">
+        <MonoAv agent={agent} status={displayStatus} lg />
+        <div className="title">
+          <h2>{agent.name}</h2>
+          <p>{overview?.task || role(agent)}</p>
         </div>
-        <div className="ml-auto">
-          <UsageBar
-            client={client}
-            agentId={agent.id}
-            busy={status.status !== "idle" && status.status !== "error"}
-          />
-        </div>
+        <Pill st={displayStatus} />
+        {supportsModes && (
+          <>
+            {/* biome-ignore lint/a11y/useSemanticElements: Required by the mockup's div role group. */}
+            <div className="seg" role="group" aria-label="Modo do bot">
+              <button
+                type="button"
+                aria-pressed={isAsking}
+                onClick={() => void setMode(isClaude ? "plan" : "read-only")}
+              >
+                Perguntar
+              </button>
+              <button
+                type="button"
+                aria-pressed={!isAsking}
+                onClick={() => void setMode(isClaude ? "default" : "auto")}
+              >
+                Agir
+              </button>
+            </div>
+          </>
+        )}
         <button
           type="button"
+          className="icon-btn"
+          aria-label="Configurar bot"
           onClick={onOpenSettings}
-          className="rounded p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
-          title="Bot settings"
         >
-          <svg
-            role="img"
-            aria-label="Settings"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          >
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-          </svg>
+          <Icon name="gear" />
         </button>
-      </div>
-      {items.length === 0 && loaded && (
-        <div className="px-4 pt-3">
-          <PermissionNotice provider={agent.provider} />
-        </div>
-      )}
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label="Alternar painel de execução"
+          onClick={onPanelToggle}
+        >
+          <Icon name="panel" />
+        </button>
+      </header>
+      {modeError && <div className="notice is-err">{modeError}</div>}
       <MessageList
+        agent={agent}
+        status={displayStatus}
         items={items}
         hasMore={hasMore}
-        onLoadEarlier={loadEarlier}
+        loaded={loaded}
+        emptyNotice={<PermissionNotice provider={agent.provider} />}
+        running={runningTurn !== null || displayStatus === "run"}
+        onLoadEarlier={() => void loadEarlier().catch(() => {})}
+        onPermissionRespond={(requestId, optionId) => {
+          void client.request("permissions.respond", { requestId, optionId }).catch((e) => {
+            setSendError(e instanceof Error ? e.message : String(e));
+          });
+        }}
         onSpeak={
           voice.tts
             ? (text) => void client.request("voice.speak", { text }).catch(() => {})
             : undefined
         }
-        onPermissionRespond={(requestId, optionId) => {
-          void client.request("permissions.respond", { requestId, optionId }).catch(() => {});
-        }}
+        onRetry={retry}
+        canRetry={canRetry}
+        retryHasAttachments={retryHasAttachments}
+        onSuggestion={setComposerText}
       />
-      {queue && queue.items.length > 0 && (
-        <div className="border-t border-zinc-800 px-4 py-2">
-          {queue.paused && (
-            <div className="mb-2 flex items-center justify-between rounded bg-amber-900/40 px-2 py-1 text-xs text-amber-300">
-              Queue paused
-              <button type="button" className="underline" onClick={queueResume}>
-                Resume
-              </button>
-            </div>
-          )}
-          {!queue.paused && (
-            <div className="mb-1 flex justify-end">
-              <button
-                type="button"
-                className="text-xs text-zinc-500 underline"
-                onClick={queuePause}
-              >
-                Pause queue
-              </button>
-            </div>
-          )}
-          <ul className="space-y-1">
-            {queue.items.map((q) => (
-              <li
-                key={q.id}
-                className="flex items-center justify-between rounded bg-zinc-900 px-2 py-1 text-xs text-zinc-300"
-              >
-                <span className="truncate">Queued: {q.text.slice(0, 80)}</span>
-                <button
-                  type="button"
-                  aria-label="Remove queued message"
-                  className="ml-2 text-zinc-500 hover:text-zinc-200"
-                  onClick={() => queueRemove(q.id)}
-                >
-                  ×
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {queue?.paused && queue.items.length === 0 && (
-        <div className="border-t border-zinc-800 px-4 py-2">
-          <div className="flex items-center justify-between rounded bg-amber-900/40 px-2 py-1 text-xs text-amber-300">
-            Queue paused
-            <button type="button" className="underline" onClick={queueResume}>
-              Resume
-            </button>
-          </div>
-        </div>
-      )}
-      <ApprovalCards client={client} agentId={agent.id} />
-      <DraftCards client={client} agentId={agent.id} />
       <Composer
+        text={composerText}
+        onTextChange={setComposerText}
+        running={runningTurn !== null || sendBusy}
+        placeholder={placeholder}
+        hint={hint}
+        hintError={sendError}
+        toolCount={toolCount}
+        contextIcon={contextIcon}
+        onTools={onOpenApps}
+        onSend={send}
+        onStop={() => void client.request("chat.cancel", { agentId: agent.id }).catch(() => {})}
         onTranscribe={
           voice.stt
             ? async (audioBase64, mime) =>
                 (await client.request("voice.transcribe", { audioBase64, mime })).text
             : undefined
         }
-        running={runningTurn !== null || sendBusy}
-        onSend={async (text, attachments) => {
-          setSendBusy(true);
-          try {
-            await client.request("chat.send", {
-              agentId: agent.id,
-              text,
-              ...(attachments.length ? { attachments } : {}),
-            });
-          } finally {
-            setSendBusy(false);
-          }
-        }}
-        onStop={() => void client.request("chat.cancel", { agentId: agent.id }).catch(() => {})}
-      />
+      >
+        {notice && (
+          <div className="notice">
+            {notice}
+            <button type="button" aria-label="Dispensar aviso" onClick={onNoticeDismiss}>
+              ×
+            </button>
+          </div>
+        )}
+        {queue && (queue.items.length > 0 || queue.paused) && (
+          <div className="quiet">
+            <span className="meta">
+              {queue.paused ? "Fila pausada" : `${queue.items.length} na fila`}
+            </span>
+            {queue.items.map((item) => (
+              <span className="chip" key={item.id}>
+                {item.text.slice(0, 60)}
+                <button
+                  type="button"
+                  aria-label="Remover da fila"
+                  onClick={() => queueRemove(item.id)}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            {queue.paused ? (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={queueResume}>
+                Retomar fila
+              </button>
+            ) : (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={queuePause}>
+                Pausar fila
+              </button>
+            )}
+          </div>
+        )}
+        <ApprovalCards client={client} agentId={agent.id} />
+        <DraftCards client={client} agentId={agent.id} />
+      </Composer>
     </div>
   );
 }

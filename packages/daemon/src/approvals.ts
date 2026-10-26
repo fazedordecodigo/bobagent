@@ -6,7 +6,8 @@ import type { Vault } from "./vault";
 
 // Approvals gate bot tool calls on the bridge. Rules match tool names (glob, `*`), per bot or
 // for every bot; "ask" wins over "allow". Without a rule, connected-app tools that look like
-// writes (create/update/delete/send/...) ask first. A pending approval blocks the tool call
+// writes (create/update/delete/send/...) ask first unless a specific rule allows them.
+// A lone wildcard allow never bypasses that connected-app write default. A pending approval blocks the tool call
 // until the user decides; approvals raised by background work (routines, other bots,
 // gateways, group chats) expire after UPBOT_APPROVAL_BACKGROUND_TTL_MS (default 10 min),
 // others after UPBOT_APPROVAL_TTL_MS (default 60 min). The same queue carries secure secret
@@ -61,7 +62,7 @@ export class ApprovalService {
       (r) => (r.agentId === null || r.agentId === agentId) && globRe(r.pattern).test(tool),
     );
     if (hits.some((r) => r.action === "ask")) return "ask";
-    if (hits.some((r) => r.action === "allow")) return "allow";
+    if (hits.some((r) => r.action === "allow" && r.pattern !== "*")) return "allow";
     const op = isAppTool ? tool.slice(tool.indexOf("__") + 2) : "";
     return isAppTool && WRITE_VERB.test(op) ? "ask" : "allow";
   }

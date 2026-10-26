@@ -68,7 +68,7 @@ export function AvatarEditor({
           disabled={!emoji.trim()}
           onClick={() => onSave({ emoji: emoji.trim(), color })}
         >
-          Save avatar
+          Salvar avatar
         </button>
       </div>
     </section>
@@ -857,7 +857,7 @@ export function MarketplaceView({ client }: { client: DaemonClient }) {
       <div className="flex items-center gap-2">
         <h2 className="text-lg font-semibold">Marketplace</h2>
         <label className="ml-auto text-xs text-zinc-400">
-          Provider for new agents{" "}
+          Provedor dos novos bots{" "}
           <select
             className="rounded bg-zinc-900 px-1"
             value={provider}

@@ -28,18 +28,44 @@ export type ToolTab =
   | "hosts";
 
 export const TABS: { id: ToolTab; label: string; hint: string }[] = [
-  { id: "apps", label: "Apps", hint: "Connect apps (MCP) for all bots" },
-  { id: "approvals", label: "Approvals", hint: "Ask-first / allow rules and pending requests" },
-  { id: "email", label: "Email", hint: "Mailboxes and drafts awaiting your review" },
-  { id: "skills", label: "Skills", hint: "Shared skills library" },
-  { id: "marketplace", label: "Marketplace", hint: "Install skills and bot templates" },
-  { id: "browser", label: "Browser", hint: "Bot-controlled Chrome tabs" },
-  { id: "vault", label: "Vault", hint: "Encrypted secrets and connectors" },
-  { id: "gateways", label: "Gateways", hint: "Telegram, Slack and Discord" },
-  { id: "mobile", label: "Mobile", hint: "Pair your phone on this network" },
-  { id: "team", label: "Team", hint: "Share bots through a relay" },
-  { id: "hosts", label: "Hosts", hint: "Run bots on a VPS, in Firecracker microVMs" },
+  { id: "apps", label: "Apps", hint: "Conecte apps para todos os agentes" },
+  { id: "approvals", label: "Aprovações", hint: "Regras de aprovação e pedidos pendentes" },
+  { id: "email", label: "E-mail", hint: "Contas de e-mail e rascunhos" },
+  { id: "skills", label: "Habilidades", hint: "Biblioteca de habilidades compartilhadas" },
+  { id: "marketplace", label: "Marketplace", hint: "Instale habilidades e modelos de agente" },
+  { id: "browser", label: "Navegador", hint: "Abas controladas pelos agentes" },
+  { id: "vault", label: "Cofre", hint: "Segredos criptografados e conectores" },
+  { id: "gateways", label: "Gateways", hint: "Telegram, Slack e Discord" },
+  { id: "mobile", label: "Celular", hint: "Emparelhe seu celular nesta rede" },
+  { id: "team", label: "Equipe", hint: "Compartilhe agentes por um relay" },
+  { id: "hosts", label: "Servidores", hint: "Execute agentes em VPS ou microVMs" },
 ];
+
+export function ToolBody({
+  client,
+  agents,
+  tab,
+}: {
+  client: DaemonClient;
+  agents: Agent[];
+  tab: ToolTab;
+}) {
+  return (
+    <div className="flex-1 overflow-y-auto">
+      {tab === "apps" && <AppsView client={client} agents={agents} />}
+      {tab === "approvals" && <ApprovalsView client={client} agents={agents} />}
+      {tab === "email" && <EmailView client={client} agents={agents} />}
+      {tab === "skills" && <SkillsView client={client} />}
+      {tab === "marketplace" && <MarketplaceView client={client} />}
+      {tab === "browser" && <BrowserView client={client} agents={agents} />}
+      {tab === "vault" && <VaultView client={client} agents={agents} />}
+      {tab === "gateways" && <GatewaysView client={client} agents={agents} />}
+      {tab === "mobile" && <MobileView client={client} />}
+      {tab === "team" && <TeamView client={client} agents={agents} />}
+      {tab === "hosts" && <HostsView client={client} agents={agents} />}
+    </div>
+  );
+}
 
 export function ToolsView({
   client,
@@ -76,19 +102,7 @@ export function ToolsView({
           </button>
         ))}
       </div>
-      <div className="flex-1 overflow-y-auto">
-        {tab === "apps" && <AppsView client={client} agents={agents} />}
-        {tab === "approvals" && <ApprovalsView client={client} agents={agents} />}
-        {tab === "email" && <EmailView client={client} agents={agents} />}
-        {tab === "skills" && <SkillsView client={client} />}
-        {tab === "marketplace" && <MarketplaceView client={client} />}
-        {tab === "browser" && <BrowserView client={client} agents={agents} />}
-        {tab === "vault" && <VaultView client={client} agents={agents} />}
-        {tab === "gateways" && <GatewaysView client={client} agents={agents} />}
-        {tab === "mobile" && <MobileView client={client} />}
-        {tab === "team" && <TeamView client={client} agents={agents} />}
-        {tab === "hosts" && <HostsView client={client} agents={agents} />}
-      </div>
+      <ToolBody client={client} agents={agents} tab={tab} />
     </div>
   );
 }

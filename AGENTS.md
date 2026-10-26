@@ -46,6 +46,7 @@ The bridge appends app tools to `tools/list` as `<slug>__<tool>` and routes call
 `src/approvals.ts` (`ApprovalService`): every bridge tool call passes `gate()`. Rules
 (`settings.approval_rules`, glob on tool names, per bot or `agentId: null`): "ask" beats
 "allow"; with no rule, connected-app tools whose operation looks like a write ask first.
+A lone `*` allow does not bypass that connected-app write default; only a matching non-`*` allow does.
 A pending approval blocks the call; background turns (from another bot, routine, gateway,
 team or group chat — `AgentRuntime.currentTurn().background`) expire after
 `UPBOT_APPROVAL_BACKGROUND_TTL_MS` (10 min), others after `UPBOT_APPROVAL_TTL_MS` (60 min);

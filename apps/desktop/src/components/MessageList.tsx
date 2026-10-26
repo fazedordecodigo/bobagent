@@ -1,35 +1,28 @@
-import type { ChatItem, PermissionOption } from "@upbot/protocol";
-import { useEffect, useRef, useState } from "react";
+import type { Agent, ChatItem } from "@upbot/protocol";
+import { type ReactNode, useEffect, useRef } from "react";
+import { MonoAv, role, type UiStatus } from "../lib/ui";
+import { Icon } from "./icons";
 
-const statusBadge: Record<string, string> = {
-  pending: "bg-zinc-700 text-zinc-300",
-  in_progress: "bg-sky-900 text-sky-300",
-  completed: "bg-emerald-900/60 text-emerald-300",
-  failed: "bg-red-900/60 text-red-300",
+const TOOL_LABEL: Record<string, string> = {
+  pending: "Na fila",
+  in_progress: "Em execução",
+  completed: "Concluído",
+  failed: "Com erro",
 };
 
-function ToolCallRow({ item }: { item: Extract<ChatItem, { kind: "tool_call" }> }) {
-  return (
-    <div className="rounded-md border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-xs">
-      <div className="flex items-center gap-2">
-        <span className="font-medium text-zinc-200">{item.title || "Tool call"}</span>
-        {item.toolKind && <span className="text-zinc-500">{item.toolKind}</span>}
-        <span
-          className={`ml-auto rounded px-1.5 py-0.5 ${statusBadge[item.status] ?? statusBadge.pending}`}
-        >
-          {item.status}
-        </span>
-      </div>
-      {item.detail && (
-        <details className="mt-1">
-          <summary className="cursor-pointer text-zinc-500">detail</summary>
-          <pre className="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap text-zinc-400">
-            {item.detail}
-          </pre>
-        </details>
-      )}
-    </div>
-  );
+function messageDay(timestamp: number, now = Date.now()) {
+  const date = new Date(timestamp);
+  const today = new Date(now);
+  const yesterday = new Date(now);
+  yesterday.setDate(today.getDate() - 1);
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+  const month = date.toLocaleDateString("pt-BR", { month: "long" });
+  if (sameDay(date, today)) return `Hoje · ${date.getDate()} de ${month}`;
+  if (sameDay(date, yesterday)) return `Ontem · ${date.getDate()} de ${month}`;
+  return `${date.getDate()} de ${month}`;
 }
 
 function PermissionCard({
@@ -39,38 +32,40 @@ function PermissionCard({
   item: Extract<ChatItem, { kind: "permission" }>;
   onRespond: (requestId: string, optionId: string | null) => void;
 }) {
-  const [clicked, setClicked] = useState(false);
-  const resolved = item.resolution !== null || clicked;
-  const isReject = (o: PermissionOption) => o.kind.startsWith("reject");
+  const resolved = item.resolution !== null;
+  const selected = item.options.find((option) => option.optionId === item.resolution?.optionId);
   return (
-    <div className="rounded-md border border-amber-800/60 bg-amber-950/40 px-3 py-2">
-      <div className="text-sm font-medium text-amber-200">{item.title}</div>
-      {item.resolution ? (
-        <div className="mt-1 text-xs text-zinc-400">
-          Resolved:{" "}
-          {item.resolution.optionId === null
-            ? "Cancelled"
-            : (item.options.find((o) => o.optionId === item.resolution?.optionId)?.name ??
-              item.resolution.optionId)}
+    <div className={`approval${resolved ? " done" : ""}`} data-od-id="approval-card">
+      <div className="approval-head">
+        <span className="status wait">
+          <i className="dot s-wait" />
+          Precisa de você
+        </span>
+      </div>
+      <div style={{ padding: "0 16px" }}>
+        <h3>{item.title}</h3>
+      </div>
+      {resolved ? (
+        <div className="resolved">
+          <Icon name="check" />
+          {selected ? `Escolhido: ${selected.name}` : "Cancelado"}
         </div>
       ) : (
-        <div className="mt-2 flex flex-wrap gap-2">
-          {item.options.map((o) => (
+        <div className="approval-actions">
+          {item.options.map((option, index) => (
             <button
-              key={o.optionId}
+              key={option.optionId}
               type="button"
-              disabled={resolved}
-              onClick={() => {
-                setClicked(true);
-                onRespond(item.requestId, o.optionId);
-              }}
-              className={`rounded px-2.5 py-1 text-xs font-medium disabled:opacity-40 ${
-                isReject(o)
-                  ? "bg-zinc-700 text-zinc-200 hover:bg-zinc-600"
-                  : "bg-sky-600 text-white hover:bg-sky-500"
-              }`}
+              className={
+                option.kind.startsWith("reject")
+                  ? "btn btn-ghost"
+                  : index === 0
+                    ? "btn btn-primary"
+                    : "btn btn-secondary"
+              }
+              onClick={() => onRespond(item.requestId, option.optionId)}
             >
-              {o.name}
+              {option.name}
             </button>
           ))}
         </div>
@@ -80,144 +75,253 @@ function PermissionCard({
 }
 
 export function MessageList({
+  agent,
+  status,
   items,
   hasMore,
+  loaded,
+  emptyNotice,
+  running,
   onLoadEarlier,
   onPermissionRespond,
   onSpeak,
+  onRetry,
+  canRetry,
+  retryHasAttachments,
+  onSuggestion,
 }: {
+  agent: Agent;
+  status: UiStatus;
   items: ChatItem[];
   hasMore: boolean;
+  loaded: boolean;
+  emptyNotice?: ReactNode;
+  running: boolean;
   onLoadEarlier: () => void;
   onPermissionRespond: (requestId: string, optionId: string | null) => void;
   onSpeak?: ((text: string) => void) | undefined;
+  onRetry: () => void;
+  canRetry: boolean;
+  retryHasAttachments: boolean;
+  onSuggestion: (text: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
-
   useEffect(() => {
-    const el = ref.current;
-    if (el && atBottom.current) el.scrollTop = el.scrollHeight;
-  }, []);
+    const element = ref.current;
+    if (element && atBottom.current) element.scrollTop = element.scrollHeight;
+  });
+  const last = items.at(-1);
+  const suggestions = [
+    "O que você consegue fazer?",
+    "Monte um plano para esta semana",
+    "Resuma o que você lembra sobre mim",
+  ];
+
+  if (!items.length && loaded) {
+    return (
+      <div className="thread" ref={ref}>
+        <div className="thread-inner">
+          <div className="empty">
+            <MonoAv agent={agent} status={status} lg />
+            <h2>{agent.name}</h2>
+            <p>{role(agent)}. Diga o que precisa; ele mostra o plano antes de agir.</p>
+            <div className="suggest">
+              {suggestions.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  className="chip"
+                  onClick={() => onSuggestion(suggestion)}
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+            {emptyNotice}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
+      className="thread"
       ref={ref}
-      className="flex-1 space-y-3 overflow-y-auto px-6 py-4"
-      onScroll={(e) => {
-        const el = e.currentTarget;
-        atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      aria-live="polite"
+      onScroll={(event) => {
+        const element = event.currentTarget;
+        atBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40;
       }}
     >
-      {hasMore && (
-        <button
-          type="button"
-          onClick={onLoadEarlier}
-          className="mx-auto block rounded bg-zinc-800 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-700"
-        >
-          Load earlier
-        </button>
-      )}
-      {items.map((item) => {
-        switch (item.kind) {
-          case "user_message":
-            return (
-              <div key={item.id} className="flex justify-end">
-                <div
-                  className={`max-w-[75%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${item.from ? "bg-violet-800/70" : "bg-sky-700/80"}`}
-                >
-                  {item.from && (
-                    <div className="mb-1 text-xs text-violet-200">From bot {item.from.name}</div>
-                  )}
+      <div className="thread-inner">
+        {hasMore && (
+          <button type="button" className="chip" onClick={onLoadEarlier}>
+            Carregar anteriores
+          </button>
+        )}
+        {items.map((item, index) => {
+          const previous = items[index - 1];
+          const separator =
+            !previous ||
+            new Date(previous.createdAt).toDateString() !== new Date(item.createdAt).toDateString();
+          return (
+            <div key={item.id}>
+              {separator && <p className="meta day">{messageDay(item.createdAt)}</p>}
+              {item.kind === "user_message" ? (
+                <div className="msg-user">
+                  {item.from && <div className="meta">De {item.from.name}</div>}
                   {item.gateway && (
-                    <div className="mb-1 text-xs text-sky-200">
+                    <div className="meta">
                       via {item.gateway.kind} · {item.gateway.userName}
                     </div>
                   )}
-                  {item.routine && (
-                    <div className="mb-1 text-xs text-sky-200">
-                      ⏰ Routine {item.routine.name} ({item.routine.trigger})
+                  {item.routine && <div className="meta">Rotina {item.routine.name}</div>}
+                  <p style={{ whiteSpace: "pre-wrap" }}>{item.text}</p>
+                  {item.attachments?.map((attachment) => (
+                    <div className="file" key={attachment.path}>
+                      <span className="fi">
+                        <Icon name="doc" />
+                      </span>
+                      <div>
+                        <strong>{attachment.name}</strong>
+                        <span className="meta">
+                          {Math.max(1, Math.round(attachment.size / 1024))} KB
+                        </span>
+                      </div>
                     </div>
+                  ))}
+                </div>
+              ) : item.kind === "agent_message" ? (
+                <div className="msg-agent">
+                  <MonoAv agent={agent} dot={false} />
+                  <div className="body">
+                    <div className="who">
+                      {agent.name}
+                      <span className="meta">
+                        {new Date(item.createdAt).toLocaleTimeString("pt-BR", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                      {onSpeak && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => onSpeak(item.text)}
+                        >
+                          Ouvir
+                        </button>
+                      )}
+                    </div>
+                    <p style={{ whiteSpace: "pre-wrap" }}>{item.text}</p>
+                  </div>
+                </div>
+              ) : item.kind === "agent_thought" ? (
+                <div className="msg-agent">
+                  <MonoAv agent={agent} dot={false} />
+                  <div className="body">
+                    <details className="meta">
+                      <summary>Pensando</summary>
+                      <p style={{ whiteSpace: "pre-wrap" }}>{item.text}</p>
+                    </details>
+                  </div>
+                </div>
+              ) : item.kind === "tool_call" ? (
+                <div className="msg-agent">
+                  <MonoAv agent={agent} dot={false} />
+                  <div className="body">
+                    <div className="tool">
+                      <b>{item.title}</b>
+                      {item.toolKind ? ` · ${item.toolKind}` : ""} → {TOOL_LABEL[item.status]}
+                      {item.detail && (
+                        <details>
+                          <summary>Detalhes</summary>
+                          <pre>{item.detail}</pre>
+                        </details>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : item.kind === "permission" ? (
+                <div className="msg-agent">
+                  <MonoAv agent={agent} dot={false} />
+                  <div className="body">
+                    <PermissionCard item={item} onRespond={onPermissionRespond} />
+                  </div>
+                </div>
+              ) : item.kind === "error" ? (
+                <div className="msg-agent">
+                  <MonoAv agent={agent} dot={false} />
+                  <div className="body">
+                    <div className="approval is-err" data-od-id="error-card">
+                      <div className="approval-head">
+                        <span className="status err">
+                          <i className="dot s-err" />
+                          Com erro
+                        </span>
+                      </div>
+                      <div style={{ padding: "0 16px" }}>
+                        <h3>Algo deu errado</h3>
+                      </div>
+                      <div className="errlog">{item.message}</div>
+                      {index === items.length - 1 &&
+                        (retryHasAttachments ? (
+                          <p className="meta" style={{ padding: "0 16px 12px" }}>
+                            Reenvie a mensagem manualmente para incluir os anexos.
+                          </p>
+                        ) : (
+                          canRetry && (
+                            <div className="approval-actions">
+                              <button
+                                type="button"
+                                className="btn btn-primary"
+                                data-od-id="error-retry"
+                                onClick={onRetry}
+                              >
+                                Tentar de novo
+                              </button>
+                            </div>
+                          )
+                        ))}
+                    </div>
+                  </div>
+                </div>
+              ) : item.kind === "compaction" ? (
+                <div>
+                  <p className="meta day">
+                    {item.status === "running"
+                      ? "Compactando contexto…"
+                      : item.status === "failed"
+                        ? `Falha ao compactar: ${item.error ?? "erro desconhecido"}`
+                        : "Contexto compactado"}
+                  </p>
+                  {item.status === "completed" && (
+                    <details className="meta">
+                      <summary>Resumo</summary>
+                      <p>{item.summary}</p>
+                    </details>
                   )}
-                  {item.text}
-                  {item.attachments && item.attachments.length > 0 && (
-                    <ul className="mt-1 space-y-0.5 text-xs text-sky-100/80">
-                      {item.attachments.map((a) => (
-                        <li key={a.path} title={a.path}>
-                          📎 {a.name} ({Math.max(1, Math.round(a.size / 1024))} KB)
-                        </li>
-                      ))}
-                    </ul>
-                  )}
                 </div>
-              </div>
-            );
-          case "agent_message":
-            return (
-              <div key={item.id} className="group flex items-end gap-1">
-                <div className="max-w-[75%] rounded-lg bg-zinc-800 px-3 py-2 text-sm whitespace-pre-wrap">
-                  {item.text}
-                </div>
-                {onSpeak && (
-                  <button
-                    type="button"
-                    title="Read aloud"
-                    className="invisible text-xs text-zinc-500 group-hover:visible hover:text-zinc-300"
-                    onClick={() => onSpeak(item.text)}
-                  >
-                    🔊
-                  </button>
-                )}
-              </div>
-            );
-          case "agent_thought":
-            return (
-              <details key={item.id} className="text-xs text-zinc-500">
-                <summary className="cursor-pointer">Thinking</summary>
-                <div className="mt-1 whitespace-pre-wrap pl-3">{item.text}</div>
-              </details>
-            );
-          case "tool_call":
-            return <ToolCallRow key={item.id} item={item} />;
-          case "permission":
-            return <PermissionCard key={item.id} item={item} onRespond={onPermissionRespond} />;
-          case "compaction":
-            return (
-              <div
-                key={item.id}
-                className="my-2 border-y border-zinc-800 py-2 text-xs text-zinc-500"
-              >
-                <div className="text-center">
-                  {item.status === "running"
-                    ? "Compacting context…"
-                    : item.status === "failed"
-                      ? `Context compaction failed: ${item.error ?? "unknown error"}`
-                      : `Context compacted (${item.reason})`}
-                </div>
-                {item.status === "completed" && (
-                  <details className="mt-1">
-                    <summary className="cursor-pointer text-center">Summary</summary>
-                    <p className="mt-1 whitespace-pre-wrap text-zinc-400">{item.summary}</p>
-                  </details>
-                )}
-              </div>
-            );
-          case "error":
-            return (
-              <div
-                key={item.id}
-                className="rounded-md border border-red-900/60 bg-red-950/40 px-3 py-2 text-sm text-red-300"
-              >
-                {item.message}
-              </div>
-            );
-          default:
-            return null;
-        }
-      })}
-      {items.length === 0 && (
-        <p className="pt-8 text-center text-sm text-zinc-500">No messages yet. Say hi.</p>
-      )}
+              ) : null}
+            </div>
+          );
+        })}
+        {running && last?.kind === "user_message" && (
+          <div className="msg-agent">
+            <MonoAv agent={agent} dot={false} />
+            <div className="body">
+              <div className="who">{agent.name}</div>
+              <span className="typing" role="status" aria-label="Digitando">
+                <i />
+                <i />
+                <i />
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
