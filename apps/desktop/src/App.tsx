@@ -45,6 +45,12 @@ const TASK_ORDER: Record<UiStatus, number> = {
   ok: 4,
   idle: 5,
 };
+const STATUS_NOTES = {
+  run: "Agindo agora",
+  wait: "Precisa de você",
+  ok: "Entregue",
+  err: "Falhou",
+};
 
 function readStorage(key: string) {
   try {
@@ -1072,7 +1078,10 @@ function SettingsView({
                 </div>
                 <div className="st-demo">
                   {(["run", "wait", "ok", "err"] as const).map((st) => (
-                    <Pill key={st} st={st} />
+                    <div key={st}>
+                      <Pill st={st} />
+                      <span className="meta">{STATUS_NOTES[st]}</span>
+                    </div>
                   ))}
                 </div>
               </div>

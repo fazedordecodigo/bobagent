@@ -1,6 +1,14 @@
 @import "tailwindcss";
 @import "./styles/upbot.css";
 
+dialog {
+  margin: auto;
+}
+
+.hint.is-err {
+  color: var(--st-err);
+}
+
 @theme {
   --color-zinc-50: var(--fg);
   --color-zinc-100: var(--fg);
