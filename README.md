@@ -34,7 +34,7 @@ Built with Bun (daemon, relay), SQLite, Tauri 2 (Rust) and React.
 
 ## Install
 
-Download the latest `.dmg` from [Releases](https://github.com/fazedordecodigo/bobagent/releases).
+Download the latest `.dmg` from [Releases](https://github.com/fazedordecodigo/upbot/releases).
 The app updates itself from there.
 
 Builds are not yet notarized by Apple. On first launch macOS says it can't verify the app:
@@ -101,6 +101,20 @@ keep the host's login. Codex's own home and thread cache are ephemeral; if a thr
 resumed, UpBot starts a fresh Codex thread while retaining its chat history. `bun run
 test:firecracker:providers` exercises fake Claude API/OAuth and Codex credentials, rejection
 handling, persistence, and credential leak boundaries.
+
+The five-provider guest image was verified in Firecracker with Claude Code 2.1.310,
+Codex 0.164.0, Gemini 0.65.0, OpenCode 1.19.4, and Cursor Agent 2026.10.22-27dcf5f.
+Cursor is installed under `/opt/cursor-agent-home` because guest startup bind-mounts the
+persistent workspace over `/root`. Gemini and Cursor vault credentials reach only Firecracker
+provider processes; invalid Gemini keys produce a redacted saved-credential rejection.
+Cursor's `Failed to initialize session services` mapping while a microVM credential is set is
+inferred: `proxy.log` shows the CLI reached `api2.cursor.sh`, but Cursor does not return an
+explicit invalid-key error. Signed-out Gemini and Cursor surface `gemini` and `agent login`.
+OpenCode has a 30-second, OpenCode-only first-activity watchdog. Message/thought chunks, tool
+calls/updates, plans, or agent requests count as progress; session metadata updates such as
+available commands do not. Without progress after a prompt it reports `opencode auth login` and
+tears down the child; after the first progress, the prompt is unbounded. The provider suite also checks signed-out chats,
+credential delivery, `isolation: "none"`, and plaintext leaks.
 
 VMs have no network device: provider stdio, the agent-to-agent bridge, and an HTTPS proxy all
 use vsock. The proxy resolves hostnames once and rejects requests if any IPv4 result is not

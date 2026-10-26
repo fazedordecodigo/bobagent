@@ -30,7 +30,7 @@ export const AUTH_RE =
   /\b(auth(entication)?[ _-]?(required|failed)|unauthori[sz]ed|not (logged|signed) in|log ?in required|sign ?in required|please run \/login)\b/i;
 
 const VM_CREDENTIAL_REJECTION_RE =
-  /\b(?:401\b|(?:invalid|incorrect|rejected|expired|revoked)\s+(?:(?:x-)?api\s+)?key\b|(?:api|x-api)[ _-]?key.{0,32}(?:invalid|incorrect|rejected|expired)|(?:invalid|incorrect|rejected|expired)\s+(?:authentication|credential|token)\b|authentication[ _-]?(?:error|failed|rejected)\b)/i;
+  /\b(?:401\b|(?:invalid|incorrect|rejected|expired|revoked)\s+(?:(?:x-)?api\s+)?key\b|(?:api|x-api)[ _-]?key.{0,32}(?:invalid|incorrect|rejected|expired|not valid)|(?:not valid|not a valid)\s+(?:(?:google|gemini)\s+)?(?:api\s+)?key\b|(?:invalid|incorrect|rejected|expired)\s+(?:authentication|credential|token)\b|authentication[ _-]?(?:error|failed|rejected)\b)/i;
 
 export function authMessage(provider: ProviderId, detail = ""): string {
   const loginCmd = LOGIN_COMMANDS[provider] ?? "its login command";
@@ -41,6 +41,7 @@ export function redactSecrets(s: string): string {
   return s
     .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, "$1<redacted>")
     .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, "<jwt-redacted>")
+    .replace(/\bAIza[A-Za-z0-9_-]{20,}\b/g, "<redacted>")
     .replace(
       /\b(sk-[A-Za-z0-9_*-]{8,}|ghp_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,})\b/g,
       "<redacted>",

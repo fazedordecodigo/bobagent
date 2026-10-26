@@ -34,7 +34,7 @@ import { TeamClient } from "./team";
 import { Vault } from "./vault";
 import { Voice } from "./voice";
 
-const VERSION = "0.2.1";
+const VERSION = "0.3.0";
 const ORIGIN_ALLOWLIST = new Set([
   "tauri://localhost",
   "http://tauri.localhost",

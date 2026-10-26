@@ -75,6 +75,26 @@ forwarded to the owner only for bot-originated work (`queue.from_agent_id`). Mig
 `channel_messages.reply_to`. UI: `CommandPalette` (⌘K all, ⌘⇧F bots) and shortcuts in
 `App.tsx` (⌘N new bot, ⌘1–9 switch bot, ⌘, settings, ⌘P pages).
 
+## ACP providers in microVMs
+
+ACP providers run in Firecracker like Claude/Codex (`AcpDriver` spawns via `RemoteLaunch` and
+passes `remote.credentials` as env). MicroVM sign-in (`vmCredentials`, Settings → Hosts):
+claude (OAuth token or API key), codex (`OPENAI_API_KEY`), gemini (`GEMINI_API_KEY`), cursor
+(`CURSOR_API_KEY`). The verified five-provider image contains Claude Code 2.1.310, Codex
+0.164.0, Gemini 0.65.0, OpenCode 1.19.4, and Cursor Agent 2026.10.22-27dcf5f. Cursor installs
+under `/opt/cursor-agent-home` because `/root` is bind-mounted from persistent storage.
+Signed-out behavior: Gemini reports `gemini`, OpenCode `opencode auth login`, and Cursor
+`agent login`. OpenCode alone has a 30-second first-activity watchdog: message/thought chunks,
+tool calls/updates, plans, or agent requests count as progress; session metadata updates such as
+available commands do not. Without progress after a prompt, it reports `opencode auth login` and
+tears down its child; after the first progress, the prompt is unbounded. Fake Gemini/Cursor credentials reach only
+Firecracker provider env. Gemini invalid-key errors are explicit; Cursor's
+`Failed to initialize session services` mapping is inferred from `proxy.log` showing a request
+to `api2.cursor.sh` with a microVM credential set, since Cursor returns no explicit invalid-key
+error. `bun run test:firecracker:providers` checks these real ACP flows, credential delivery,
+placement isolation, and plaintext leaks.
+devin/grok need a custom image plus `UPBOT_PROVIDER_COMMAND_<PROVIDER>`.
+
 ## Layout
 
 - `packages/protocol` — `@upbot/protocol`: zod 4 schemas + the typed method map

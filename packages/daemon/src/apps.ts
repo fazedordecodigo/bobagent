@@ -352,7 +352,7 @@ export class AppsService {
               },
               stderr: "ignore",
             });
-      const client = new Client({ name: "upbot", version: "0.2.1" });
+      const client = new Client({ name: "upbot", version: "0.3.0" });
       const timeout = AbortSignal.timeout(Number(process.env.UPBOT_APP_START_TIMEOUT_MS) || 60_000);
       await client.connect(transport as Transport, { signal: timeout });
       const tools: Tool[] = [];

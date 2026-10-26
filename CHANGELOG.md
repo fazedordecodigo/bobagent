@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0
+
 ### Changed
 - Renamed BobAgent to UpBot and repositioned it as a hub for general-purpose bots that work
   together (web, files, email, apps), not only coding agents. Existing data is migrated:

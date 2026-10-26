@@ -31,6 +31,8 @@ process.stdin.on("data", (chunk: Buffer) => {
             "CLAUDE_CODE_OAUTH_TOKEN",
             "OPENAI_API_KEY",
             "CODEX_API_KEY",
+            "GEMINI_API_KEY",
+            "CURSOR_API_KEY",
           ];
           appendFileSync(
             logPath,
@@ -44,13 +46,10 @@ process.stdin.on("data", (chunk: Buffer) => {
                 .filter((key) => credentialKeys.includes(key))
                 .sort(),
               hasFakeCredential: entries.some(
-                ([key, value]) =>
-                  credentialKeys.includes(key) && /^sk-(?:ant-|proj-).*fake-/.test(value),
+                ([key, value]) => credentialKeys.includes(key) && value.includes("-fake-"),
               ),
               upbotKeys: entries.map(([key]) => key).filter((key) => key.startsWith("UPBOT_")),
-              apiKeyKeys: entries
-                .map(([key]) => key)
-                .filter((key) => key === "ANTHROPIC_API_KEY" || key === "OPENAI_API_KEY"),
+              apiKeyKeys: entries.map(([key]) => key).filter((key) => credentialKeys.includes(key)),
               hasSentinelValue: entries.some(
                 ([, value]) => value === "leak" || value === "sk-sentinel-leak",
               ),

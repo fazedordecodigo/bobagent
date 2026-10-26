@@ -11,6 +11,8 @@ import type { SkillLibrary } from "./skills";
 // Every file is verified against the sha256 in the index before it is installed.
 
 export const DEFAULT_REGISTRY =
+  "https://raw.githubusercontent.com/fazedordecodigo/upbot/main/marketplace/index.json";
+const LEGACY_REGISTRY =
   "https://raw.githubusercontent.com/fazedordecodigo/bobagent/main/marketplace/index.json";
 const MAX_BYTES = 1024 * 1024;
 
@@ -47,7 +49,11 @@ export class Marketplace {
       .get() as {
       value: string;
     } | null;
-    if (r) return JSON.parse(r.value) as string[];
+    // sources saved before the repo moved to fazedordecodigo/upbot
+    if (r)
+      return (JSON.parse(r.value) as string[]).map((u) =>
+        u === LEGACY_REGISTRY ? DEFAULT_REGISTRY : u,
+      );
     return [process.env.UPBOT_MARKETPLACE_URL ?? DEFAULT_REGISTRY];
   }
 

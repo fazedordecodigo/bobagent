@@ -17,6 +17,7 @@ export function ChannelView({
   const [replyTo, setReplyTo] = useState<ChannelMessage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const name = (id: string | null) => agents.find((a) => a.id === id)?.name ?? "deleted bot";
 
   useEffect(() => {
@@ -223,7 +224,10 @@ export function ChannelView({
               key={n}
               type="button"
               className="rounded bg-zinc-800 px-2 py-0.5 text-xs hover:bg-zinc-700"
-              onClick={() => setText(text.replace(/@([\w-]*)$/, `@${n} `))}
+              onClick={() => {
+                setText(text.replace(/@([\w-]*)$/, `@${n} `));
+                inputRef.current?.focus();
+              }}
             >
               @{n}
             </button>
@@ -232,11 +236,12 @@ export function ChannelView({
       )}
       <div className="flex gap-2 border-t border-zinc-800 p-3">
         <textarea
+          ref={inputRef}
           className={`${inputCls} min-h-[44px] flex-1 resize-none`}
           placeholder={
             channel.status === "active"
               ? `Message #${channel.name}`
-              : `Channel is ${channel.status}`
+              : `Group chat is ${channel.status}`
           }
           disabled={channel.status !== "active"}
           value={text}
@@ -286,7 +291,7 @@ export function ChannelCreateForm({
         );
       }}
     >
-      <h2 className="text-lg font-semibold">New channel</h2>
+      <h2 className="text-lg font-semibold">New group chat</h2>
       <label className="block text-sm">
         Name
         <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />

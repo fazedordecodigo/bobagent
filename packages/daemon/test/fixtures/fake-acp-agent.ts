@@ -158,7 +158,10 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
   };
   const full = (prompt?.[0]?.text ?? "")
     .replace(/^[\s\S]*<\/agent_message_context>\n/, "")
-    .replace(/^[\s\S]*<\/channel_context>\n[^\n]*\n/, "");
+    .replace(/^[\s\S]*<\/channel_context>\n[^\n]*\n/, "")
+    // group-chat quotes and leading @mentions are addressing, not part of the command
+    .replace(/^<in_reply_to[^>]*>[\s\S]*?<\/in_reply_to>\n/, "")
+    .replace(/^(?:@[\w-]+\s+)+/, "");
   // session context blocks prepended by the daemon are not part of the command
   const stripped = full.replace(
     /^(?:<(upbot_context|agent_instructions|agent_memories|skills_library|conversation_summary|conversation_history|attachments)>[\s\S]*?<\/\1>\s*)+/,
@@ -176,6 +179,35 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
   const say = async (kind: string, t: string) => {
     await ctx.client.notify("session/update", chunk(sessionId, kind, t));
   };
+
+  if (text.startsWith("watchdog-delay:")) {
+    await sleep(Number.parseInt(text.slice("watchdog-delay:".length), 10) || 0);
+    return { stopReason: "end_turn" };
+  }
+
+  if (text === "watchdog-idle") {
+    while (!cancelledSessions.has(sessionId)) await sleep(10);
+    return { stopReason: "cancelled" };
+  }
+
+  if (text === "watchdog-metadata-idle") {
+    await ctx.client.notify("session/update", {
+      sessionId,
+      update: { sessionUpdate: "available_commands_update", availableCommands: [] },
+    } as never);
+    while (!cancelledSessions.has(sessionId)) await sleep(10);
+    return { stopReason: "cancelled" };
+  }
+
+  const watchdogActivity = /^watchdog-activity:(\d+):(\d+)$/.exec(text);
+  if (watchdogActivity) {
+    const activityDelay = Number(watchdogActivity[1]);
+    const totalDelay = Number(watchdogActivity[2]);
+    await sleep(activityDelay);
+    await say("agent_thought_chunk", "activity");
+    await sleep(Math.max(0, totalDelay - activityDelay));
+    return { stopReason: "end_turn" };
+  }
 
   if (text.startsWith("mcp:")) {
     const m = /^mcp:(\w+)\s*([\s\S]*)$/.exec(text);
