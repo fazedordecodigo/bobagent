@@ -43,6 +43,7 @@ async function main() {
   const daemon = Bun.spawn(["bun", DAEMON, "--data-dir", dataDir, "--agents-root", agentsRoot], {
     env: {
       ...process.env,
+      UPBOT_DEFAULT_BOT: "off",
       UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       UPBOT_CANCEL_GRACE_MS: "2000",
       FAKE_ACP_STATE_DIR: stateDir,
@@ -73,20 +74,26 @@ async function main() {
   }
   reader.releaseLock();
 
-  const vite = Bun.spawn(
-    [join(ROOT, "apps/desktop/node_modules/.bin/vite"), "--port", "1420", "--strictPort"],
-    {
-      cwd: join(ROOT, "apps/desktop"),
-      env: process.env,
-      stdout: "pipe",
-      stderr: "inherit",
-    },
-  );
-  await waitHttp("http://localhost:1420", 15000);
+  let vite: ReturnType<typeof Bun.spawn> | undefined;
+  try {
+    await waitHttp("http://localhost:1420", 500);
+  } catch {
+    vite = Bun.spawn(
+      [join(ROOT, "apps/desktop/node_modules/.bin/vite"), "--port", "1420", "--strictPort"],
+      {
+        cwd: join(ROOT, "apps/desktop"),
+        env: process.env,
+        stdout: "pipe",
+        stderr: "inherit",
+      },
+    );
+    await waitHttp("http://localhost:1420", 15000);
+  }
 
   const browser = await chromium.launch({ channel: "chrome", headless: true });
   const page = await browser.newPage();
   await page.goto(`http://localhost:1420/#port=${port}&token=${encodeURIComponent(TOKEN)}`);
+  await page.getByText("Nenhum agente ainda.").waitFor({ timeout: 15000 });
 
   const step = async (name: string, fn: () => Promise<void>) => {
     const t0 = Date.now();
@@ -106,26 +113,43 @@ async function main() {
       null,
       { timeout: 10000 },
     );
-    await page.getByPlaceholder("Message the agent…").pressSequentially(text);
+    await page.getByLabel("Mensagem para o agente").pressSequentially(text);
   };
 
   await step("a-create", async () => {
-    await page.getByRole("button", { name: "New agent" }).click();
-    await page.getByPlaceholder("Name").fill("UI Smoke");
-    await page.getByRole("button", { name: "Create" }).click();
+    await page.locator('[aria-label="Criar agente"]').first().click();
+    await page.getByPlaceholder("Ex.: Viagens").fill("UI Smoke");
+    await page.getByLabel("Devin").check();
+    await page.getByRole("button", { name: "Criar e abrir" }).click();
     await page.getByRole("button", { name: /UI Smoke/ }).waitFor({ timeout: 5000 });
+  });
+
+  await step("i-permissions-notice", async () => {
+    const notice = page.locator(".empty > p.meta").filter({ hasText: "Permissões:" });
+    await notice.waitFor({ timeout: 10000 });
+    await page.getByText("~/.config/devin/config.json").waitFor({ timeout: 10000 });
+    const belowSuggestions = await page.locator(".empty").evaluate((empty) => {
+      const suggestions = empty.querySelector(".suggest");
+      const permissionNotice = empty.querySelector("p.meta");
+      return Boolean(
+        suggestions &&
+          permissionNotice &&
+          suggestions.compareDocumentPosition(permissionNotice) & Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+    });
+    if (!belowSuggestions) throw new Error("permission notice is not below suggestions");
   });
 
   await step("b-echo", async () => {
     await type("echo:hello world");
-    await page.getByRole("button", { name: "Send" }).click();
+    await page.getByRole("button", { name: "Enviar" }).click();
     await page.getByText("hello world", { exact: false }).waitFor({ timeout: 20000 });
     await page.screenshot({ path: join(OUT, "ui-smoke-b.png") });
   });
 
   await step("c-permission", async () => {
     await type("tool");
-    await page.getByRole("button", { name: "Send" }).click();
+    await page.getByRole("button", { name: "Enviar" }).click();
     await page.getByRole("button", { name: "Allow once" }).waitFor({ timeout: 20000 });
     await page.getByRole("button", { name: "Allow once" }).click();
     await page.getByText("permission:allow_once").waitFor({ timeout: 20000 });
@@ -134,74 +158,66 @@ async function main() {
 
   await step("d-stop", async () => {
     await type("slow");
-    await page.getByRole("button", { name: "Send" }).click();
-    await page.getByRole("button", { name: "Stop" }).waitFor({ timeout: 20000 });
-    await page.getByRole("button", { name: "Stop" }).click();
-    await page.getByRole("button", { name: "Stop" }).waitFor({ state: "hidden", timeout: 10000 });
+    await page.getByRole("button", { name: "Enviar" }).click();
+    await page.getByRole("button", { name: "Parar" }).waitFor({ timeout: 20000 });
+    await page.getByRole("button", { name: "Parar" }).click();
+    await page.getByRole("button", { name: "Parar" }).waitFor({ state: "hidden", timeout: 10000 });
     await page.screenshot({ path: join(OUT, "ui-smoke-d.png") });
   });
 
   await step("e-reload-stop", async () => {
     await type("slow");
-    await page.getByRole("button", { name: "Send" }).click();
-    await page.getByRole("button", { name: "Stop" }).waitFor({ timeout: 20000 });
+    await page.getByRole("button", { name: "Enviar" }).click();
+    await page.getByRole("button", { name: "Parar" }).waitFor({ timeout: 20000 });
     await page.reload();
-    await page.getByRole("button", { name: /UI Smoke/ }).click(); // reselect after reload
-    await page.getByRole("button", { name: "Stop" }).waitFor({ timeout: 15000 });
-    await page.getByRole("button", { name: "Stop" }).click();
-    await page.getByRole("button", { name: "Stop" }).waitFor({ state: "hidden", timeout: 15000 });
+    await page
+      .getByRole("button", { name: /UI Smoke/ })
+      .first()
+      .click();
+    await page.getByRole("button", { name: "Parar" }).waitFor({ timeout: 15000 });
+    await page.getByRole("button", { name: "Parar" }).click();
+    await page.getByRole("button", { name: "Parar" }).waitFor({ state: "hidden", timeout: 15000 });
   });
 
   await step("g-queue", async () => {
     await type("slow");
-    await page.getByRole("button", { name: "Send" }).click();
-    await page.getByRole("button", { name: "Stop" }).waitFor({ timeout: 20000 });
+    await page.getByRole("button", { name: "Enviar" }).click();
+    await page.getByRole("button", { name: "Parar" }).waitFor({ timeout: 20000 });
     await type("echo:q1");
-    await page.getByRole("button", { name: "Send" }).click();
-    await page.getByText("Queued: echo:q1").waitFor({ timeout: 10000 });
+    await page.getByRole("button", { name: "Enviar" }).click();
+    await page.getByText("echo:q1", { exact: false }).waitFor({ timeout: 10000 });
     await type("echo:q2");
-    await page.getByRole("button", { name: "Send" }).click();
-    await page.getByText("Queued: echo:q2").waitFor({ timeout: 10000 });
+    await page.getByRole("button", { name: "Enviar" }).click();
+    await page.getByText("echo:q2", { exact: false }).waitFor({ timeout: 10000 });
     // remove q2, stop the turn -> queue pauses with q1 left
     await page
-      .locator("li", { hasText: "Queued: echo:q2" })
-      .getByRole("button", { name: "Remove queued message" })
+      .locator(".chip", { hasText: "echo:q2" })
+      .getByRole("button", { name: "Remover da fila" })
       .click();
     await page.screenshot({ path: join(OUT, "ui-smoke-queue.png") });
-    await page.getByRole("button", { name: "Stop" }).click();
-    await page.getByText("Queue paused").waitFor({ timeout: 10000 });
-    await page.getByRole("button", { name: "Resume" }).click();
+    await page.getByRole("button", { name: "Parar" }).click();
+    await page.getByText("Fila pausada").waitFor({ timeout: 10000 });
+    await page.getByRole("button", { name: "Retomar fila" }).click();
     // q1 drains and echoes "q1"
     await page.getByText("q1", { exact: true }).waitFor({ timeout: 20000 });
-    await page.getByRole("button", { name: "Stop" }).waitFor({ state: "hidden", timeout: 15000 });
+    await page.getByRole("button", { name: "Parar" }).waitFor({ state: "hidden", timeout: 15000 });
   });
 
   await step("h-config", async () => {
-    await page.getByTitle("Agent settings").click();
-    await page.getByText("Provider options").waitFor({ timeout: 30000 });
-    await page.getByLabel("Model").waitFor({ timeout: 30000 });
-    await page.getByLabel("Model").selectOption("m2");
+    await page.getByRole("button", { name: "Configurações do agente" }).click();
+    await page.getByText("Opções do provedor").waitFor({ timeout: 30000 });
+    await page.getByLabel("Modelo").waitFor({ timeout: 30000 });
+    await page.getByLabel("Modelo").selectOption("m2");
     await page.screenshot({ path: join(OUT, "ui-smoke-config.png") });
     // reopen settings: back to chat then gear again — selection persists
     await page
       .getByRole("button", { name: /UI Smoke/ })
       .first()
       .click();
-    await page.getByTitle("Agent settings").click();
-    await page.getByLabel("Model").waitFor({ timeout: 30000 });
-    const v = await page.getByLabel("Model").inputValue();
+    await page.getByRole("button", { name: "Configurações do agente" }).click();
+    await page.getByLabel("Modelo").waitFor({ timeout: 30000 });
+    const v = await page.getByLabel("Modelo").inputValue();
     if (v !== "m2") throw new Error(`model not persisted: ${v}`);
-  });
-
-  await step("i-permissions-notice", async () => {
-    await page
-      .getByRole("button", { name: /UI Smoke/ })
-      .first()
-      .click();
-    await page.getByTitle("Agent settings").click();
-    await page.getByText("Provider options").waitFor({ timeout: 30000 });
-    await page.getByText("~/.config/devin/config.json").waitFor({ timeout: 10000 });
-    await page.screenshot({ path: join(OUT, "ui-smoke-permissions.png") });
   });
 
   await step("f-delete", async () => {
@@ -209,18 +225,18 @@ async function main() {
       .getByRole("button", { name: /UI Smoke/ })
       .first()
       .click();
-    await page.getByTitle("Agent settings").click();
-    await page.getByRole("button", { name: "Delete" }).first().click();
-    await page.getByText('Delete "UI Smoke"?').waitFor({ timeout: 5000 });
-    await page.getByRole("button", { name: "Delete" }).last().click();
-    await page.getByText("No agents yet.").waitFor({ timeout: 10000 });
+    await page.getByRole("button", { name: "Configurações do agente" }).click();
+    await page.getByRole("button", { name: "Excluir" }).first().click();
+    await page.getByText('Excluir "UI Smoke"?').waitFor({ timeout: 5000 });
+    await page.getByRole("button", { name: "Excluir" }).last().click();
+    await page.getByText("Nenhum agente ainda.").waitFor({ timeout: 10000 });
     await page.screenshot({ path: join(OUT, "ui-smoke-f.png") });
   });
 
   await browser.close();
-  vite.kill("SIGKILL");
+  vite?.kill("SIGKILL");
   daemon.kill("SIGKILL");
-  await Promise.allSettled([vite.exited, daemon.exited]);
+  await Promise.allSettled([...(vite ? [vite.exited] : []), daemon.exited]);
 
   mkdirSync(OUT, { recursive: true });
   const outPath = join(OUT, "ui-smoke.json");

@@ -59,16 +59,11 @@ export function UsageBar({
         </span>
       )}
       <span>
-        {fmt(usage.inputTokens)} in · {fmt(usage.outputTokens)} out
+        {fmt(usage.inputTokens)} entrada · {fmt(usage.outputTokens)} saída
         {usage.costUsd > 0 ? ` · $${usage.costUsd.toFixed(2)}` : ""}
       </span>
-      <button
-        type="button"
-        className="rounded px-1.5 py-0.5 hover:bg-zinc-800 hover:text-zinc-300 disabled:opacity-40"
-        disabled={busy}
-        onClick={compact}
-      >
-        Compact
+      <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={compact}>
+        Compactar
       </button>
       {error && <span className="text-red-400">!</span>}
     </div>

@@ -18,16 +18,32 @@ export class DaemonClient {
   private connection: DaemonConnection | null = null;
   private everConnected = false;
   private reconnectCbs = new Set<() => void>();
+  private connecting: Promise<void> | null = null;
+  private closeTimer: ReturnType<typeof setTimeout> | null = null;
 
-  async connect(): Promise<void> {
-    // Dev-only browser path: vite dev server outside Tauri has no invoke bridge.
-    if (!("__TAURI_INTERNALS__" in window) && import.meta.env.DEV) {
-      const p = new URLSearchParams(location.hash.slice(1));
-      this.connection = { port: Number(p.get("port")), token: p.get("token") ?? "" };
-    } else {
-      this.connection = await invoke<DaemonConnection>("daemon_connection");
+  connect(): Promise<void> {
+    if (this.closeTimer) {
+      clearTimeout(this.closeTimer);
+      this.closeTimer = null;
     }
-    await this.openSocket();
+    this.closed = false;
+    if (this.ws?.readyState === WebSocket.OPEN) return Promise.resolve();
+    if (this.connecting) return this.connecting;
+    const opening = (async () => {
+      // Dev-only browser path: vite dev server outside Tauri has no invoke bridge.
+      if (!("__TAURI_INTERNALS__" in window) && import.meta.env.DEV) {
+        const p = new URLSearchParams(location.hash.slice(1));
+        this.connection = { port: Number(p.get("port")), token: p.get("token") ?? "" };
+      } else {
+        this.connection = await invoke<DaemonConnection>("daemon_connection");
+      }
+      await this.openSocket();
+    })();
+    const connection = opening.finally(() => {
+      this.connecting = null;
+    });
+    this.connecting = connection;
+    return connection;
   }
 
   onReconnect(cb: () => void): () => void {
@@ -110,6 +126,9 @@ export class DaemonClient {
 
   close() {
     this.closed = true;
-    this.ws?.close();
+    this.closeTimer = setTimeout(() => {
+      this.closeTimer = null;
+      if (this.closed) this.ws?.close();
+    }, 0);
   }
 }

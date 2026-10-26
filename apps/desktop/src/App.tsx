@@ -1,103 +1,165 @@
-import type {
-  Agent,
-  AgentAvatar,
-  AgentStatusInfo,
-  Channel,
-  PendingPermission,
-  ProviderId,
-} from "@upbot/protocol";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { AgentSettings, btnCls, inputCls, PROVIDERS } from "./components/AgentSettings";
+import type { Agent, AgentStatusInfo, ApprovalRule, Channel, ProviderId } from "@upbot/protocol";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AgentSettings, PROVIDERS } from "./components/AgentSettings";
 import { ChannelCreateForm, ChannelView } from "./components/ChannelView";
 import { ChatView } from "./components/ChatView";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
-import {
-  AvatarBadge,
-  AvatarEditor,
-  ComputerUsePanel,
-  MemoriesPanel,
-  RoutinesPanel,
-} from "./components/Library";
+import { Icon } from "./components/icons";
+import { ComputerUsePanel, MemoriesPanel, RoutinesPanel } from "./components/Library";
 import { PagesView } from "./components/PagesView";
-import { TABS, ToolsView, type ToolTab } from "./components/ToolsView";
+import { RunPanel } from "./components/RunPanel";
+import { TABS, ToolBody, type ToolTab } from "./components/ToolsView";
 import { UpdateButton } from "./components/UpdateButton";
+import { useOverview } from "./hooks/useOverview";
 import { DaemonClient } from "./lib/daemon";
+import { MonoAv, mono, Pill, role, type UiStatus } from "./lib/ui";
+
+type View =
+  | "chat"
+  | "agents"
+  | "tasks"
+  | "settings"
+  | "channel"
+  | "pages"
+  | "agent-settings"
+  | "channel-new";
+type RailView = Extract<View, "chat" | "agents" | "tasks" | "settings">;
+type Autonomy = "ask" | "sensitive" | "auto";
+type ThemePreference = "light" | "dark" | "auto";
+const RAIL_VIEWS: RailView[] = ["chat", "agents", "tasks", "settings"];
+const PROVIDER_NAMES: Record<ProviderId, string> = {
+  devin: "Devin",
+  cursor: "Cursor",
+  grok: "Grok",
+  opencode: "OpenCode",
+  gemini: "Gemini",
+  claude: "Claude",
+  codex: "Codex",
+  "openai-compatible": "Compatível com OpenAI",
+};
+const TASK_ORDER: Record<UiStatus, number> = {
+  err: 0,
+  wait: 1,
+  run: 2,
+  queue: 3,
+  ok: 4,
+  idle: 5,
+};
+
+function readStorage(key: string) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {}
+}
+
+function readView(): RailView {
+  const stored = readStorage("upbot.view");
+  return RAIL_VIEWS.includes(stored as RailView) ? (stored as RailView) : "chat";
+}
+
+function statusProvider(provider: ProviderId) {
+  return PROVIDER_NAMES[provider];
+}
+
+function isAskMode(agent: Agent) {
+  return (
+    (agent.provider === "claude" && agent.config.mode === "plan") ||
+    (agent.provider === "codex" && agent.config.mode === "read-only")
+  );
+}
+
+function useThemePref() {
+  const [pref, setPref] = useState<ThemePreference>(() => {
+    const current = document.documentElement.dataset.themePref;
+    return current === "light" || current === "dark" ? current : "auto";
+  });
+  const setTheme = useCallback((next: ThemePreference) => {
+    const root = document.documentElement;
+    root.dataset.themePref = next;
+    const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    root.dataset.theme = next === "auto" ? (dark ? "dark" : "light") : next;
+    writeStorage("upbot.theme", next);
+    setPref(next);
+  }, []);
+  return [pref, setTheme] as const;
+}
 
 export default function App() {
+  const [client] = useState(() => new DaemonClient());
   const [agents, setAgents] = useState<Agent[]>([]);
   const [statuses, setStatuses] = useState<Record<string, AgentStatusInfo>>({});
-  const [pendingCounts, setPendingCounts] = useState<Record<string, number>>({});
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(() => readStorage("upbot.agent"));
   const [channels, setChannels] = useState<Channel[]>([]);
   const [channelId, setChannelId] = useState<string | null>(null);
-  const [creatingChannel, setCreatingChannel] = useState(false);
-  const [tool, setTool] = useState<ToolTab | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [pagesOpen, setPagesOpen] = useState(false);
+  const [view, setView] = useState<View>(readView);
+  const [creating, setCreating] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<ToolTab | "general">("general");
+  const [search, setSearch] = useState("");
   const [palette, setPalette] = useState<{ group?: string } | null>(null);
   const [paletteItems, setPaletteItems] = useState<PaletteItem[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const clientRef = useRef<DaemonClient | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [clientReady, setClientReady] = useState(false);
+  const [noPanel, setNoPanel] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
 
-  const refreshAll = useCallback(async (client: DaemonClient) => {
-    const [list, st, perms, chans] = await Promise.all([
+  const refreshAll = useCallback(async () => {
+    const [list, nextStatuses, nextChannels] = await Promise.all([
       client.request("agents.list", {}),
       client.request("agents.statuses", {}),
-      client.request("permissions.list", {}),
       client.request("channels.list", { includeArchived: true }),
     ]);
-    setChannels(chans);
+    setChannels(nextChannels);
     setAgents(list);
-    setStatuses(st);
-    const counts: Record<string, number> = {};
-    for (const p of perms as PendingPermission[]) {
-      counts[p.agentId] = (counts[p.agentId] ?? 0) + 1;
-    }
-    setPendingCounts(counts);
-  }, []);
+    setStatuses(nextStatuses);
+  }, [client]);
 
   useEffect(() => {
-    const client = new DaemonClient();
-    clientRef.current = client;
     let alive = true;
-    client
+    void client
       .connect()
-      .then(() => refreshAll(client))
+      .then(refreshAll)
       .then(() => {
         if (alive) setClientReady(true);
       })
-      .catch((e) => {
-        if (alive) setError(String(e));
+      .catch((e: unknown) => {
+        if (alive) setError(e instanceof Error ? e.message : String(e));
       });
-
-    const bump = (agentId: string, delta: number) =>
-      setPendingCounts((prev) => ({
-        ...prev,
-        [agentId]: Math.max(0, (prev[agentId] ?? 0) + delta),
-      }));
-
     const offs = [
-      client.on("agent.created", (a) => setAgents((prev) => [...prev, a])),
-      client.on("agent.updated", (a) =>
-        setAgents((prev) => prev.map((p) => (p.id === a.id ? a : p))),
+      client.on("agent.created", (agent) =>
+        setAgents((prev) => (prev.some((item) => item.id === agent.id) ? prev : [...prev, agent])),
+      ),
+      client.on("agent.updated", (agent) =>
+        setAgents((prev) => prev.map((item) => (item.id === agent.id ? agent : item))),
       ),
       client.on("agent.deleted", ({ id }) => {
-        setAgents((prev) => prev.filter((p) => p.id !== id));
-        setSelectedId((sel) => (sel === id ? null : sel));
+        setAgents((prev) => prev.filter((agent) => agent.id !== id));
+        setSelectedId((selected) => (selected === id ? null : selected));
       }),
-      client.on("agent.status", ({ agentId, status, error }) =>
-        setStatuses((prev) => ({ ...prev, [agentId]: { status, error } })),
+      client.on("agent.status", ({ agentId, status, error: statusError }) =>
+        setStatuses((prev) => ({
+          ...prev,
+          [agentId]: { status, error: statusError },
+        })),
       ),
-      client.on("channel.created", (ch) => setChannels((prev) => [...prev, ch])),
-      client.on("channel.updated", (ch) =>
-        setChannels((prev) => prev.map((p) => (p.id === ch.id ? ch : p))),
+      client.on("channel.created", (channel) =>
+        setChannels((prev) =>
+          prev.some((item) => item.id === channel.id) ? prev : [...prev, channel],
+        ),
       ),
-      client.on("permission.requested", (p) => bump(p.agentId, +1)),
-      client.on("permission.resolved", (p) => bump(p.agentId, -1)),
+      client.on("channel.updated", (channel) =>
+        setChannels((prev) => prev.map((item) => (item.id === channel.id ? channel : item))),
+      ),
       client.onReconnect(() => {
-        refreshAll(client).catch(() => {});
+        void refreshAll().catch(() => {});
       }),
     ];
     return () => {
@@ -105,125 +167,140 @@ export default function App() {
       for (const off of offs) off();
       client.close();
     };
-  }, [refreshAll]);
+  }, [client, refreshAll]);
 
-  const selected = agents.find((a) => a.id === selectedId) ?? null;
-  const selectedChannel = channels.find((ch) => ch.id === channelId) ?? null;
-  const openAgent = (id: string | null) => {
-    setTool(null);
-    setPagesOpen(false);
-    setSelectedId(id);
-    setChannelId(null);
+  const overview = useOverview(client, agents, statuses, clientReady);
+  const selected = agents.find((agent) => agent.id === selectedId) ?? null;
+  const selectedOverview = selected ? overview[selected.id] : undefined;
+  const selectedChannel = channels.find((channel) => channel.id === channelId) ?? null;
+  const pendingCount = agents.filter((agent) => overview[agent.id]?.status === "wait").length;
+
+  const navigate = useCallback((next: View) => {
+    setView(next);
+    if (RAIL_VIEWS.includes(next as RailView)) writeStorage("upbot.view", next);
     setCreating(false);
-    setCreatingChannel(false);
-    setSettingsOpen(false);
-  };
+  }, []);
+
+  const openAgent = useCallback(
+    (id: string) => {
+      setSelectedId(id);
+      writeStorage("upbot.agent", id);
+      setChannelId(null);
+      navigate("chat");
+    },
+    [navigate],
+  );
+
+  useEffect(() => {
+    if (!clientReady || !agents.length) return;
+    if (!selectedId || !agents.some((agent) => agent.id === selectedId)) {
+      const first = agents[0];
+      if (first) {
+        setSelectedId(first.id);
+        writeStorage("upbot.agent", first.id);
+      }
+    }
+  }, [agents, clientReady, selectedId]);
+
   const shortcutsRef = useRef<(e: KeyboardEvent) => void>(() => {});
-  shortcutsRef.current = (e: KeyboardEvent) => {
+  shortcutsRef.current = (e) => {
     if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
-    const k = e.key.toLowerCase();
-    if (k === "k") setPalette({});
-    else if (k === "f" && e.shiftKey) setPalette({ group: "Bots" });
-    else if (k === "n" && !e.shiftKey) {
-      openAgent(null);
+    const key = e.key.toLowerCase();
+    if (key === "k") setPalette({});
+    else if (key === "f" && e.shiftKey) setPalette({ group: "Agentes" });
+    else if (key === "n" && !e.shiftKey) {
+      navigate("chat");
+      setSelectedId(null);
       setCreating(true);
-    } else if (k === ",") {
-      openAgent(null);
-      setTool("apps");
-    } else if (k === "p" && !e.shiftKey) {
-      openAgent(null);
-      setPagesOpen(true);
-    } else if (/^[1-9]$/.test(k) && !e.shiftKey) {
-      const a = agents[Number(k) - 1];
-      if (!a) return;
-      openAgent(a.id);
+    } else if (key === ",") {
+      setSettingsTab("general");
+      navigate("settings");
+    } else if (key === "p" && !e.shiftKey) navigate("pages");
+    else if (/^[1-9]$/.test(key) && !e.shiftKey) {
+      const agent = agents[Number(key) - 1];
+      if (agent) openAgent(agent.id);
+      else return;
     } else return;
     e.preventDefault();
   };
+
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => shortcutsRef.current(e);
+    const onKey = (event: KeyboardEvent) => shortcutsRef.current(event);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: openAgent is recreated every render
+
   useEffect(() => {
     if (!palette) return;
     const base: PaletteItem[] = [
-      ...agents.map((a) => ({
-        id: `bot:${a.id}`,
-        group: "Bots",
-        label: a.name,
-        hint: a.provider,
-        run: () => openAgent(a.id),
+      ...agents.map((agent) => ({
+        id: `agent:${agent.id}`,
+        group: "Agentes",
+        label: agent.name,
+        hint: statusProvider(agent.provider),
+        run: () => openAgent(agent.id),
       })),
-      ...channels.map((ch) => ({
-        id: `chat:${ch.id}`,
-        group: "Group chats",
-        label: `# ${ch.name}`,
-        hint: ch.status,
+      ...channels.map((channel) => ({
+        id: `group:${channel.id}`,
+        group: "Conversas em grupo",
+        label: `# ${channel.name}`,
+        hint: channel.status === "active" ? "ativo" : "arquivado",
         run: () => {
-          openAgent(null);
-          setChannelId(ch.id);
+          setChannelId(channel.id);
+          navigate("channel");
         },
       })),
-      ...TABS.map((t) => ({
-        id: `tab:${t.id}`,
-        group: "Settings",
-        label: t.label,
-        hint: t.hint,
+      ...TABS.map((tab) => ({
+        id: `settings:${tab.id}`,
+        group: "Configurações",
+        label: tab.label,
+        hint: tab.hint,
         run: () => {
-          openAgent(null);
-          setTool(t.id);
+          setSettingsTab(tab.id);
+          navigate("settings");
         },
       })),
       {
-        id: "new-bot",
-        group: "Actions",
-        label: "New bot",
+        id: "new-agent",
+        group: "Ações",
+        label: "Criar agente",
         run: () => {
-          openAgent(null);
+          navigate("chat");
           setCreating(true);
         },
       },
       {
-        id: "new-chat",
-        group: "Actions",
-        label: "New group chat",
-        run: () => {
-          openAgent(null);
-          setCreatingChannel(true);
-        },
+        id: "new-group",
+        group: "Ações",
+        label: "Nova conversa em grupo",
+        run: () => navigate("channel-new"),
       },
     ];
     setPaletteItems(base);
-    clientRef.current
-      ?.request("pages.list", {})
+    void client
+      .request("pages.list", {})
       .then((pages) =>
         setPaletteItems([
           ...base,
-          ...pages.map((p) => ({
-            id: `page:${p.id}`,
-            group: "Pages",
-            label: p.title,
-            hint: p.description,
-            run: () => {
-              openAgent(null);
-              setPagesOpen(true);
-            },
+          ...pages.map((page) => ({
+            id: `page:${page.id}`,
+            group: "Páginas",
+            label: page.title,
+            hint: page.description,
+            run: () => navigate("pages"),
           })),
         ]),
       )
       .catch(() => {});
-  }, [palette, agents, channels]);
+  }, [agents, channels, client, navigate, openAgent, palette]);
+
   const createChannel = useCallback(
     async (form: { name: string; memberIds: string[]; ownerId: string | null }) => {
-      const client = clientRef.current;
-      if (!client) return;
-      const ch = await client.request("channels.create", form);
-      setCreatingChannel(false);
-      setChannelId(ch.id);
+      const channel = await client.request("channels.create", form);
+      setChannelId(channel.id);
+      navigate("channel");
     },
-    [],
+    [client, navigate],
   );
 
   const createAgent = useCallback(
@@ -231,165 +308,404 @@ export default function App() {
       name: string;
       provider: ProviderId;
       instructions: string;
-      avatar: AgentAvatar | null;
+      autonomy: Autonomy;
     }) => {
-      const client = clientRef.current;
-      if (!client) return;
       const agent = await client.request("agents.create", {
         name: form.name,
         provider: form.provider,
         instructions: form.instructions,
-        avatar: form.avatar,
       });
-      setCreating(false);
+      setAgents((prev) => (prev.some((item) => item.id === agent.id) ? prev : [...prev, agent]));
       setSelectedId(agent.id);
-      setSettingsOpen(false);
+      writeStorage("upbot.agent", agent.id);
+      navigate("chat");
+      if (form.autonomy !== "sensitive") {
+        try {
+          const rules = await client.request("approvals.rules", {});
+          const rule: ApprovalRule = {
+            id: crypto.randomUUID(),
+            pattern: "*",
+            action: form.autonomy === "ask" ? "ask" : "allow",
+            agentId: agent.id,
+          };
+          await client.request("approvals.setRules", { rules: [...rules, rule] });
+        } catch (e) {
+          setNotice(
+            `Agente criado, mas não foi possível salvar a regra de autonomia: ${
+              e instanceof Error ? e.message : String(e)
+            }`,
+          );
+        }
+      }
     },
-    [],
+    [client, navigate],
   );
 
   const updateAgent = useCallback(
-    async (
-      id: string,
-      patch: {
-        name?: string;
-        instructions?: string;
-        provider?: ProviderId;
-        avatar?: AgentAvatar | null;
-      },
-    ) => {
-      const client = clientRef.current;
-      if (!client) return;
+    async (id: string, patch: { name?: string; instructions?: string; provider?: ProviderId }) => {
       await client.request("agents.update", { id, ...patch });
     },
-    [],
+    [client],
   );
 
-  const deleteAgent = useCallback(async (id: string) => {
-    const client = clientRef.current;
-    if (!client) return;
-    await client.request("agents.delete", { id });
-  }, []);
+  const deleteAgent = useCallback(
+    async (id: string) => {
+      await client.request("agents.delete", { id });
+      setSelectedId(null);
+      navigate("agents");
+    },
+    [client, navigate],
+  );
 
-  if (error) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <p className="text-sm text-red-400">Failed to connect to daemon: {error}</p>
-      </div>
-    );
-  }
+  const togglePanel = () => {
+    if (window.matchMedia("(max-width: 1180px)").matches) setPanelOpen((open) => !open);
+    else setNoPanel((hidden) => !hidden);
+  };
+
+  const appView =
+    view === "channel" || view === "pages" || view === "agent-settings" || view === "channel-new"
+      ? "settings"
+      : view;
+  const appClass = [
+    "app",
+    `view-${appView}`,
+    noPanel && view === "chat" ? "no-panel" : "",
+    panelOpen && view === "chat" ? "panel-open" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const normalizedSearch = search.trim().toLocaleLowerCase("pt-BR");
+  const filteredAgents = agents.filter((agent) => {
+    if (!normalizedSearch) return true;
+    const detail = overview[agent.id];
+    return [agent.name, role(agent), detail?.task ?? ""]
+      .join(" ")
+      .toLocaleLowerCase("pt-BR")
+      .includes(normalizedSearch);
+  });
+  const filteredTasks = agents.filter(
+    (agent) =>
+      overview[agent.id]?.task &&
+      (!normalizedSearch ||
+        `${agent.name} ${overview[agent.id]?.task}`
+          .toLocaleLowerCase("pt-BR")
+          .includes(normalizedSearch)),
+  );
 
   return (
-    <div className="flex h-screen">
-      <aside className="flex w-64 flex-col border-r border-zinc-800">
-        <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
-          <h1 className="text-sm font-semibold">UpBot</h1>
-          <button
-            type="button"
-            className={`${btnCls} bg-zinc-800 hover:bg-zinc-700`}
-            onClick={() => {
-              openAgent(null);
-              setCreating(true);
-            }}
+    <div className={appClass}>
+      <nav className="rail" aria-label="Navegação principal">
+        <div className="logo" role="img" aria-label="UpBot">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
           >
-            New bot
-          </button>
+            <path d="M12 19V6M6.5 11.5 12 6l5.5 5.5" />
+          </svg>
         </div>
-        <ul className="flex-1 overflow-y-auto">
-          {agents.map((a) => {
-            const st = statuses[a.id]?.status ?? "idle";
-            const pending = pendingCounts[a.id] ?? 0;
-            return (
-              <li key={a.id}>
-                <button
-                  type="button"
-                  onClick={() => openAgent(a.id)}
-                  className={`w-full px-4 py-2 text-left text-sm hover:bg-zinc-900 ${
-                    a.id === selectedId ? "bg-zinc-900" : ""
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <AvatarBadge agent={a} />
-                    <span className="truncate font-medium">{a.name}</span>
-                    <StatusDot status={st} />
-                    {pending > 0 && (
-                      <span className="ml-auto rounded-full bg-amber-600 px-1.5 text-[10px] font-bold text-white">
-                        {pending}
-                      </span>
-                    )}
-                  </div>
-                  <div className="pl-7 text-xs text-zinc-500">{a.provider}</div>
-                </button>
-              </li>
-            );
-          })}
-          {agents.length === 0 && <li className="px-4 py-6 text-sm text-zinc-500">No bots yet.</li>}
-          <li className="mt-2 flex items-center justify-between border-t border-zinc-800 px-4 pt-3 pb-1">
-            <span className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">
-              Group chats
-            </span>
-            <button
-              type="button"
-              className="text-xs text-sky-400 hover:text-sky-300"
-              onClick={() => {
-                openAgent(null);
-                setCreatingChannel(true);
-              }}
-            >
-              + New
-            </button>
-          </li>
-          <li className="mt-2 flex gap-4 border-t border-zinc-800 px-4 pt-3">
-            <button
-              type="button"
-              className={`text-xs font-semibold tracking-wide uppercase ${pagesOpen ? "text-sky-400" : "text-zinc-400"} hover:text-zinc-200`}
-              onClick={() => {
-                openAgent(null);
-                setPagesOpen(true);
-              }}
-            >
-              Pages
-            </button>
-            <button
-              type="button"
-              className={`text-xs font-semibold tracking-wide uppercase ${tool ? "text-sky-400" : "text-zinc-400"} hover:text-zinc-200`}
-              onClick={() => {
-                openAgent(null);
-                setTool("skills");
-              }}
-            >
-              Settings &amp; tools
-            </button>
-          </li>
-          {channels.map((ch) => (
-            <li key={ch.id}>
-              <button
-                type="button"
-                onClick={() => {
-                  openAgent(null);
-                  setChannelId(ch.id);
-                }}
-                className={`w-full px-4 py-1.5 text-left text-sm hover:bg-zinc-900 ${
-                  ch.id === channelId ? "bg-zinc-900" : ""
-                } ${ch.status === "archived" ? "text-zinc-600" : ""}`}
-              >
-                # {ch.name}
-                {ch.status !== "active" && (
-                  <span className="ml-2 text-xs text-zinc-500">{ch.status}</span>
-                )}
-              </button>
-            </li>
-          ))}
-        </ul>
+        {(
+          [
+            ["chat", "Conversas"],
+            ["agents", "Agentes"],
+            ["tasks", "Tarefas"],
+          ] as const
+        ).map(([railView, label]) => (
+          <button
+            key={railView}
+            type="button"
+            className="rail-btn"
+            data-view={railView}
+            aria-label={label}
+            aria-current={view === railView ? "page" : undefined}
+            onClick={() => navigate(railView)}
+          >
+            <Icon name={railView} />
+            {railView === "chat" && pendingCount > 0 && (
+              <span className="badge">{pendingCount}</span>
+            )}
+          </button>
+        ))}
+        <div className="rail-spacer" />
         <button
           type="button"
-          className="mx-4 mb-2 rounded border border-zinc-800 px-2 py-1 text-left text-xs text-zinc-500 hover:bg-zinc-900"
-          onClick={() => setPalette({})}
+          className="rail-btn"
+          data-view="settings"
+          aria-label="Configurações"
+          aria-current={view === "settings" ? "page" : undefined}
+          onClick={() => {
+            setSettingsTab("general");
+            navigate("settings");
+          }}
         >
-          Search… <span className="float-right">⌘K</span>
+          <Icon name="settings" />
         </button>
-        <UpdateButton />
+        <div className="avatar" title="Sua conta">
+          EU
+        </div>
+      </nav>
+
+      <aside className="side" aria-label="Agentes e tarefas">
+        <div className="side-head">
+          <div className="row">
+            <span className="brand">UpBot</span>
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Criar agente"
+              onClick={() => {
+                setSelectedId(null);
+                setCreating(true);
+              }}
+            >
+              <Icon name="plus" />
+            </button>
+          </div>
+          <label className="search">
+            <span className="sr">Buscar agentes e tarefas</span>
+            <Icon name="search" />
+            <input
+              type="search"
+              placeholder="Buscar agentes e tarefas"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </label>
+        </div>
+        <div className="side-scroll">
+          <p className="eyebrow side-label">Seus agentes</p>
+          <div id="agentList">
+            {filteredAgents.map((agent) => {
+              const item = overview[agent.id];
+              const summary =
+                item?.status === "err"
+                  ? `Falhou: ${statuses[agent.id]?.error ?? "erro na última tarefa"}`
+                  : (item?.task ?? "Pronto para uma tarefa");
+              return (
+                <button
+                  key={agent.id}
+                  type="button"
+                  className={`agent-item is-${item?.status ?? "idle"}`}
+                  aria-current={selectedId === agent.id && view === "chat" ? "true" : undefined}
+                  onClick={() => openAgent(agent.id)}
+                >
+                  <MonoAv agent={agent} status={item?.status ?? "idle"} />
+                  <div>
+                    <div className="name">{agent.name}</div>
+                    <div className="sub">{summary}</div>
+                  </div>
+                  <span className="meta">{item?.updated ?? "—"}</span>
+                </button>
+              );
+            })}
+            {filteredAgents.length === 0 && (
+              <p className="meta" style={{ padding: 8 }}>
+                {agents.length === 0 ? "Nenhum agente ainda." : "Nada encontrado."}
+              </p>
+            )}
+          </div>
+          <p className="eyebrow side-label">Tarefas recentes</p>
+          <div id="recentTasks">
+            {filteredTasks.map((agent) => (
+              <button
+                key={agent.id}
+                type="button"
+                className="task-item"
+                onClick={() => openAgent(agent.id)}
+              >
+                <i className={`dot s-${overview[agent.id]?.status ?? "idle"}`} />
+                <span>{overview[agent.id]?.task}</span>
+                <span className="meta">{mono(agent.name)}</span>
+              </button>
+            ))}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <p className="eyebrow side-label">Conversas em grupo</p>
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Criar conversa em grupo"
+              onClick={() => navigate("channel-new")}
+            >
+              <Icon name="plus" />
+            </button>
+          </div>
+          <div>
+            {channels.map((channel) => (
+              <button
+                key={channel.id}
+                type="button"
+                className="task-item"
+                aria-current={channelId === channel.id && view === "channel" ? "true" : undefined}
+                onClick={() => {
+                  setChannelId(channel.id);
+                  navigate("channel");
+                }}
+              >
+                <i className={`dot ${channel.status === "active" ? "s-run" : "s-idle"}`} />
+                <span># {channel.name}</span>
+                <span className="meta">
+                  {channel.status === "active"
+                    ? "ativo"
+                    : channel.status === "archived"
+                      ? "arquivado"
+                      : "parado"}
+                </span>
+              </button>
+            ))}
+          </div>
+          <p className="eyebrow side-label">Biblioteca</p>
+          <button type="button" className="task-item" onClick={() => navigate("pages")}>
+            <Icon name="page" />
+            <span>Páginas</span>
+          </button>
+        </div>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            borderTop: "1px solid var(--border)",
+            padding: "4px 8px 12px",
+          }}
+        >
+          <button type="button" className="task-item" onClick={() => setPalette({})}>
+            <Icon name="search" />
+            <span>Buscar…</span>
+            <span className="meta">⌘K</span>
+          </button>
+          <UpdateButton />
+        </div>
       </aside>
+
+      <main className="main">
+        {error ? (
+          <section className="view on">
+            <div className="empty">
+              <h2>Não foi possível conectar ao UpBot</h2>
+              <p className="meta">{error}</p>
+            </div>
+          </section>
+        ) : !clientReady ? (
+          <section className="view on">
+            <div className="empty">
+              <h2>Conectando ao UpBot…</h2>
+            </div>
+          </section>
+        ) : view === "chat" ? (
+          selected ? (
+            <ChatView
+              client={client}
+              agent={selected}
+              overview={selectedOverview}
+              onOpenSettings={() => navigate("agent-settings")}
+              onOpenApps={() => {
+                setSettingsTab("apps");
+                navigate("settings");
+              }}
+              notice={notice}
+              onNoticeDismiss={() => setNotice(null)}
+              onPanelToggle={togglePanel}
+            />
+          ) : (
+            <section className="view on">
+              <div className="empty">
+                <h2>Escolha um agente ou crie um novo.</h2>
+                <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
+                  Criar agente
+                </button>
+              </div>
+            </section>
+          )
+        ) : view === "agents" ? (
+          <AgentsView
+            agents={agents}
+            overview={overview}
+            onCreate={() => setCreating(true)}
+            onOpen={openAgent}
+          />
+        ) : view === "tasks" ? (
+          <TasksView agents={agents} overview={overview} onOpen={openAgent} />
+        ) : view === "settings" ? (
+          <SettingsView
+            client={client}
+            agents={agents}
+            selected={settingsTab}
+            onSelect={setSettingsTab}
+          />
+        ) : view === "channel-new" ? (
+          <section className="view on">
+            <ChannelCreateForm
+              agents={agents}
+              onSubmit={createChannel}
+              onCancel={() => navigate("chat")}
+            />
+          </section>
+        ) : view === "channel" && selectedChannel ? (
+          <section className="view on">
+            <ChannelView client={client} channel={selectedChannel} agents={agents} />
+          </section>
+        ) : view === "pages" ? (
+          <section className="view on">
+            <PagesView client={client} agents={agents} onOpenBot={openAgent} />
+          </section>
+        ) : view === "agent-settings" && selected ? (
+          <section className="view on">
+            <div className="page agent-settings-page">
+              <div className="page-inner">
+                <div className="page-top">
+                  <div>
+                    <h1>{selected.name}</h1>
+                    <p>Configurações do agente</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => navigate("chat")}
+                  >
+                    Voltar à conversa
+                  </button>
+                </div>
+                <AgentSettings
+                  key={selected.id}
+                  client={client}
+                  agent={selected}
+                  onUpdate={updateAgent}
+                  onDelete={deleteAgent}
+                />
+                <MemoriesPanel client={client} agentId={selected.id} />
+                <RoutinesPanel client={client} agentId={selected.id} />
+                <ComputerUsePanel client={client} agentId={selected.id} />
+              </div>
+            </div>
+          </section>
+        ) : (
+          <section className="view on">
+            <div className="empty">
+              <h2>Escolha um agente ou crie um novo.</h2>
+            </div>
+          </section>
+        )}
+      </main>
+
+      {view === "chat" && selected && selectedOverview && (
+        <RunPanel
+          client={client}
+          agent={selected}
+          overview={selectedOverview}
+          onClose={togglePanel}
+          onOpenApps={() => {
+            setSettingsTab("apps");
+            navigate("settings");
+          }}
+        />
+      )}
+
+      {creating && <CreateAgentDialog onSubmit={createAgent} onCancel={() => setCreating(false)} />}
       {palette && (
         <CommandPalette
           items={paletteItems}
@@ -397,170 +713,579 @@ export default function App() {
           onClose={() => setPalette(null)}
         />
       )}
-      <main className="flex-1 overflow-hidden">
-        {pagesOpen && clientReady ? (
-          <PagesView
-            client={clientRef.current!}
-            agents={agents}
-            onOpenBot={(id) => openAgent(id)}
-          />
-        ) : tool && clientReady ? (
-          <ToolsView client={clientRef.current!} agents={agents} tab={tool} onTab={setTool} />
-        ) : creatingChannel ? (
-          <ChannelCreateForm
-            agents={agents}
-            onSubmit={createChannel}
-            onCancel={() => setCreatingChannel(false)}
-          />
-        ) : selectedChannel && clientReady ? (
-          <ChannelView client={clientRef.current!} channel={selectedChannel} agents={agents} />
-        ) : creating ? (
-          <CreateForm
-            onSubmit={createAgent}
-            onCancel={() => setCreating(false)}
-            draft={(prompt) => clientRef.current!.request("agents.draft", { prompt })}
-          />
-        ) : selected && settingsOpen ? (
-          <div className="h-full overflow-y-auto">
-            <AgentSettings
-              client={clientRef.current!}
-              agent={selected}
-              onUpdate={updateAgent}
-              onDelete={deleteAgent}
-            />
-            <AvatarEditor
-              key={selected.id}
-              agent={selected}
-              onSave={(avatar) => updateAgent(selected.id, { avatar })}
-            />
-            <MemoriesPanel client={clientRef.current!} agentId={selected.id} />
-            <RoutinesPanel client={clientRef.current!} agentId={selected.id} />
-            <ComputerUsePanel client={clientRef.current!} agentId={selected.id} />
-          </div>
-        ) : selected && clientReady ? (
-          <ChatView
-            client={clientRef.current!}
-            agent={selected}
-            onOpenSettings={() => setSettingsOpen(true)}
-          />
-        ) : (
-          <p className="p-6 text-sm text-zinc-500">Select a bot or create a new one.</p>
-        )}
-      </main>
     </div>
   );
 }
 
-function StatusDot({ status }: { status: AgentStatusInfo["status"] }) {
-  const cls =
-    status === "running" || status === "starting"
-      ? "bg-emerald-400 animate-pulse"
-      : status === "awaiting_permission"
-        ? "bg-amber-400"
-        : status === "error"
-          ? "bg-red-500"
-          : "bg-zinc-600";
-  return <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${cls}`} />;
+function AgentsView({
+  agents,
+  overview,
+  onCreate,
+  onOpen,
+}: {
+  agents: Agent[];
+  overview: ReturnType<typeof useOverview>;
+  onCreate: () => void;
+  onOpen: (id: string) => void;
+}) {
+  const providers = useMemo(() => [...new Set(agents.map((agent) => agent.provider))], [agents]);
+  const [filter, setFilter] = useState<ProviderId | "all">("all");
+  const shown = filter === "all" ? agents : agents.filter((agent) => agent.provider === filter);
+  return (
+    <section className="view on">
+      <div className="page">
+        <div className="page-inner">
+          <div className="page-top">
+            <div>
+              <h1>Agentes</h1>
+              <p>
+                Cada agente tem uma função, as ferramentas que pode usar e o quanto pode agir sem
+                perguntar.
+              </p>
+            </div>
+            <button type="button" className="btn btn-primary" onClick={onCreate}>
+              Criar agente
+            </button>
+          </div>
+          <fieldset className="filters">
+            <legend className="sr">Filtrar agentes</legend>
+            <button
+              type="button"
+              className="chip"
+              aria-pressed={filter === "all"}
+              onClick={() => setFilter("all")}
+            >
+              Todos
+            </button>
+            {providers.map((provider) => (
+              <button
+                key={provider}
+                type="button"
+                className="chip"
+                aria-pressed={filter === provider}
+                onClick={() => setFilter(provider)}
+              >
+                {statusProvider(provider)}
+              </button>
+            ))}
+          </fieldset>
+          <div className="grid" id="agentGrid">
+            {shown.map((agent) => {
+              const info = overview[agent.id];
+              const appTags = info?.apps.flatMap((app) => app.tools.map((tool) => tool.name)) ?? [];
+              const tools = [
+                statusProvider(agent.provider),
+                ...appTags,
+                ...(info?.emailAccounts.length ? ["E-mail"] : []),
+              ];
+              return (
+                <article className="a-card" key={agent.id}>
+                  <div className="top">
+                    <MonoAv agent={agent} status={info?.status ?? "idle"} lg />
+                    <Pill st={info?.status ?? "idle"} />
+                  </div>
+                  <div>
+                    <h3>{agent.name}</h3>
+                    <p style={{ marginTop: 4 }}>{role(agent)}</p>
+                  </div>
+                  <div className="tags">
+                    {tools.map((tool) => (
+                      <span className="tag" key={tool}>
+                        {tool}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="foot">
+                    <span className="meta">
+                      {isAskMode(agent) ? "Só sugere" : "Age e pede aprovação"}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => onOpen(agent.id)}
+                    >
+                      Abrir conversa
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+            <button type="button" className="a-card new" onClick={onCreate}>
+              <Icon name="plus" />
+              <h3>Novo agente</h3>
+              <span style={{ fontSize: 13 }}>Defina função, ferramentas e autonomia</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
 }
 
-function CreateForm({
+function TasksView({
+  agents,
+  overview,
+  onOpen,
+}: {
+  agents: Agent[];
+  overview: ReturnType<typeof useOverview>;
+  onOpen: (id: string) => void;
+}) {
+  const tasks = agents
+    .filter((agent) => overview[agent.id]?.task)
+    .sort(
+      (a, b) =>
+        TASK_ORDER[overview[a.id]?.status ?? "idle"] - TASK_ORDER[overview[b.id]?.status ?? "idle"],
+    );
+  return (
+    <section className="view on">
+      <div className="page">
+        <div className="page-inner">
+          <div className="page-top">
+            <div>
+              <h1>Tarefas</h1>
+              <p>
+                Tudo o que seus agentes estão fazendo, em um só lugar. O que espera por você vem
+                primeiro.
+              </p>
+            </div>
+          </div>
+          <table className="ds-table" data-od-id="task-table">
+            <thead>
+              <tr>
+                <th>Tarefa</th>
+                <th>Agente</th>
+                <th>Status</th>
+                <th className="hide-sm">Atualizado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tasks.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="meta">
+                    Nenhuma tarefa ainda.
+                  </td>
+                </tr>
+              ) : (
+                tasks.map((agent) => {
+                  const info = overview[agent.id];
+                  return (
+                    <tr
+                      key={agent.id}
+                      tabIndex={0}
+                      onClick={() => onOpen(agent.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") onOpen(agent.id);
+                      }}
+                    >
+                      <td>{info?.task}</td>
+                      <td className="agent">
+                        <MonoAv agent={agent} dot={false} />
+                        {agent.name}
+                      </td>
+                      <td>
+                        <Pill st={info?.status ?? "idle"} />
+                      </td>
+                      <td className="meta hide-sm">{info?.updated ?? "—"}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SettingsView({
+  client,
+  agents,
+  selected,
+  onSelect,
+}: {
+  client: DaemonClient;
+  agents: Agent[];
+  selected: ToolTab | "general";
+  onSelect: (tab: ToolTab | "general") => void;
+}) {
+  const [theme, setTheme] = useThemePref();
+  const [systemDark, setSystemDark] = useState(
+    () => window.matchMedia("(prefers-color-scheme: dark)").matches,
+  );
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const update = () => setSystemDark(media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  const dark = theme === "auto" ? systemDark : theme === "dark";
+  return (
+    <section className="view on">
+      <div className="page">
+        <div className="page-inner settings">
+          <div className="page-top">
+            <div>
+              <h1>Configurações</h1>
+              <p>Preferências desta conta, aplicadas em todos os seus agentes.</p>
+            </div>
+          </div>
+          <div className="filters" role="tablist" aria-label="Configurações">
+            <button
+              type="button"
+              className="chip"
+              role="tab"
+              aria-selected={selected === "general"}
+              onClick={() => onSelect("general")}
+            >
+              Geral
+            </button>
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className="chip"
+                role="tab"
+                aria-selected={selected === tab.id}
+                title={tab.hint}
+                onClick={() => onSelect(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          {selected === "general" ? (
+            <>
+              <div className="set-group" data-od-id="settings-appearance">
+                <div>
+                  <h2 style={{ fontSize: "var(--fs-h3)" }}>Tema</h2>
+                  <p>Escolha um tema fixo ou deixe o UpBot seguir o seu sistema.</p>
+                </div>
+                <div>
+                  <fieldset className="theme-opts">
+                    <legend className="sr">Tema da interface</legend>
+                    <ThemeOption value="light" current={theme} onChange={setTheme}>
+                      <span className="tp light">
+                        <span className="tp-rail" />
+                        <span className="tp-main">
+                          <i style={{ width: "62%" }} />
+                          <i style={{ width: "88%" }} />
+                          <i style={{ width: "46%" }} />
+                          <span className="tp-dots">
+                            <b className="r" />
+                            <b className="w" />
+                            <b className="o" />
+                          </span>
+                        </span>
+                      </span>
+                      <span className="lbl">
+                        <span>
+                          Claro<small>Fundo branco</small>
+                        </span>
+                        <span className="tick">
+                          <Icon name="ok" />
+                        </span>
+                      </span>
+                    </ThemeOption>
+                    <ThemeOption value="dark" current={theme} onChange={setTheme}>
+                      <span className="tp dark">
+                        <span className="tp-rail" />
+                        <span className="tp-main">
+                          <i style={{ width: "62%" }} />
+                          <i style={{ width: "88%" }} />
+                          <i style={{ width: "46%" }} />
+                          <span className="tp-dots">
+                            <b className="r" />
+                            <b className="w" />
+                            <b className="o" />
+                          </span>
+                        </span>
+                      </span>
+                      <span className="lbl">
+                        <span>
+                          Escuro<small>Fundo grafite</small>
+                        </span>
+                        <span className="tick">
+                          <Icon name="ok" />
+                        </span>
+                      </span>
+                    </ThemeOption>
+                    <ThemeOption value="auto" current={theme} onChange={setTheme}>
+                      <span className="tp auto">
+                        <span className="tp light">
+                          <span className="tp-rail" />
+                          <span className="tp-main">
+                            <i style={{ width: "80%" }} />
+                            <i style={{ width: "100%" }} />
+                            <i style={{ width: "60%" }} />
+                            <span className="tp-dots">
+                              <b className="r" />
+                              <b className="w" />
+                            </span>
+                          </span>
+                        </span>
+                        <span className="tp dark">
+                          <span className="tp-main">
+                            <i style={{ width: "70%" }} />
+                            <i style={{ width: "100%" }} />
+                            <i style={{ width: "50%" }} />
+                            <span className="tp-dots">
+                              <b className="w" />
+                              <b className="o" />
+                            </span>
+                          </span>
+                        </span>
+                      </span>
+                      <span className="lbl">
+                        <span>
+                          Automático<small>Segue o sistema</small>
+                        </span>
+                        <span className="tick">
+                          <Icon name="ok" />
+                        </span>
+                      </span>
+                    </ThemeOption>
+                  </fieldset>
+                  <p className="theme-note" aria-live="polite">
+                    {theme === "auto" ? (
+                      <>
+                        Seu sistema está no tema <b>{dark ? "escuro" : "claro"}</b>. O UpBot troca
+                        junto quando ele mudar.
+                      </>
+                    ) : (
+                      <>
+                        Tema <b>{theme === "dark" ? "escuro" : "claro"}</b> fixo, independente do
+                        sistema.
+                      </>
+                    )}
+                  </p>
+                </div>
+              </div>
+              <div className="set-group" data-od-id="settings-status-preview">
+                <div>
+                  <h2 style={{ fontSize: "var(--fs-h3)" }}>Cores de status</h2>
+                  <p>
+                    Os mesmos quatro estados nos dois temas. No escuro, o tom fica mais claro e
+                    saturado.
+                  </p>
+                </div>
+                <div className="st-demo">
+                  {(["run", "wait", "ok", "err"] as const).map((st) => (
+                    <Pill key={st} st={st} />
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : (
+            <ToolBody client={client} agents={agents} tab={selected} />
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ThemeOption({
+  value,
+  current,
+  onChange,
+  children,
+}: {
+  value: ThemePreference;
+  current: ThemePreference;
+  onChange: (value: ThemePreference) => void;
+  children: ReactNode;
+}) {
+  return (
+    <label className="theme-opt">
+      <input
+        type="radio"
+        name="theme"
+        value={value}
+        checked={current === value}
+        onChange={() => onChange(value)}
+      />
+      {children}
+    </label>
+  );
+}
+
+function CreateAgentDialog({
   onSubmit,
   onCancel,
-  draft,
 }: {
-  onSubmit: (f: {
+  onSubmit: (form: {
     name: string;
     provider: ProviderId;
     instructions: string;
-    avatar: AgentAvatar | null;
+    autonomy: Autonomy;
   }) => Promise<void>;
   onCancel: () => void;
-  draft: (prompt: string) => Promise<{ name: string; instructions: string; avatar: AgentAvatar }>;
 }) {
-  const [describe, setDescribe] = useState("");
-  const [avatar, setAvatar] = useState<AgentAvatar | null>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const [name, setName] = useState("");
-  const [provider, setProvider] = useState<ProviderId>("devin");
+  const [provider, setProvider] = useState<ProviderId>("claude");
   const [instructions, setInstructions] = useState("");
+  const [autonomy, setAutonomy] = useState<Autonomy>("ask");
+  const [nameError, setNameError] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (dialog && !dialog.open) dialog.showModal();
+  }, []);
+
   return (
-    <form
-      className="mx-auto max-w-lg space-y-4 p-6"
-      onSubmit={async (e) => {
-        e.preventDefault();
-        setBusy(true);
-        try {
-          await onSubmit({ name, provider, instructions, avatar });
-        } finally {
-          setBusy(false);
-        }
-      }}
+    <dialog
+      ref={dialogRef}
+      aria-labelledby="dlgTitle"
+      data-od-id="new-agent-dialog"
+      onClose={onCancel}
     >
-      <h2 className="text-lg font-semibold">New bot</h2>
-      <div className="flex gap-2">
-        <input
-          className={inputCls}
-          placeholder="Describe the bot you want, e.g. researches competitors and drafts a weekly email…"
-          value={describe}
-          onChange={(e) => setDescribe(e.target.value)}
-        />
-        <button
-          type="button"
-          className={`${btnCls} bg-zinc-700 hover:bg-zinc-600`}
-          disabled={!describe.trim()}
-          onClick={async () => {
-            const d = await draft(describe);
-            setName(d.name);
-            setInstructions(d.instructions);
-            setAvatar(d.avatar);
-          }}
-        >
-          Draft
-        </button>
-      </div>
-      {avatar && (
-        <div className="flex items-center gap-2 text-sm text-zinc-400">
-          <AvatarBadge agent={{ name, avatar }} size={28} /> avatar
-        </div>
-      )}
-      <input
-        className={inputCls}
-        placeholder="Name"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        required
-        maxLength={80}
-      />
-      <select
-        className={inputCls}
-        value={provider}
-        onChange={(e) => setProvider(e.target.value as ProviderId)}
+      <form
+        noValidate
+        onSubmit={async (event) => {
+          event.preventDefault();
+          const trimmedName = name.trim();
+          if (!trimmedName) {
+            setNameError(true);
+            return;
+          }
+          setNameError(false);
+          setSubmitError(null);
+          setBusy(true);
+          try {
+            await onSubmit({
+              name: trimmedName,
+              provider,
+              instructions: instructions.trim(),
+              autonomy,
+            });
+          } catch (e) {
+            setSubmitError(e instanceof Error ? e.message : String(e));
+            setBusy(false);
+          }
+        }}
       >
-        {PROVIDERS.map((p) => (
-          <option key={p} value={p}>
-            {p}
-          </option>
-        ))}
-      </select>
-      <textarea
-        className={`${inputCls} min-h-32`}
-        placeholder="Instructions"
-        value={instructions}
-        onChange={(e) => setInstructions(e.target.value)}
-      />
-      <div className="flex gap-2">
-        <button type="submit" disabled={busy} className={`${btnCls} bg-sky-600 hover:bg-sky-500`}>
-          Create
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className={`${btnCls} bg-zinc-800 hover:bg-zinc-700`}
-        >
-          Cancel
-        </button>
-      </div>
-    </form>
+        <div className="dlg-head">
+          <h2 id="dlgTitle">Criar agente</h2>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Fechar"
+            onClick={() => dialogRef.current?.close()}
+          >
+            <Icon name="x" />
+          </button>
+        </div>
+        <div className="dlg-body">
+          <div className="field">
+            <label htmlFor="fName">Nome</label>
+            <input
+              className="input"
+              id="fName"
+              placeholder="Ex.: Viagens"
+              value={name}
+              maxLength={80}
+              aria-invalid={nameError}
+              aria-describedby={nameError ? "fNameErr" : undefined}
+              onChange={(event) => {
+                setName(event.target.value);
+                if (event.target.value.trim()) setNameError(false);
+              }}
+            />
+            {nameError && (
+              <span className="err" id="fNameErr">
+                Dê um nome ao agente.
+              </span>
+            )}
+          </div>
+          <div className="field">
+            <label htmlFor="fRole">O que ele faz</label>
+            <input
+              className="input"
+              id="fRole"
+              placeholder="Ex.: Reserva voos e hotéis dentro da política"
+              value={instructions}
+              onChange={(event) => setInstructions(event.target.value)}
+            />
+          </div>
+          <fieldset className="field">
+            <legend>Provedor</legend>
+            <div className="checks">
+              {PROVIDERS.map((providerId) => (
+                <label key={providerId}>
+                  <input
+                    type="radio"
+                    name="provider"
+                    value={providerId}
+                    checked={provider === providerId}
+                    onChange={() => setProvider(providerId)}
+                  />
+                  {statusProvider(providerId)}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <fieldset className="field">
+            <legend>Autonomia</legend>
+            <label className="opt">
+              <input
+                type="radio"
+                name="auto"
+                value="ask"
+                checked={autonomy === "ask"}
+                onChange={() => setAutonomy("ask")}
+              />
+              <span>
+                Sempre perguntar
+                <small>Mostra o plano e espera sua aprovação antes de cada ação.</small>
+              </span>
+            </label>
+            <label className="opt">
+              <input
+                type="radio"
+                name="auto"
+                value="sensitive"
+                checked={autonomy === "sensitive"}
+                onChange={() => setAutonomy("sensitive")}
+              />
+              <span>
+                Perguntar em ações sensíveis
+                <small>Age sozinho, mas pede aprovação para pagar, enviar ou apagar.</small>
+              </span>
+            </label>
+            <label className="opt">
+              <input
+                type="radio"
+                name="auto"
+                value="auto"
+                checked={autonomy === "auto"}
+                onChange={() => setAutonomy("auto")}
+              />
+              <span>
+                Autônomo
+                <small>Executa do início ao fim e envia um resumo.</small>
+              </span>
+            </label>
+          </fieldset>
+          {submitError && <p className="err">{submitError}</p>}
+        </div>
+        <div className="dlg-foot">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => dialogRef.current?.close()}
+          >
+            Cancelar
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={busy}>
+            Criar e abrir
+          </button>
+        </div>
+      </form>
+    </dialog>
   );
 }

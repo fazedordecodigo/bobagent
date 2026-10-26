@@ -1,4 +1,5 @@
-import { useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useRef, useState } from "react";
+import { Icon, type IconName } from "./icons";
 
 export type OutgoingAttachment = { name: string; mime: string; dataBase64: string };
 
@@ -6,30 +7,48 @@ const MAX_BYTES = 25 * 1024 * 1024;
 
 function readBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result).split(",", 2)[1] ?? "");
-    r.onerror = () => reject(r.error);
-    r.readAsDataURL(file);
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",", 2)[1] ?? "");
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
   });
 }
 
 export function Composer({
   running,
+  text,
+  onTextChange,
+  placeholder,
+  hint,
+  hintError,
+  toolCount,
+  contextIcon,
+  onTools,
   onSend,
   onStop,
   onTranscribe,
+  children,
 }: {
   running: boolean;
+  text: string;
+  onTextChange: (text: string) => void;
+  placeholder: string;
+  hint: string;
+  hintError?: string | null;
+  toolCount: number;
+  contextIcon: IconName;
+  onTools: () => void;
   onSend: (text: string, attachments: OutgoingAttachment[]) => Promise<void>;
   onStop: () => void;
   onTranscribe?: ((audioBase64: string, mime: string) => Promise<string>) | undefined;
+  children?: ReactNode;
 }) {
-  const [text, setText] = useState("");
-  const [error, setError] = useState<string | null>(null);
   const [files, setFiles] = useState<File[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [recording, setRecording] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const recorder = useRef<MediaRecorder | null>(null);
-  const [recording, setRecording] = useState(false);
+  const textRef = useRef<HTMLTextAreaElement>(null);
 
   const toggleMic = async () => {
     if (!onTranscribe) return;
@@ -40,130 +59,162 @@ export function Composer({
     setError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const rec = new MediaRecorder(stream);
+      const mediaRecorder = new MediaRecorder(stream);
       const chunks: Blob[] = [];
-      rec.ondataavailable = (e) => chunks.push(e.data);
-      rec.onstop = async () => {
-        for (const t of stream.getTracks()) t.stop();
+      mediaRecorder.ondataavailable = (event) => chunks.push(event.data);
+      mediaRecorder.onstop = async () => {
+        for (const track of stream.getTracks()) track.stop();
         recorder.current = null;
         setRecording(false);
-        const blob = new Blob(chunks, { type: rec.mimeType });
+        const blob = new Blob(chunks, { type: mediaRecorder.mimeType });
         try {
-          const b64 = await readBase64(new File([blob], "voice", { type: rec.mimeType }));
-          const heard = await onTranscribe(b64, rec.mimeType);
-          if (heard) setText((t) => (t ? `${t} ${heard}` : heard));
+          const data = await readBase64(
+            new File([blob], "voice", { type: mediaRecorder.mimeType }),
+          );
+          const transcript = await onTranscribe(data, mediaRecorder.mimeType);
+          if (transcript) onTextChange(text ? `${text} ${transcript}` : transcript);
+          textRef.current?.focus();
         } catch (e) {
           setError(e instanceof Error ? e.message : String(e));
         }
       };
-      recorder.current = rec;
-      rec.start();
+      recorder.current = mediaRecorder;
+      mediaRecorder.start();
       setRecording(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   };
 
-  const submit = async () => {
-    const t = text.trim() || (files.length > 0 ? "See the attached files." : "");
-    if (!t) return;
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const outgoingText = text.trim() || (files.length ? "Veja os arquivos anexados." : "");
+    if (!outgoingText) return;
     setError(null);
     try {
-      if (files.reduce((n, f) => n + f.size, 0) > MAX_BYTES)
-        throw new Error("attachments exceed 25 MB");
+      if (files.reduce((total, file) => total + file.size, 0) > MAX_BYTES)
+        throw new Error("Os anexos excedem 25 MB.");
       const attachments = await Promise.all(
-        files.map(async (f) => ({
-          name: f.name,
-          mime: f.type || "application/octet-stream",
-          dataBase64: await readBase64(f),
+        files.map(async (file) => ({
+          name: file.name,
+          mime: file.type || "application/octet-stream",
+          dataBase64: await readBase64(file),
         })),
       );
-      await onSend(t, attachments);
-      setText("");
+      await onSend(outgoingText, attachments);
+      onTextChange("");
       setFiles([]);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   };
 
+  const hintText = error ?? hintError ?? hint;
   return (
-    <div className="border-t border-zinc-800 px-4 py-3">
-      {error && <div className="mb-2 text-xs text-red-400">{error}</div>}
+    <div className="composer-wrap" data-od-id="composer">
+      {children}
       {files.length > 0 && (
-        <div className="mb-2 flex flex-wrap gap-1">
-          {files.map((f, i) => (
+        <div className="suggest">
+          {files.map((file, index) => (
             <button
-              key={`${f.name}-${f.size}-${f.lastModified}`}
+              key={`${file.name}-${file.size}-${file.lastModified}`}
               type="button"
-              className="rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-700"
-              title="Remove"
-              onClick={() => setFiles(files.filter((_, j) => j !== i))}
+              className="chip"
+              title="Remover anexo"
+              onClick={() => setFiles((prev) => prev.filter((_, i) => i !== index))}
             >
-              📎 {f.name} ×
+              {file.name} ×
             </button>
           ))}
         </div>
       )}
-      <div className="flex items-end gap-2">
-        <input
-          ref={fileRef}
-          type="file"
-          multiple
-          hidden
-          accept="image/*,audio/*,video/*,.zip,.mp3,.mov,.pdf,.txt,.md,.json,.csv"
-          onChange={(e) => {
-            setFiles([...files, ...Array.from(e.target.files ?? [])].slice(0, 10));
-            e.target.value = "";
-          }}
-        />
-        <button
-          type="button"
-          onClick={() => fileRef.current?.click()}
-          className="rounded-md px-2 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
-          title="Attach files"
-        >
-          📎
-        </button>
-        {onTranscribe && (
-          <button
-            type="button"
-            onClick={() => void toggleMic()}
-            className={`rounded-md px-2 py-2 text-sm hover:bg-zinc-800 ${recording ? "animate-pulse text-red-400" : "text-zinc-400 hover:text-zinc-200"}`}
-            title={recording ? "Stop and transcribe" : "Dictate"}
-          >
-            🎙
-          </button>
-        )}
+      <form className="composer" onSubmit={(event) => void submit(event)}>
+        <label className="sr" htmlFor="prompt">
+          Mensagem para o agente
+        </label>
         <textarea
-          className="max-h-40 min-h-10 flex-1 resize-y rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-zinc-500 focus:outline-none"
-          placeholder="Message the bot…"
+          ref={textRef}
+          id="prompt"
+          rows={1}
+          placeholder={placeholder}
           value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              void submit();
+          onChange={(event) => {
+            onTextChange(event.target.value);
+            event.target.style.height = "auto";
+            event.target.style.height = `${Math.min(event.target.scrollHeight, 160)}px`;
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              event.currentTarget.form?.requestSubmit();
             }
           }}
         />
-        {running && (
+        <div className="composer-bar">
+          <input
+            ref={fileRef}
+            type="file"
+            multiple
+            hidden
+            accept="image/*,audio/*,video/*,.zip,.mp3,.mov,.pdf,.txt,.md,.json,.csv"
+            onChange={(event) => {
+              setFiles((prev) => [...prev, ...Array.from(event.target.files ?? [])].slice(0, 10));
+              event.target.value = "";
+            }}
+          />
           <button
             type="button"
-            onClick={onStop}
-            className="rounded-md bg-red-700 px-4 py-2 text-sm font-medium text-white hover:bg-red-600"
+            className="icon-btn"
+            aria-label="Anexar arquivo"
+            onClick={() => fileRef.current?.click()}
           >
-            Stop
+            <Icon name="clip" />
           </button>
-        )}
-        <button
-          type="button"
-          onClick={() => void submit()}
-          disabled={!text.trim() && files.length === 0}
-          className="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-40"
-        >
-          Send
-        </button>
-      </div>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Escolher ferramentas"
+            onClick={onTools}
+          >
+            <Icon name="plug" />
+          </button>
+          {onTranscribe && (
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label={recording ? "Parar gravação" : "Ditado por voz"}
+              title={recording ? "Parar e transcrever" : "Ditado por voz"}
+              style={recording ? { color: "var(--st-err)" } : undefined}
+              onClick={() => void toggleMic()}
+            >
+              <Icon name={recording ? "stop" : "mic"} />
+            </button>
+          )}
+          <span className="ctx" id="ctxChip">
+            <Icon name={contextIcon} size={14} />
+            {toolCount === 0 ? "Sem ferramentas" : `${toolCount} ferramenta${toolCount > 1 ? "s" : ""}`}
+          </span>
+          <span className="grow" />
+          {running && (
+            <button type="button" className="btn btn-secondary btn-sm" onClick={onStop}>
+              <Icon name="stop" />
+              Parar
+            </button>
+          )}
+          <button
+            type="submit"
+            className="send"
+            aria-label="Enviar"
+            disabled={!text.trim() && files.length === 0}
+            data-od-id="send-button"
+          >
+            <Icon name="up" />
+          </button>
+        </div>
+      </form>
+      <p className={`hint${error || hintError ? " is-err" : ""}`} aria-live="polite">
+        {hintText}
+      </p>
     </div>
   );
 }
