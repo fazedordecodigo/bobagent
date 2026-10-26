@@ -102,4 +102,22 @@ describe("ACP microVM authentication errors", () => {
     expect(error?.code).toBe("auth_required");
     expect(error?.message).toContain("Run `agent login` in a terminal.");
   });
+
+  test("maps OpenCode's unexpected ACP disconnect to sign-in guidance before progress", () => {
+    const error = mapAcpAuthError("opencode", new Error("connection closed unexpectedly"), null);
+    const beforeProgress = mapAcpAuthError(
+      "opencode",
+      new Error("connection closed unexpectedly"),
+      null,
+      true,
+    );
+    expect(error).toBeNull();
+    expect(beforeProgress?.code).toBe("auth_required");
+    expect(beforeProgress?.message).toBe(
+      "opencode requires sign-in. Run `opencode auth login` in a terminal.",
+    );
+    expect(
+      mapAcpAuthError("opencode", new Error("connection closed unexpectedly"), null, false),
+    ).toBeNull();
+  });
 });

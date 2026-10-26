@@ -577,7 +577,16 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
             agentId: agent.id,
             text: "Reply with READY.",
           })) as { queueId: string };
-          turn = await waitForEvent(client, agent.id, queue.queueId, 30000);
+          try {
+            turn = await waitForEvent(client, agent.id, queue.queueId, 60000);
+          } catch (error) {
+            const activity = client.events
+              .filter((event) => (event.data as { agentId?: string }).agentId === agent.id)
+              .map(({ event, data }) => ({ event, data }));
+            console.log(`${provider} events before turn completion: ${JSON.stringify(activity)}`);
+            console.log(`${provider} daemon stderr tail: ${daemonStderrText.slice(-3000)}`);
+            throw error;
+          }
         } finally {
           clearInterval(pidPoll);
           collectPids();
@@ -585,6 +594,21 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
 
         const durationMs = Date.now() - startedAt;
         const errorText = turn.error ?? "";
+        if (turn.status !== "failed" || !errorText.includes("requires sign-in")) {
+          const activity = client.events
+            .filter((event) => (event.data as { agentId?: string }).agentId === agent.id)
+            .map(({ event, data }) => {
+              const payload = data as { item?: { kind?: string }; status?: string };
+              return { event, kind: payload.item?.kind, status: payload.status };
+            });
+          console.log(`${provider} unexpected turn result (${durationMs} ms): ${errorText}`);
+          console.log(`${provider} chat events: ${JSON.stringify(activity)}`);
+          console.log(`${provider} daemon stderr tail: ${daemonStderrText.slice(-3000)}`);
+          const proxyLogPath = join(root, "vms", agent.id, "proxy.log");
+          console.log(
+            `${provider} proxy activity:\n${existsSync(proxyLogPath) ? readFileSync(proxyLogPath, "utf8").trim() : "(no CONNECT requests)"}`,
+          );
+        }
         expect(turn.status).toBe("failed");
         expect(errorText).toContain("requires sign-in");
         expect(errorText).toContain(loginCommands[provider]);

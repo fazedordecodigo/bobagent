@@ -84,10 +84,15 @@ claude (OAuth token or API key), codex (`OPENAI_API_KEY`), gemini (`GEMINI_API_K
 0.164.0, Gemini 0.65.0, OpenCode 1.19.4, and Cursor Agent 2026.10.22-27dcf5f. Cursor installs
 under `/opt/cursor-agent-home` because `/root` is bind-mounted from persistent storage.
 Signed-out behavior: Gemini reports `gemini`, OpenCode `opencode auth login`, and Cursor
-`agent login`. OpenCode ACP prompt waits are bounded at 20 seconds and mapped to its sign-in
-guidance. Fake Gemini/Cursor credentials reach only Firecracker provider env and rejected
-credentials produce the redacted Settings → Hosts message. `bun run test:firecracker:providers`
-checks these real ACP flows, credential delivery, placement isolation, and plaintext leaks.
+`agent login`. OpenCode alone has a 30-second first-activity watchdog: message/thought chunks,
+tool calls/updates, plans, or agent requests count as progress; session metadata updates such as
+available commands do not. Without progress after a prompt, it reports `opencode auth login` and
+tears down its child; after the first progress, the prompt is unbounded. Fake Gemini/Cursor credentials reach only
+Firecracker provider env. Gemini invalid-key errors are explicit; Cursor's
+`Failed to initialize session services` mapping is inferred from `proxy.log` showing a request
+to `api2.cursor.sh` with a microVM credential set, since Cursor returns no explicit invalid-key
+error. `bun run test:firecracker:providers` checks these real ACP flows, credential delivery,
+placement isolation, and plaintext leaks.
 devin/grok need a custom image plus `UPBOT_PROVIDER_COMMAND_<PROVIDER>`.
 
 ## Layout

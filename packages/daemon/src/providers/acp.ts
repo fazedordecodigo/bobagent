@@ -22,6 +22,8 @@ import {
   type StartOpts,
 } from "./types";
 
+const DEFAULT_OPENCODE_FIRST_ACTIVITY_MS = 30000;
+
 function isAuthError(e: unknown): boolean {
   const err = e as { code?: number; message?: string };
   if (err?.code === -32000) return true;
@@ -32,7 +34,7 @@ async function boundedRequest<T>(
   provider: ProviderId,
   method: string,
   request: Promise<T>,
-  timeoutMs = 15000,
+  timeoutMs = 30000,
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -48,6 +50,84 @@ async function boundedRequest<T>(
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+function opencodeFirstActivityTimeoutMs(): number {
+  const configured = Number(process.env.UPBOT_ACP_FIRST_ACTIVITY_MS);
+  return Number.isFinite(configured) && configured > 0
+    ? configured
+    : DEFAULT_OPENCODE_FIRST_ACTIVITY_MS;
+}
+
+type AcpActivityMonitor = {
+  sessionId: string | null;
+  promptHandler: (() => void) | null;
+  promptActive: boolean;
+  promptHadProgress: boolean;
+};
+
+const PROMPT_PROGRESS_UPDATES = new Set([
+  "agent_message_chunk",
+  "agent_thought_chunk",
+  "tool_call",
+  "tool_call_update",
+  "plan",
+]);
+
+function isPromptProgressUpdate(params: unknown): boolean {
+  if (!params || typeof params !== "object") return false;
+  const update = (params as { update?: { sessionUpdate?: unknown } }).update;
+  return (
+    typeof update?.sessionUpdate === "string" && PROMPT_PROGRESS_UPDATES.has(update.sessionUpdate)
+  );
+}
+
+function observeAgentRequests(
+  stream: ReadableStream<Uint8Array>,
+  sessionId: () => string | null,
+  onRequest: () => void,
+): void {
+  const observeLine = (line: string) => {
+    let message: unknown;
+    try {
+      message = JSON.parse(line);
+    } catch {
+      return;
+    }
+    if (!message || typeof message !== "object") return;
+    const frame = message as {
+      method?: unknown;
+      id?: unknown;
+      params?: { sessionId?: unknown } | null;
+    };
+    if (typeof frame.method !== "string" || frame.id === undefined) return;
+    const requestSessionId = frame.params?.sessionId;
+    if (requestSessionId === undefined || requestSessionId === sessionId()) onRequest();
+  };
+
+  void (async () => {
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
+        let newline = buffer.indexOf("\n");
+        while (newline >= 0) {
+          observeLine(buffer.slice(0, newline));
+          buffer = buffer.slice(newline + 1);
+          newline = buffer.indexOf("\n");
+        }
+        if (done) {
+          if (buffer.trim()) observeLine(buffer);
+          return;
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  })().catch(() => {});
 }
 
 function errorDetail(e: unknown): string {
@@ -83,6 +163,7 @@ export function mapAcpAuthError(
   provider: ProviderId,
   error: unknown,
   credential: string | null,
+  opencodeNoProgressPrompt = false,
 ): ProviderError | null {
   const detail = errorDetail(error);
   if (credential && isVmCredentialRejection(detail)) {
@@ -101,8 +182,13 @@ export function mapAcpAuthError(
       vmCredentialRejectedMessage(provider, detail, credential),
     );
   }
-  if (provider === "opencode" && /session\/(?:new|prompt) timed out/i.test(detail)) {
-    return new ProviderError("auth_required", authMessage(provider, ""));
+  if (
+    provider === "opencode" &&
+    !credential &&
+    opencodeNoProgressPrompt &&
+    /connection closed unexpectedly/i.test(detail)
+  ) {
+    return new ProviderError("auth_required", authMessage("opencode", ""));
   }
   if (isAuthError(error)) {
     return new ProviderError(
@@ -258,6 +344,8 @@ class AcpSession implements ProviderSession {
     private hooks: ProviderHooks,
     private provider: ProviderId,
     private credential: string | null,
+    private activity: AcpActivityMonitor,
+    private firstActivityTimeoutMs: number,
   ) {}
 
   async setConfigOption(configId: string, value: string): Promise<ConfigOption[]> {
@@ -276,20 +364,70 @@ class AcpSession implements ProviderSession {
       stopReason?: string;
       usage?: { inputTokens?: number; outputTokens?: number };
     };
+    let watchdogTimer: ReturnType<typeof setTimeout> | undefined;
+    let watchdogFired = false;
+    let activityHandler: (() => void) | undefined;
+    let watchdog: Promise<never> | undefined;
     try {
-      res = (await boundedRequest(
-        this.provider,
-        "session/prompt",
-        this.conn.agent.request("session/prompt", {
-          sessionId: this.sessionId,
-          prompt: [{ type: "text", text }],
-        } as never),
-        this.provider === "opencode" ? 20000 : 60000,
-      )) as typeof res;
+      if (this.provider === "opencode") {
+        this.activity.promptActive = true;
+        this.activity.promptHadProgress = false;
+        watchdog = new Promise<never>((_, reject) => {
+          watchdogTimer = setTimeout(() => {
+            watchdogFired = true;
+            reject(new ProviderError("auth_required", authMessage("opencode", "")));
+          }, this.firstActivityTimeoutMs);
+        });
+        activityHandler = () => {
+          if (watchdogFired || watchdogTimer === undefined) return;
+          this.activity.promptHadProgress = true;
+          clearTimeout(watchdogTimer);
+          watchdogTimer = undefined;
+          if (this.activity.promptHandler === activityHandler) {
+            this.activity.promptHandler = null;
+          }
+        };
+        this.activity.promptHandler = activityHandler;
+      }
+      const request = this.conn.agent.request("session/prompt", {
+        sessionId: this.sessionId,
+        prompt: [{ type: "text", text }],
+      } as never);
+      res = (await (watchdog ? Promise.race([request, watchdog]) : request)) as typeof res;
     } catch (e) {
-      const authError = mapAcpAuthError(this.provider, e, this.credential);
+      if (!watchdogFired && watchdogTimer !== undefined && watchdog) {
+        const authError = mapAcpAuthError(
+          this.provider,
+          e,
+          this.credential,
+          this.activity.promptActive && !this.activity.promptHadProgress,
+        );
+        if (authError) throw authError;
+        try {
+          await watchdog;
+        } catch (watchdogError) {
+          e = watchdogError;
+        }
+      }
+      if (watchdogFired) {
+        await boundedRequest(this.provider, "session/cancel", this.cancel(), 1000).catch(() => {});
+        await this.close();
+      }
+      if (e instanceof ProviderError) throw e;
+      const authError = mapAcpAuthError(
+        this.provider,
+        e,
+        this.credential,
+        this.activity.promptActive && !this.activity.promptHadProgress,
+      );
       if (authError) throw authError;
       throw e;
+    } finally {
+      if (watchdogTimer !== undefined) clearTimeout(watchdogTimer);
+      if (activityHandler && this.activity.promptHandler === activityHandler) {
+        this.activity.promptHandler = null;
+      }
+      this.activity.promptActive = false;
     }
     if (res.usage) {
       this.hooks.onUpdate({
@@ -363,23 +501,46 @@ export class AcpDriver implements ProviderDriver {
 
     let exited = false;
     let closedByUs = false;
+    const activity: AcpActivityMonitor = {
+      sessionId: null,
+      promptHandler: null,
+      promptActive: false,
+      promptHadProgress: false,
+    };
     child.on("exit", (code, signal) => {
       exited = true;
-      if (!closedByUs) {
+      if (
+        !closedByUs &&
+        (!activity.promptHandler || (activity.promptActive && !activity.promptHadProgress))
+      ) {
         const tail = redactCredential(
           stderrLines.slice(-STDERR_TAIL_LINES).join("\n"),
           credential,
         ).trim();
-        hooks.onExit(
-          `process exited (code ${code ?? "null"}, signal ${signal ?? "null"})${tail ? `: ${tail}` : ""}`,
+        const message = `process exited (code ${code ?? "null"}, signal ${signal ?? "null"})${tail ? `: ${tail}` : ""}`;
+        const authError = mapAcpAuthError(
+          this.provider,
+          new Error(message),
+          credential,
+          activity.promptActive && !activity.promptHadProgress,
         );
+        hooks.onExit(authError?.message ?? message);
       }
     });
 
     const stdoutNode = child.stdout!;
+    const stdoutStream = Readable.toWeb(stdoutNode) as unknown as ReadableStream<Uint8Array>;
+    const [providerStream, activityStream] = stdoutStream.tee();
+    observeAgentRequests(
+      activityStream,
+      () => activity.sessionId,
+      () => {
+        activity.promptHandler?.();
+      },
+    );
     const stream = acp.ndJsonStream(
       Writable.toWeb(child.stdin!) as WritableStream<Uint8Array>,
-      Readable.toWeb(stdoutNode) as unknown as ReadableStream<Uint8Array>,
+      providerStream,
     );
 
     let loading = false;
@@ -405,6 +566,10 @@ export class AcpDriver implements ProviderDriver {
         return { outcome: { outcome: "selected", optionId: res.optionId } } as never;
       })
       .onNotification("session/update", async (ctx) => {
+        const params = ctx.params as { sessionId?: string };
+        if (params.sessionId === activity.sessionId && isPromptProgressUpdate(ctx.params)) {
+          activity.promptHandler?.();
+        }
         if (loading) return;
         hooks.onUpdate(mapUpdate(ctx.params));
       });
@@ -412,7 +577,24 @@ export class AcpDriver implements ProviderDriver {
     const conn = app.connect(stream);
     conn.closed.catch(() => {});
     conn.closed.then(() => {
-      if (!exited && !closedByUs) hooks.onExit("connection closed unexpectedly");
+      if (
+        !exited &&
+        !closedByUs &&
+        (!activity.promptHandler || (activity.promptActive && !activity.promptHadProgress))
+      ) {
+        const tail = redactCredential(
+          stderrLines.slice(-STDERR_TAIL_LINES).join("\n"),
+          credential,
+        ).trim();
+        const message = `connection closed unexpectedly${tail ? `: ${tail}` : ""}`;
+        const authError = mapAcpAuthError(
+          this.provider,
+          new Error(message),
+          credential,
+          activity.promptActive && !activity.promptHadProgress,
+        );
+        hooks.onExit(authError?.message ?? message);
+      }
     });
 
     const init = async () => {
@@ -537,6 +719,7 @@ export class AcpDriver implements ProviderDriver {
       );
     }
 
+    activity.sessionId = sessionId;
     const session = new AcpSession(
       sessionId,
       resumed,
@@ -545,6 +728,8 @@ export class AcpDriver implements ProviderDriver {
       hooks,
       this.provider,
       credential,
+      activity,
+      this.provider === "opencode" ? opencodeFirstActivityTimeoutMs() : 0,
     );
     session.configOptions = rawConfig;
     const origClose = session.close.bind(session);
