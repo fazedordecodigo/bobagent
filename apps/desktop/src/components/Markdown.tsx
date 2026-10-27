@@ -66,19 +66,33 @@ export function Markdown({ text }: { text: string }) {
     <div className="md">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        remarkRehypeOptions={{ footnoteLabel: "Notas", footnoteBackLabel: "Voltar ao texto" }}
         components={{
-          a: ({ href, children }) => (
-            <a
-              href={href}
-              rel="noreferrer noopener"
-              onClick={(event) => {
-                event.preventDefault();
-                if (href) openExternal(href);
-              }}
-            >
-              {children}
-            </a>
-          ),
+          a: ({ node, href, children, ...props }) => {
+            void node;
+            return (
+              <a
+                {...props}
+                href={href}
+                rel="noreferrer noopener"
+                onClick={(event) => {
+                  event.preventDefault();
+                  if (!href) return;
+                  if (href.startsWith("#")) {
+                    const id = decodeURIComponent(href.slice(1));
+                    const target = event.currentTarget
+                      .closest(".md")
+                      ?.querySelector(`[id="${CSS.escape(id)}"]`);
+                    target?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    return;
+                  }
+                  openExternal(href);
+                }}
+              >
+                {children}
+              </a>
+            );
+          },
           img: ({ src, alt }) =>
             src ? (
               <a
