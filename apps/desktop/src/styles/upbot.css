@@ -463,4 +463,4 @@
     .md th, .md td { padding: 6px 8px; border: 1px solid var(--border); text-align: left; }
     .md hr { border: 0; border-top: 1px solid var(--border); }
     .md a { text-decoration: underline; text-underline-offset: 2px; }
-    .channel-markdown { --fg: rgb(244 244 245); --muted: rgb(212 212 216); --border: rgb(255 255 255 / 16%); --fg-softer: rgb(255 255 255 / 8%); }
+    .channel-markdown { --border: color-mix(in oklab, currentColor 22%, transparent); --fg-softer: color-mix(in oklab, currentColor 8%, transparent); --muted: color-mix(in oklab, currentColor 72%, transparent); }

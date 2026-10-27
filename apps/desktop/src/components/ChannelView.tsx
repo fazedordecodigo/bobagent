@@ -165,9 +165,7 @@ export function ChannelView({
             >
               <div
                 className={`max-w-[75%] rounded-lg px-3 py-2 text-sm ${
-                  m.authorKind === "user"
-                    ? "bg-sky-700/80 whitespace-pre-wrap"
-                    : "bg-zinc-800 text-zinc-100"
+                  m.authorKind === "user" ? "bg-sky-700/80 whitespace-pre-wrap" : "bg-zinc-800"
                 }`}
               >
                 {m.replyTo && byId.get(m.replyTo) && (
