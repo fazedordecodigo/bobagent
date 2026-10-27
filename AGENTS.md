@@ -37,9 +37,10 @@ MCP server via `@modelcontextprotocol/sdk` (stdio with secrets as env, or stream
 secret-filled headers). Catalog `APP_CATALOG` (Notion, GitHub remote MCP, Brave Search,
 Airtable, Stripe; pinned npx versions) plus `custom-stdio` / `custom-http`. Secrets in the
 vault as `app.<id>.<KEY>` (hidden from `vault.list`); tool output has secrets redacted.
-The bridge appends app tools to `tools/list` as `<slug>__<tool>` and routes calls to them
+The bridge appends app tools to `tools/list` as `<slug>-<tool>` and routes calls to them
 (`agentIds` empty = every bot). RPC `apps.catalog/list/connect/update/refresh/delete`, event
 `apps.changed`; UI Settings → Apps. Tests: `test/apps.e2e.test.ts` + `fixtures/fake-mcp-server.ts`.
+Grok rejects `__` in MCP tool names because it uses that separator to qualify server and tool names.
 
 ## Approvals (UpBot)
 

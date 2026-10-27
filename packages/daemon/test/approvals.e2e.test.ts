@@ -95,41 +95,53 @@ describe("approvals e2e", () => {
   });
 
   test("reads run without asking; app writes ask first and can be approved or declined", async () => {
-    expect(await tool(a, "notes__echo", { text: "x" })).toBe("tool-ok:echo:x");
-    const ok = await withApproval("notes__create_note", { title: "t" }, (ap) =>
+    expect(await tool(a, "notes-echo", { text: "x" })).toBe("tool-ok:echo:x");
+    const ok = await withApproval("notes-create_note", { title: "t" }, (ap) =>
       c.request("approvals.respond", { id: ap.id, decision: "approve" }),
     );
     expect(ok.approval).toMatchObject({
       kind: "tool",
-      tool: "notes__create_note",
+      tool: "notes-create_note",
       background: false,
     });
     expect(ok.approval.detail).toContain('"title": "t"');
     expect(ok.text).toBe("tool-ok:note-created");
-    const no = await withApproval("notes__create_note", {}, (ap) =>
+    const no = await withApproval("notes-create_note", {}, (ap) =>
       c.request("approvals.respond", { id: ap.id, decision: "deny" }),
     );
     expect(no.text).toContain("declined");
   });
 
   test("always allow adds a rule; ask rules beat allow rules", async () => {
-    await withApproval("notes__create_note", {}, (ap) =>
+    await withApproval("notes-create_note", {}, (ap) =>
       c.request("approvals.respond", { id: ap.id, decision: "always" }),
     );
-    expect(await tool(a, "notes__create_note")).toBe("tool-ok:note-created");
+    expect(await tool(a, "notes-create_note")).toBe("tool-ok:note-created");
     const rules = (await c.request("approvals.rules", {})) as { pattern: string }[];
-    expect(rules.map((r) => r.pattern)).toEqual(["notes__create_note"]);
+    expect(rules.map((r) => r.pattern)).toEqual(["notes-create_note"]);
     await c.request("approvals.setRules", {
       rules: [
         ...rules,
-        { id: "r-ask", pattern: "notes__*", action: "ask", agentId: null },
+        { id: "r-ask", pattern: "notes-*", action: "ask", agentId: null },
         { id: "r-allow", pattern: "list_agents", action: "allow", agentId: null },
       ],
     });
-    const asked = await withApproval("notes__create_note", {}, (ap) =>
+    const asked = await withApproval("notes-create_note", {}, (ap) =>
       c.request("approvals.respond", { id: ap.id, decision: "approve" }),
     );
     expect(asked.text).toBe("tool-ok:note-created");
+    await c.request("approvals.setRules", { rules: [] });
+  });
+
+  test("legacy double-underscore app approval rules still match", async () => {
+    await c.request("approvals.setRules", {
+      rules: [{ id: "legacy-ask", pattern: "notes__*", action: "ask", agentId: null }],
+    });
+    const asked = await withApproval("notes-echo", { text: "legacy" }, (ap) =>
+      c.request("approvals.respond", { id: ap.id, decision: "approve" }),
+    );
+    expect(asked.approval.tool).toBe("notes-echo");
+    expect(asked.text).toBe("tool-ok:echo:legacy");
     await c.request("approvals.setRules", { rules: [] });
   });
 
@@ -137,25 +149,25 @@ describe("approvals e2e", () => {
     await c.request("approvals.setRules", {
       rules: [{ id: "wildcard-allow", pattern: "*", action: "allow", agentId: null }],
     });
-    const write = await withApproval("notes__create_note", {}, (ap) =>
+    const write = await withApproval("notes-create_note", {}, (ap) =>
       c.request("approvals.respond", { id: ap.id, decision: "approve" }),
     );
-    expect(write.approval.tool).toBe("notes__create_note");
+    expect(write.approval.tool).toBe("notes-create_note");
     expect(write.text).toBe("tool-ok:note-created");
-    expect(await tool(a, "notes__echo", { text: "read" })).toBe("tool-ok:echo:read");
+    expect(await tool(a, "notes-echo", { text: "read" })).toBe("tool-ok:echo:read");
     expect(await tool(a, "list_agents")).toContain("A");
 
     await c.request("approvals.setRules", {
       rules: [
         {
           id: "explicit-write-allow",
-          pattern: "notes__create_note",
+          pattern: "notes-create_note",
           action: "allow",
           agentId: null,
         },
       ],
     });
-    expect(await tool(a, "notes__create_note")).toBe("tool-ok:note-created");
+    expect(await tool(a, "notes-create_note")).toBe("tool-ok:note-created");
     await c.request("approvals.setRules", { rules: [] });
   });
 
@@ -165,7 +177,7 @@ describe("approvals e2e", () => {
       (d) => (d as Approval).status === "expired",
       20000,
     );
-    const text = await tool(a, "notes__create_note");
+    const text = await tool(a, "notes-create_note");
     await pending;
     expect(text).toContain("did not approve");
   });

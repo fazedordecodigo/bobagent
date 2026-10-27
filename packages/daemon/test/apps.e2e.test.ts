@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Agent, ChatItem, ConnectedApp, Turn } from "@upbot/protocol";
+import { appToolNames } from "../src/apps";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -106,18 +107,30 @@ describe("connected apps (MCP) e2e", () => {
       await Bun.sleep(100);
     }
     expect(list[0]).toMatchObject({ status: "ready", secretKeys: ["FAKE_APP_TOKEN"] });
-    expect(list[0]!.tools.map((t) => t.name)).toEqual(["echo", "whoami", "create_note"]);
+    expect(list[0]!.tools.map((t) => t.name)).toEqual([
+      "echo",
+      "whoami",
+      "create_note",
+      "foo__bar",
+      "foo_bar",
+    ]);
     expect(JSON.stringify(list)).not.toContain(APP_SECRET);
     const vault = (await c.request("vault.list", {})) as { name: string }[];
     expect(vault.some((v) => v.name.startsWith("app."))).toBe(false);
   });
 
   test("allowed bots call app tools through the bridge; secrets are redacted", async () => {
-    expect(await tool(a, "fake_app__echo", { text: "hi" })).toBe("tool-ok:echo:hi");
-    const who = await tool(a, "fake_app__whoami");
+    expect(await tool(a, "fake_app-echo", { text: "hi" })).toBe("tool-ok:echo:hi");
+    const who = await tool(a, "fake_app-whoami");
     expect(who).toContain("token-present:true");
     expect(who).not.toContain(APP_SECRET);
-    expect(await tool(b, "fake_app__echo", { text: "hi" })).toContain("not available to you");
+    const collisionNames = appToolNames("fake_app", [{ name: "foo__bar" }, { name: "foo_bar" }]);
+    const doubleName = [...collisionNames].find(([, t]) => t.name === "foo__bar")?.[0];
+    expect(await tool(a, "fake_app-foo_bar")).toBe("tool-ok:single-underscore");
+    expect(doubleName).toMatch(/^fake_app-foo_bar_[0-9a-f]{6}$/);
+    if (!doubleName) throw new Error("expected a disambiguated foo__bar tool name");
+    expect(await tool(a, doubleName)).toBe("tool-ok:double-underscore");
+    expect(await tool(b, "fake_app-echo", { text: "hi" })).toContain("not available to you");
     const log = readFileSync(join(stateDir, "log.jsonl"), "utf8");
     expect(log).not.toContain(APP_SECRET);
   });
@@ -125,7 +138,7 @@ describe("connected apps (MCP) e2e", () => {
   test("disable and delete", async () => {
     const off = (await c.request("apps.update", { id: app.id, enabled: false })) as ConnectedApp;
     expect(off.status).toBe("stopped");
-    expect(await tool(a, "fake_app__echo", { text: "x" })).toContain("not available to you");
+    expect(await tool(a, "fake_app-echo", { text: "x" })).toContain("not available to you");
     await c.request("apps.delete", { id: app.id });
     expect(await c.request("apps.list", {})).toEqual([]);
   });

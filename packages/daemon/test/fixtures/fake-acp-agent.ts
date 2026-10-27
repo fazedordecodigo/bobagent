@@ -210,7 +210,7 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
   }
 
   if (text.startsWith("mcp:")) {
-    const m = /^mcp:(\w+)\s*([\s\S]*)$/.exec(text);
+    const m = /^mcp:([A-Za-z0-9_-]+)\s*([\s\S]*)$/.exec(text);
     const spec = sessionMcp.get(sessionId)?.find((x) => x.name === "upbot");
     if (!m || !spec) {
       await say("agent_message_chunk", "no-upbot-mcp");
