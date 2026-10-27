@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@source inline("sr-only");
 @import "./styles/upbot.css";
 
 dialog {

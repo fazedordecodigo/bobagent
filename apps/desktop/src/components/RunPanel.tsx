@@ -183,7 +183,7 @@ export function RunPanel({
       </div>
       <div className="panel-sec" data-od-id="panel-progress">
         <p className="eyebrow">Tarefa atual</p>
-        <h3>{overview.task ?? "Nenhuma tarefa em andamento"}</h3>
+        <h3 className="panel-task">{overview.task ?? "Nenhuma tarefa em andamento"}</h3>
         {turns.length ? (
           <>
             <div className={`progress${progress === 100 ? " ok" : ""}`}>

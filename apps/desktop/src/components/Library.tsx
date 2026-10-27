@@ -17,6 +17,7 @@ import type {
 import { useCallback, useEffect, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
 import { btnCls, inputCls, PROVIDERS } from "./AgentSettings";
+import { Markdown } from "./Markdown";
 
 export function AvatarBadge({
   agent,
@@ -1170,7 +1171,12 @@ export function TeamView({ client, agents }: { client: DaemonClient; agents: Age
               · {m.status}
             </div>
             <div className="whitespace-pre-wrap">{m.text}</div>
-            {m.reply && <div className="mt-1 whitespace-pre-wrap text-zinc-300">↳ {m.reply}</div>}
+            {m.reply && (
+              <div className="mt-1 flex items-start gap-1 text-zinc-300">
+                <span>↳</span>
+                <Markdown text={m.reply} />
+              </div>
+            )}
           </li>
         ))}
       </ul>
