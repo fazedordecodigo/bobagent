@@ -13,7 +13,7 @@ import type { Vault } from "./vault";
 // Connected apps: MCP servers the daemon runs (stdio) or talks to (streamable HTTP) on behalf
 // of the bots. Secrets live in the vault as app.<id>.<KEY> and only reach the server process
 // (env) or its HTTP headers; bots see the app's tools through the upbot bridge as
-// `<slug>__<tool>` and never the credentials. Account-wide: agentIds empty = every bot.
+// `<slug>-<tool>` and never the credentials. Account-wide: agentIds empty = every bot.
 
 type Broadcast = (event: string, data: unknown) => void;
 type Tool = { name: string; description?: string; inputSchema?: unknown };
@@ -134,6 +134,13 @@ export function slugFor(name: string): string {
       .replace(/^_+|_+$/g, "")
       .slice(0, 20) || "app"
   );
+}
+
+export function appToolName(slug: string, tool: string): string {
+  return `${slug}-${tool}`
+    .replace(/[^A-Za-z0-9_-]/g, "_")
+    .replace(/_{2,}/g, "_")
+    .slice(0, 64);
 }
 
 export class AppsService {
@@ -417,7 +424,7 @@ export class AppsService {
       const c = this.config(r);
       const slug = slugFor(c.name);
       for (const t of l.tools) {
-        const name = `${slug}__${t.name}`.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64);
+        const name = appToolName(slug, t.name);
         out.push({
           name,
           description: `[${c.name}] ${t.description ?? ""}`.trim(),
@@ -429,19 +436,19 @@ export class AppsService {
   }
 
   isAppTool(name: string): boolean {
-    const i = name.indexOf("__");
+    const i = name.indexOf("-");
     if (i <= 0) return false;
     const slug = name.slice(0, i);
     return this.rows().some((x) => slugFor(this.config(x).name) === slug);
   }
 
-  /** Runs `<slug>__<tool>`; null when the name is not an app tool. */
+  /** Runs `<slug>-<tool>`; null when the name is not an app tool. */
   async call(
     agentId: string,
     name: string,
     args: Record<string, unknown>,
   ): Promise<{ text: string; isError: boolean } | null> {
-    const i = name.indexOf("__");
+    const i = name.indexOf("-");
     if (i <= 0) return null;
     const slug = name.slice(0, i);
     const r = this.rows().find((x) => slugFor(this.config(x).name) === slug);
@@ -450,9 +457,7 @@ export class AppsService {
       throw new Error(`the ${this.config(r).name} app is not available to you`);
     await this.ensure(r.id);
     const l = this.live.get(r.id)!;
-    const tool = l.tools.find(
-      (t) => `${slug}__${t.name}`.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64) === name,
-    );
+    const tool = l.tools.find((t) => appToolName(slug, t.name) === name);
     if (!tool) throw new Error(`unknown tool ${name}`);
     const res = await l.client!.callTool({ name: tool.name, arguments: args });
     const content = (res.content ?? []) as { type: string; text?: string }[];

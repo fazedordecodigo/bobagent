@@ -184,9 +184,9 @@ export function ApprovalsView({ client, agents }: { client: DaemonClient; agents
     <div className="mx-auto max-w-2xl space-y-4 p-6">
       <h2 className="text-lg font-semibold">Approvals</h2>
       <p className="text-xs text-zinc-500">
-        Rules match tool names (use * as a wildcard, e.g. github__* or notion__create_*). "Ask
-        first" always wins over "Allow automatically". Without a rule, connected-app actions that
-        change data ask first. Requests from background work expire after 10 minutes.
+        Rules match tool names (use * as a wildcard, e.g. github-* or notion-create_*). "Ask first"
+        always wins over "Allow automatically". Without a rule, connected-app actions that change
+        data ask first. Requests from background work expire after 10 minutes.
       </p>
       <ul className="space-y-1">
         {rules.map((r) => (

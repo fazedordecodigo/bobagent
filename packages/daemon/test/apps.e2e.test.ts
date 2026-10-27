@@ -113,11 +113,11 @@ describe("connected apps (MCP) e2e", () => {
   });
 
   test("allowed bots call app tools through the bridge; secrets are redacted", async () => {
-    expect(await tool(a, "fake_app__echo", { text: "hi" })).toBe("tool-ok:echo:hi");
-    const who = await tool(a, "fake_app__whoami");
+    expect(await tool(a, "fake_app-echo", { text: "hi" })).toBe("tool-ok:echo:hi");
+    const who = await tool(a, "fake_app-whoami");
     expect(who).toContain("token-present:true");
     expect(who).not.toContain(APP_SECRET);
-    expect(await tool(b, "fake_app__echo", { text: "hi" })).toContain("not available to you");
+    expect(await tool(b, "fake_app-echo", { text: "hi" })).toContain("not available to you");
     const log = readFileSync(join(stateDir, "log.jsonl"), "utf8");
     expect(log).not.toContain(APP_SECRET);
   });
@@ -125,7 +125,7 @@ describe("connected apps (MCP) e2e", () => {
   test("disable and delete", async () => {
     const off = (await c.request("apps.update", { id: app.id, enabled: false })) as ConnectedApp;
     expect(off.status).toBe("stopped");
-    expect(await tool(a, "fake_app__echo", { text: "x" })).toContain("not available to you");
+    expect(await tool(a, "fake_app-echo", { text: "x" })).toContain("not available to you");
     await c.request("apps.delete", { id: app.id });
     expect(await c.request("apps.list", {})).toEqual([]);
   });

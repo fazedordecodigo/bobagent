@@ -58,12 +58,15 @@ export class ApprovalService {
 
   /** "ask" | "allow" for a tool call, after rules and defaults. */
   decide(agentId: string, tool: string, isAppTool: boolean): "ask" | "allow" {
+    const legacy = (pattern: string) => pattern.replace("__", "-");
     const hits = this.rules().filter(
-      (r) => (r.agentId === null || r.agentId === agentId) && globRe(r.pattern).test(tool),
+      (r) =>
+        (r.agentId === null || r.agentId === agentId) &&
+        (globRe(r.pattern).test(tool) || globRe(legacy(r.pattern)).test(tool)),
     );
     if (hits.some((r) => r.action === "ask")) return "ask";
     if (hits.some((r) => r.action === "allow" && r.pattern !== "*")) return "allow";
-    const op = isAppTool ? tool.slice(tool.indexOf("__") + 2) : "";
+    const op = isAppTool ? tool.slice(tool.indexOf("-") + 1) : "";
     return isAppTool && WRITE_VERB.test(op) ? "ask" : "allow";
   }
 
