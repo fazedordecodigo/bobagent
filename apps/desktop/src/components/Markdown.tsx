@@ -13,6 +13,26 @@ function getTextContent(node: ReactNode): string {
   return "";
 }
 
+function wrapLongCellText(children: ReactNode): ReactNode {
+  return Children.map(children, (child) => {
+    if (typeof child !== "string") return child;
+    let preceding = "";
+    return child.split(/(\s+)/u).flatMap((run) => {
+      const chars = Array.from(run);
+      const context = preceding;
+      preceding += run;
+      if (!run || /^\s+$/u.test(run) || chars.length <= 24) return run;
+      const wrapped: ReactNode[] = [];
+      for (let index = 0; index < chars.length; index += 24) {
+        wrapped.push(chars.slice(index, index + 24).join(""));
+        if (index + 24 < chars.length)
+          wrapped.push(<wbr key={`${context}${chars.slice(0, index).join("")}`} />);
+      }
+      return wrapped;
+    });
+  });
+}
+
 function CodeBlock({ children }: { children: ReactNode }) {
   const code = Children.toArray(children).find(
     (child): child is ReactElement<{ className?: string; children?: ReactNode }> =>
@@ -73,6 +93,14 @@ export function Markdown({ text }: { text: string }) {
               </a>
             ) : null,
           pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+          th: ({ node, children, ...props }) => {
+            void node;
+            return <th {...props}>{wrapLongCellText(children)}</th>;
+          },
+          td: ({ node, children, ...props }) => {
+            void node;
+            return <td {...props}>{wrapLongCellText(children)}</td>;
+          },
         }}
       >
         {text}

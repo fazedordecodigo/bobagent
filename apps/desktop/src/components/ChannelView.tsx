@@ -196,14 +196,12 @@ export function ChannelView({
                 ) : m.authorKind === "user" ? (
                   <div className="channel-user-row">
                     <div className="msg-user channel-user-bubble">
-                      <div className="channel-user-who">
-                        Você <span className="meta">{time(m.createdAt)}</span>
-                      </div>
                       {quote(m)}
                       <p className="channel-user-text">{m.text}</p>
                     </div>
-                    {active && (
-                      <div className="msg-actions">
+                    <div className="msg-actions">
+                      <span className="meta">{time(m.createdAt)}</span>
+                      {active && (
                         <button
                           type="button"
                           className="btn btn-ghost btn-sm"
@@ -214,8 +212,8 @@ export function ChannelView({
                         >
                           Responder
                         </button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <div className="msg-agent">
