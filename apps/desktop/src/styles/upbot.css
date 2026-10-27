@@ -445,3 +445,22 @@
       .ds-table .hide-sm { display: none; }
     }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+    .md { min-width: 0; overflow-wrap: anywhere; }
+    .md > * { margin: 0; }
+    .md > * + * { margin-top: 8px; }
+    .md h1 { font-size: 17px; font-weight: 600; }
+    .md h2 { font-size: 15px; font-weight: 600; }
+    .md h3 { font-size: 14px; font-weight: 600; }
+    .md ul, .md ol { padding-left: 1.5em; }
+    .md ul { list-style: disc; }
+    .md ol { list-style: decimal; }
+    .md code { padding: .15em .35em; border-radius: 4px; background: var(--fg-softer); font: 12px var(--font-mono); }
+    .md pre { overflow-x: auto; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--fg-softer); font: 12px/1.6 var(--font-mono); }
+    .md pre code { padding: 0; background: none; font: inherit; }
+    .md blockquote { padding-left: 12px; border-left: 2px solid var(--border); color: var(--muted); }
+    .md table { display: block; width: 100%; overflow-x: auto; border-collapse: collapse; }
+    .md th, .md td { padding: 6px 8px; border: 1px solid var(--border); text-align: left; }
+    .md hr { border: 0; border-top: 1px solid var(--border); }
+    .md a { text-decoration: underline; text-underline-offset: 2px; }
+    .channel-markdown { --fg: rgb(244 244 245); --muted: rgb(212 212 216); --border: rgb(255 255 255 / 16%); --fg-softer: rgb(255 255 255 / 8%); }

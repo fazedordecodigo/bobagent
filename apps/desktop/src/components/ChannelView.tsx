@@ -2,6 +2,7 @@ import type { Agent, Channel, ChannelMessage } from "@upbot/protocol";
 import { useEffect, useRef, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
 import { btnCls, inputCls } from "./AgentSettings";
+import { Markdown } from "./Markdown";
 
 export function ChannelView({
   client,
@@ -163,8 +164,10 @@ export function ChannelView({
               className={`group flex items-start gap-1 ${m.authorKind === "user" ? "flex-row-reverse" : ""}`}
             >
               <div
-                className={`max-w-[75%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
-                  m.authorKind === "user" ? "bg-sky-700/80" : "bg-zinc-800"
+                className={`max-w-[75%] rounded-lg px-3 py-2 text-sm ${
+                  m.authorKind === "user"
+                    ? "bg-sky-700/80 whitespace-pre-wrap"
+                    : "bg-zinc-800 text-zinc-100"
                 }`}
               >
                 {m.replyTo && byId.get(m.replyTo) && (
@@ -178,7 +181,13 @@ export function ChannelView({
                     {m.authorAgentId === channel.ownerId ? " (owner)" : ""}
                   </div>
                 )}
-                {m.text}
+                {m.authorKind === "agent" ? (
+                  <div className="channel-markdown">
+                    <Markdown text={m.text} />
+                  </div>
+                ) : (
+                  m.text
+                )}
               </div>
               {channel.status === "active" && (
                 <button

@@ -2,6 +2,7 @@ import type { Agent, ChatItem } from "@upbot/protocol";
 import { type ReactNode, useEffect, useRef } from "react";
 import { MonoAv, role, type UiStatus } from "../lib/ui";
 import { Icon } from "./icons";
+import { Markdown } from "./Markdown";
 
 const TOOL_LABEL: Record<string, string> = {
   pending: "Na fila",
@@ -215,7 +216,7 @@ export function MessageList({
                         </button>
                       )}
                     </div>
-                    <p style={{ whiteSpace: "pre-wrap" }}>{item.text}</p>
+                    <Markdown text={item.text} />
                   </div>
                 </div>
               ) : item.kind === "agent_thought" ? (
@@ -224,7 +225,7 @@ export function MessageList({
                   <div className="body">
                     <details className="meta">
                       <summary>Pensando</summary>
-                      <p style={{ whiteSpace: "pre-wrap" }}>{item.text}</p>
+                      <Markdown text={item.text} />
                     </details>
                   </div>
                 </div>
