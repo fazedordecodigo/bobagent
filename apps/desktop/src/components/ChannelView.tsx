@@ -164,7 +164,7 @@ export function ChannelView({
               className={`group flex items-start gap-1 ${m.authorKind === "user" ? "flex-row-reverse" : ""}`}
             >
               <div
-                className={`max-w-[75%] rounded-lg px-3 py-2 text-sm ${
+                className={`max-w-[75%] min-w-0 rounded-lg px-3 py-2 text-sm ${
                   m.authorKind === "user" ? "bg-sky-700/80 whitespace-pre-wrap" : "bg-zinc-800"
                 }`}
               >
