@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { createHash } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   getDefaultEnvironment,
@@ -141,6 +142,24 @@ export function appToolName(slug: string, tool: string): string {
     .replace(/[^A-Za-z0-9_-]/g, "_")
     .replace(/_{2,}/g, "_")
     .slice(0, 64);
+}
+
+export function appToolNames(slug: string, tools: Tool[]): Map<string, Tool> {
+  const counts = new Map<string, number>();
+  const entries = tools.map((tool) => {
+    const base = appToolName(slug, tool.name);
+    counts.set(base, (counts.get(base) ?? 0) + 1);
+    return { base, tool };
+  });
+  const named = entries
+    .map(({ base, tool }) => {
+      if (base === `${slug}-${tool.name}` || counts.get(base) === 1) return [base, tool] as const;
+      const prefix = base.slice(0, 64 - 7).replace(/_+$/, "");
+      const hash = createHash("sha256").update(tool.name).digest("hex").slice(0, 6);
+      return [`${prefix}_${hash}`, tool] as const;
+    })
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return new Map(named);
 }
 
 export class AppsService {
@@ -423,8 +442,7 @@ export class AppsService {
       if (l?.status !== "ready") continue;
       const c = this.config(r);
       const slug = slugFor(c.name);
-      for (const t of l.tools) {
-        const name = appToolName(slug, t.name);
+      for (const [name, t] of appToolNames(slug, l.tools)) {
         out.push({
           name,
           description: `[${c.name}] ${t.description ?? ""}`.trim(),
@@ -457,7 +475,7 @@ export class AppsService {
       throw new Error(`the ${this.config(r).name} app is not available to you`);
     await this.ensure(r.id);
     const l = this.live.get(r.id)!;
-    const tool = l.tools.find((t) => appToolName(slug, t.name) === name);
+    const tool = appToolNames(slug, l.tools).get(name);
     if (!tool) throw new Error(`unknown tool ${name}`);
     const res = await l.client!.callTool({ name: tool.name, arguments: args });
     const content = (res.content ?? []) as { type: string; text?: string }[];
