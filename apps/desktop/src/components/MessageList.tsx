@@ -1,6 +1,7 @@
 import type { Agent, ChatItem } from "@upbot/protocol";
 import { type ReactNode, useEffect, useRef } from "react";
 import { MonoAv, role, type UiStatus } from "../lib/ui";
+import { CopyButton } from "./CopyButton";
 import { Icon } from "./icons";
 import { Markdown } from "./Markdown";
 
@@ -11,7 +12,7 @@ const TOOL_LABEL: Record<string, string> = {
   failed: "Com erro",
 };
 
-function messageDay(timestamp: number, now = Date.now()) {
+export function messageDay(timestamp: number, now = Date.now()) {
   const date = new Date(timestamp);
   const today = new Date(now);
   const yesterday = new Date(now);
@@ -206,15 +207,18 @@ export function MessageList({
                           minute: "2-digit",
                         })}
                       </span>
-                      {onSpeak && (
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => onSpeak(item.text)}
-                        >
-                          Ouvir
-                        </button>
-                      )}
+                      <div className="msg-actions">
+                        <CopyButton text={item.text} />
+                        {onSpeak && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => onSpeak(item.text)}
+                          >
+                            Ouvir
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <Markdown text={item.text} />
                   </div>
@@ -223,8 +227,8 @@ export function MessageList({
                 <div className="msg-agent">
                   <MonoAv agent={agent} dot={false} />
                   <div className="body">
-                    <details className="meta">
-                      <summary>Pensando</summary>
+                    <details className="thought">
+                      <summary className="meta">Pensando</summary>
                       <Markdown text={item.text} />
                     </details>
                   </div>

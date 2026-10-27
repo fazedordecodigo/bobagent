@@ -1,8 +1,12 @@
 import type { Agent, Channel, ChannelMessage } from "@upbot/protocol";
 import { useEffect, useRef, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
+import { MonoAv } from "../lib/ui";
 import { btnCls, inputCls } from "./AgentSettings";
+import { CopyButton } from "./CopyButton";
+import { Icon } from "./icons";
 import { Markdown } from "./Markdown";
+import { messageDay } from "./MessageList";
 
 export function ChannelView({
   client,
@@ -19,7 +23,7 @@ export function ChannelView({
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  const name = (id: string | null) => agents.find((a) => a.id === id)?.name ?? "deleted bot";
+  const name = (id: string | null) => agents.find((a) => a.id === id)?.name ?? "bot removido";
 
   useEffect(() => {
     let alive = true;
@@ -68,206 +72,286 @@ export function ChannelView({
     });
   };
 
+  const active = channel.status === "active";
   const archived = channel.status === "archived";
   const byId = new Map(messages.map((m) => [m.id, m]));
   const author = (m: ChannelMessage) =>
-    m.authorKind === "agent" ? name(m.authorAgentId) : m.authorKind === "user" ? "You" : "system";
+    m.authorKind === "agent" ? name(m.authorAgentId) : m.authorKind === "user" ? "Você" : "sistema";
+  const quote = (m: ChannelMessage) => {
+    const quoted = m.replyTo ? byId.get(m.replyTo) : null;
+    return quoted ? (
+      <div className="quote">
+        <b>{author(quoted)}:</b> {quoted.text}
+      </div>
+    ) : null;
+  };
+  const time = (timestamp: number) =>
+    new Date(timestamp).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
   const mention = /(^|\s)@([\w-]*)$/.exec(text);
+  const mentionText = mention?.[2]?.toLowerCase() ?? "";
   const suggestions = mention
     ? ["everyone", ...channel.memberIds.map((id) => name(id))].filter((n) =>
-        n.toLowerCase().startsWith(mention[2]!.toLowerCase()),
+        n.toLowerCase().startsWith(mentionText),
       )
     : [];
+  const status =
+    channel.status === "active"
+      ? { className: "ok", dot: "s-ok", label: "Ativa" }
+      : channel.status === "stopped"
+        ? { className: "wait", dot: "s-wait", label: "Parada" }
+        : { className: "", dot: "s-idle", label: "Arquivada" };
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-4 py-3">
-        <h2 className="text-sm font-semibold"># {channel.name}</h2>
-        <span className="text-xs text-zinc-500">{channel.status}</span>
-        <span className="text-xs text-zinc-500">
-          members: {channel.memberIds.map((id) => name(id)).join(", ")}
+    <div className="main channel-view" style={{ flex: 1 }}>
+      <header className="main-head channel-head">
+        <span className="mono-av lg">#</span>
+        <div className="title">
+          <h2>{channel.name}</h2>
+          <p>Membros: {channel.memberIds.map((id) => name(id)).join(", ")}</p>
+        </div>
+        <span className={`status${status.className ? ` ${status.className}` : ""}`}>
+          <i className={`dot ${status.dot}`} />
+          {status.label}
         </span>
-        <div className="ml-auto flex items-center gap-2">
-          <label className="text-xs text-zinc-400">
-            Owner{" "}
-            <select
-              className={`${inputCls} w-auto py-1`}
-              value={channel.ownerId ?? ""}
-              disabled={archived}
-              onChange={(e) =>
-                act(() =>
-                  client.request("channels.reassign", {
-                    channelId: channel.id,
-                    ownerId: e.target.value,
-                  }),
-                )
-              }
-            >
-              {channel.memberIds.map((id) => (
-                <option key={id} value={id}>
-                  {name(id)}
-                </option>
-              ))}
-            </select>
-          </label>
-          {channel.status === "active" && (
+        <label className="channel-owner">
+          Dono
+          <select
+            className="input"
+            aria-label="Dono"
+            value={channel.ownerId ?? ""}
+            disabled={archived}
+            onChange={(e) =>
+              void act(() =>
+                client.request("channels.reassign", {
+                  channelId: channel.id,
+                  ownerId: e.target.value,
+                }),
+              )
+            }
+          >
+            {channel.memberIds.map((id) => (
+              <option key={id} value={id}>
+                {name(id)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="channel-actions">
+          {active && (
             <button
               type="button"
-              className={`${btnCls} bg-red-800 hover:bg-red-700`}
-              onClick={() => act(() => client.request("channels.stop", { channelId: channel.id }))}
+              className="btn btn-secondary btn-sm"
+              onClick={() =>
+                void act(() => client.request("channels.stop", { channelId: channel.id }))
+              }
             >
-              Stop
+              Parar
             </button>
           )}
           {channel.status === "stopped" && (
             <button
               type="button"
-              className={`${btnCls} bg-zinc-800 hover:bg-zinc-700`}
+              className="btn btn-secondary btn-sm"
               onClick={() =>
-                act(() => client.request("channels.resume", { channelId: channel.id }))
+                void act(() => client.request("channels.resume", { channelId: channel.id }))
               }
             >
-              Resume
+              Retomar
             </button>
           )}
           {archived ? (
             <button
               type="button"
-              className={`${btnCls} bg-zinc-800 hover:bg-zinc-700`}
+              className="btn btn-secondary btn-sm"
               onClick={() =>
-                act(() => client.request("channels.restore", { channelId: channel.id }))
+                void act(() => client.request("channels.restore", { channelId: channel.id }))
               }
             >
-              Restore
+              Restaurar
             </button>
           ) : (
             <button
               type="button"
-              className={`${btnCls} bg-zinc-800 hover:bg-zinc-700`}
+              className="btn btn-secondary btn-sm"
               onClick={() =>
-                act(() => client.request("channels.archive", { channelId: channel.id }))
+                void act(() => client.request("channels.archive", { channelId: channel.id }))
               }
             >
-              Archive
+              Arquivar
             </button>
           )}
         </div>
       </header>
-      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
-        {messages.map((m) =>
-          m.authorKind === "system" ? (
-            <p key={m.id} className="text-center text-xs text-zinc-500">
-              {m.text}
-            </p>
-          ) : (
-            <div
-              key={m.id}
-              className={`group flex items-start gap-1 ${m.authorKind === "user" ? "flex-row-reverse" : ""}`}
-            >
-              <div
-                className={`max-w-[75%] min-w-0 rounded-lg px-3 py-2 text-sm ${
-                  m.authorKind === "user" ? "bg-sky-700/80 whitespace-pre-wrap" : "bg-zinc-800"
-                }`}
-              >
-                {m.replyTo && byId.get(m.replyTo) && (
-                  <div className="mb-1 border-l-2 border-zinc-500 pl-2 text-xs text-zinc-300 opacity-80">
-                    {author(byId.get(m.replyTo)!)}: {byId.get(m.replyTo)!.text.slice(0, 140)}
-                  </div>
-                )}
-                {m.authorKind === "agent" && (
-                  <div className="mb-1 text-xs text-zinc-400">
-                    {name(m.authorAgentId)}
-                    {m.authorAgentId === channel.ownerId ? " (owner)" : ""}
-                  </div>
-                )}
-                {m.authorKind === "agent" ? (
-                  <div className="channel-markdown">
-                    <Markdown text={m.text} />
+      <div className="thread" aria-live="polite">
+        <div className="thread-inner channel-thread-inner">
+          {messages.map((m, index) => {
+            const previous = messages[index - 1];
+            const separator =
+              !previous ||
+              new Date(previous.createdAt).toDateString() !== new Date(m.createdAt).toDateString();
+            return (
+              <div className="channel-message" key={m.id}>
+                {separator && <p className="meta day">{messageDay(m.createdAt)}</p>}
+                {m.authorKind === "system" ? (
+                  <p className="meta day">{m.text}</p>
+                ) : m.authorKind === "user" ? (
+                  <div className="channel-user-row">
+                    <div className="msg-user channel-user-bubble">
+                      <div className="channel-user-who">
+                        Você <span className="meta">{time(m.createdAt)}</span>
+                      </div>
+                      {quote(m)}
+                      <p className="channel-user-text">{m.text}</p>
+                    </div>
+                    {active && (
+                      <div className="msg-actions">
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => {
+                            setReplyTo(m);
+                            inputRef.current?.focus();
+                          }}
+                        >
+                          Responder
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ) : (
-                  m.text
+                  <div className="msg-agent">
+                    <MonoAv
+                      agent={
+                        agents.find((agent) => agent.id === m.authorAgentId) ?? {
+                          name: "?",
+                          avatar: null,
+                        }
+                      }
+                      dot={false}
+                    />
+                    <div className="body">
+                      <div className="who">
+                        {name(m.authorAgentId)}
+                        {m.authorAgentId === channel.ownerId && <span className="meta">dono</span>}
+                        <span className="meta">{time(m.createdAt)}</span>
+                        <div className="msg-actions">
+                          <CopyButton text={m.text} />
+                          {active && (
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => {
+                                setReplyTo(m);
+                                inputRef.current?.focus();
+                              }}
+                            >
+                              Responder
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {quote(m)}
+                      <Markdown text={m.text} />
+                    </div>
+                  </div>
                 )}
               </div>
-              {channel.status === "active" && (
-                <button
-                  type="button"
-                  className="invisible mt-1 text-xs text-zinc-500 group-hover:visible hover:text-zinc-300"
-                  title="Reply"
-                  aria-label="Reply"
-                  onClick={() => setReplyTo(m)}
-                >
-                  ↩ Reply
-                </button>
-              )}
+            );
+          })}
+          {messages.length === 0 && (
+            <div className="empty">
+              <p>
+                As mensagens vão para o dono, que pode delegar aos outros bots. Use @Nome para falar
+                com um bot, @everyone para todos, ou responda a uma mensagem de um bot.
+              </p>
             </div>
-          ),
-        )}
-        {messages.length === 0 && (
-          <p className="text-sm text-zinc-500">
-            Messages go to the owner, who can delegate to the other bots. Use @Name to talk to a bot
-            directly, @everyone to ask all of them, or reply to a bot's message.
+          )}
+          <div ref={bottomRef} />
+        </div>
+      </div>
+      <div className="composer-wrap channel-composer-wrap">
+        {error && (
+          <p className="meta channel-error" role="alert">
+            {error}
           </p>
         )}
-        <div ref={bottomRef} />
-      </div>
-      {error && <p className="px-4 text-xs text-red-400">{error}</p>}
-      {replyTo && (
-        <div className="flex items-center gap-2 border-t border-zinc-800 px-4 py-1 text-xs text-zinc-400">
-          Replying to {author(replyTo)}:{" "}
-          <span className="truncate">{replyTo.text.slice(0, 100)}</span>
-          <button
-            type="button"
-            className="ml-auto hover:text-zinc-200"
-            aria-label="Cancel reply"
-            onClick={() => setReplyTo(null)}
-          >
-            ×
-          </button>
-        </div>
-      )}
-      {suggestions.length > 0 && (
-        <div className="flex flex-wrap gap-1 border-t border-zinc-800 px-4 py-1">
-          {suggestions.map((n) => (
-            <button
-              key={n}
-              type="button"
-              className="rounded bg-zinc-800 px-2 py-0.5 text-xs hover:bg-zinc-700"
-              onClick={() => {
-                setText(text.replace(/@([\w-]*)$/, `@${n} `));
-                inputRef.current?.focus();
-              }}
-            >
-              @{n}
-            </button>
-          ))}
-        </div>
-      )}
-      <div className="flex gap-2 border-t border-zinc-800 p-3">
-        <textarea
-          ref={inputRef}
-          className={`${inputCls} min-h-[44px] flex-1 resize-none`}
-          placeholder={
-            channel.status === "active"
-              ? `Message #${channel.name}`
-              : `Group chat is ${channel.status}`
-          }
-          disabled={channel.status !== "active"}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              send();
-            }
+        <form
+          className="composer channel-composer"
+          onSubmit={(e) => {
+            e.preventDefault();
+            send();
           }}
-        />
-        <button
-          type="button"
-          className={`${btnCls} bg-sky-700 hover:bg-sky-600`}
-          disabled={channel.status !== "active" || !text.trim()}
-          onClick={send}
         >
-          Send
-        </button>
+          {replyTo && (
+            <div className="composer-reply channel-composer-reply">
+              <span className="meta">
+                Respondendo a {author(replyTo)}: {replyTo.text}
+              </span>
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label="Cancelar resposta"
+                onClick={() => setReplyTo(null)}
+              >
+                <Icon name="x" />
+              </button>
+            </div>
+          )}
+          {suggestions.length > 0 && (
+            <div className="channel-mentions">
+              {suggestions.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  className="chip"
+                  onClick={() => {
+                    setText((current) => {
+                      const match = /(^|\s)@([\w-]*)$/.exec(current);
+                      if (!match) return current;
+                      const end = match.index + (match[1]?.length ?? 0);
+                      return `${current.slice(0, end)}@${suggestion} `;
+                    });
+                    inputRef.current?.focus();
+                  }}
+                >
+                  @{suggestion}
+                </button>
+              ))}
+            </div>
+          )}
+          <textarea
+            ref={inputRef}
+            rows={1}
+            aria-label={`Mensagem para #${channel.name}`}
+            placeholder={
+              active
+                ? `Mensagem para #${channel.name}`
+                : archived
+                  ? "Conversa em grupo arquivada"
+                  : "Conversa em grupo parada"
+            }
+            disabled={!active}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                send();
+              }
+            }}
+          />
+          <div className="composer-bar">
+            <span className="grow" />
+            <button
+              type="submit"
+              className="send"
+              aria-label="Enviar"
+              disabled={!active || !text.trim()}
+            >
+              <Icon name="up" />
+            </button>
+          </div>
+        </form>
+        <p className="hint">Enter envia · Shift+Enter quebra linha</p>
       </div>
     </div>
   );
