@@ -28,11 +28,23 @@ function testRoot() {
   return root;
 }
 
-function fakeSecretTool(directory: string, state: string, lookupSucceeds = true) {
+function fakeSecretTool(
+  directory: string,
+  state: string,
+  lookupSucceeds = true,
+  timeoutOn?: "lookup" | "store",
+) {
   const executable = join(directory, "secret-tool");
+  const lookup =
+    timeoutOn === "lookup"
+      ? "exec /bin/sleep 30"
+      : lookupSucceeds
+        ? `[ -f "$SECRET_TOOL_STATE" ] || exit 1\n    /bin/cat "$SECRET_TOOL_STATE"`
+        : "exit 1";
+  const store = timeoutOn === "store" ? "exec /bin/sleep 30" : '/bin/cat > "$SECRET_TOOL_STATE"';
   writeFileSync(
     executable,
-    `#!/bin/sh\nif [ "$1" = "lookup" ]; then\n  ${lookupSucceeds ? `[ -f "$SECRET_TOOL_STATE" ] || exit 1\n    /bin/cat "$SECRET_TOOL_STATE"` : "exit 1"}\nelif [ "$1" = "store" ]; then\n  /bin/cat > "$SECRET_TOOL_STATE"\nfi\n`,
+    `#!/bin/sh\nif [ "$1" = "lookup" ]; then\n  ${lookup}\nelif [ "$1" = "store" ]; then\n  ${store}\nfi\n`,
     { mode: 0o700 },
   );
   chmodSync(executable, 0o700);
@@ -83,6 +95,38 @@ describe("Linux Secret Service vault key", () => {
       expect(() => loadVaultKey(dataDir, "linux")).toThrow("could not be read from Secret Service");
       expect(existsSync(join(dataDir, "vault.key"))).toBe(false);
     },
+  );
+
+  test.skipIf(process.platform !== "linux")(
+    "does not replace a marked key when lookup times out",
+    () => {
+      const directory = testRoot();
+      const dataDir = join(directory, "data");
+      const binDir = join(directory, "bin");
+      mkdirSync(dataDir);
+      mkdirSync(binDir);
+      writeFileSync(join(dataDir, "vault.key.location"), "secret-service\n");
+      fakeSecretTool(binDir, join(directory, "stored-key"), true, "lookup");
+      expect(() => loadVaultKey(dataDir, "linux")).toThrow("could not be read from Secret Service");
+      expect(existsSync(join(dataDir, "vault.key"))).toBe(false);
+    },
+    15_000,
+  );
+
+  test.skipIf(process.platform !== "linux")(
+    "falls back when secret-tool store times out",
+    () => {
+      const directory = testRoot();
+      const dataDir = join(directory, "data");
+      const binDir = join(directory, "bin");
+      mkdirSync(binDir);
+      fakeSecretTool(binDir, join(directory, "stored-key"), false, "store");
+      const key = loadVaultKey(dataDir, "linux");
+      const file = join(dataDir, "vault.key");
+      expect(readFileSync(file, "utf8")).toBe(key.toString("hex"));
+      expect(statSync(file).mode & 0o777).toBe(0o600);
+    },
+    15_000,
   );
 
   test.skipIf(process.platform !== "linux")(

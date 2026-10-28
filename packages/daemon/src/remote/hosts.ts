@@ -82,7 +82,7 @@ async function sshExec(
     stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
   });
   if (input !== undefined) proc.stdin?.end(input);
-  const timer = setTimeout(() => proc.kill(), timeoutMs);
+  const timer = setTimeout(() => proc.kill("SIGKILL"), timeoutMs);
   const [stdout, stderr, code] = await Promise.all([
     new Promise<string>((resolve) => {
       const chunks: Buffer[] = [];

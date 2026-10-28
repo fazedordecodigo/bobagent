@@ -183,7 +183,7 @@ describe("vault, connectors, computer use, voice e2e", () => {
     },
   );
 
-  test.skipIf(process.platform !== "darwin")("computer use is opt-in per agent", async () => {
+  test.skipIf(process.platform === "win32")("computer use is opt-in per agent", async () => {
     expect(await tool(a, "computer_click", { x: 10, y: 20 })).toContain(
       "tool-error:Computer Use is not enabled",
     );

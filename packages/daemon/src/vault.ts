@@ -44,6 +44,7 @@ function runSecretTool(command: string, args: string[], input?: string) {
   return spawnSync(command, args, {
     input,
     encoding: "utf8",
+    timeout: 10_000,
     windowsHide: process.platform === "win32",
     maxBuffer: 1024 * 1024,
   });
@@ -103,6 +104,7 @@ function protectWithDpapi(hex: string): string {
     {
       input: hex,
       encoding: "utf8",
+      timeout: 30_000,
       windowsHide: true,
       maxBuffer: 1024 * 1024,
     },
@@ -120,7 +122,7 @@ function unprotectWithDpapi(value: string): Buffer {
     "$base64 = [Console]::In.ReadToEnd().Trim()",
     "$bytes = [Convert]::FromBase64String($base64)",
     "$plain = [Security.Cryptography.ProtectedData]::Unprotect($bytes, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)",
-    "[Convert]::ToHexString($plain).ToLowerInvariant()",
+    "$hex = -join ($plain | ForEach-Object { $_.ToString('x2') })",
   ].join("; ");
   const result = spawnSync(
     "powershell.exe",
@@ -128,6 +130,7 @@ function unprotectWithDpapi(value: string): Buffer {
     {
       input: value,
       encoding: "utf8",
+      timeout: 30_000,
       windowsHide: true,
       maxBuffer: 1024 * 1024,
     },
