@@ -19,6 +19,7 @@ import { TABS, ToolBody, type ToolTab } from "./components/ToolsView";
 import { UpdateButton } from "./components/UpdateButton";
 import { useOverview } from "./hooks/useOverview";
 import { DaemonClient } from "./lib/daemon";
+import { mod } from "./lib/platform";
 import { MonoAv, mono, Pill, role, type UiStatus } from "./lib/ui";
 
 type View =
@@ -614,7 +615,7 @@ export default function App() {
           <button type="button" className="task-item" onClick={() => setPalette({})}>
             <Icon name="search" />
             <span>Buscar…</span>
-            <span className="meta">⌘K</span>
+            <span className="meta">{mod}K</span>
           </button>
           <UpdateButton />
         </div>

@@ -1,6 +1,8 @@
+import type { ChildProcess } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import type { Subprocess } from "bun";
+import { delimiter, join } from "node:path";
+import { resolveCommandIn, spawnEnv } from "./env/login-path";
+import { spawnChild } from "./env/spawn";
 
 // Voice: text-to-speech with macOS `say` (or UPBOT_TTS_COMMAND, text on stdin) and
 // speech-to-text with UPBOT_STT_COMMAND (JSON array, "{file}" = recorded audio path,
@@ -26,7 +28,7 @@ const EXT: Record<string, string> = {
 };
 
 export class Voice {
-  private speaking: Subprocess | null = null;
+  private speaking: ChildProcess | null = null;
 
   constructor(
     private dir: string,
@@ -37,8 +39,15 @@ export class Voice {
     return jsonCommand("UPBOT_TTS_COMMAND") ?? (process.platform === "darwin" ? ["say"] : null);
   }
 
+  private resolve(cmd: string): string | null {
+    return resolveCommandIn(cmd, this.pathEnv().split(delimiter), {
+      platform: process.platform,
+      ...(process.env.PATHEXT ? { pathext: process.env.PATHEXT } : {}),
+    });
+  }
+
   private whisper(): string | null {
-    return Bun.which("whisper", { PATH: this.pathEnv() });
+    return this.resolve("whisper");
   }
 
   status() {
@@ -52,9 +61,11 @@ export class Voice {
     const cmd = this.tts();
     if (!cmd) throw new Error("text-to-speech is not available");
     this.stop();
-    const p = Bun.spawn(cmd, { stdin: "pipe", stdout: "ignore", stderr: "ignore" });
-    p.stdin.write(text.slice(0, 20_000));
-    p.stdin.end();
+    const p = spawnChild(this.resolve(cmd[0]!) ?? cmd[0]!, cmd.slice(1), {
+      stdio: ["pipe", "ignore", "ignore"],
+      env: spawnEnv(undefined, process.platform, this.pathEnv()),
+    });
+    p.stdin?.end(text.slice(0, 20_000));
     this.speaking = p;
   }
 
@@ -81,17 +92,28 @@ export class Voice {
       const cmd = custom
         ? custom.map((a) => a.replaceAll("{file}", file))
         : [whisper!, file, "--model", "base", "--output_format", "txt", "--output_dir", work];
-      const p = Bun.spawn(cmd, {
-        stdout: "pipe",
-        stderr: "pipe",
-        stdin: "ignore",
-        env: { ...process.env, PATH: this.pathEnv() },
+      const p = spawnChild(this.resolve(cmd[0]!) ?? cmd[0]!, cmd.slice(1), {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: spawnEnv(undefined, process.platform, this.pathEnv()),
       });
       const timer = setTimeout(() => p.kill(), 120_000);
       const [out, err, code] = await Promise.all([
-        new Response(p.stdout).text(),
-        new Response(p.stderr).text(),
-        p.exited,
+        new Promise<string>((resolve) => {
+          const chunks: Buffer[] = [];
+          p.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
+          p.stdout?.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+          if (!p.stdout) resolve("");
+        }),
+        new Promise<string>((resolve) => {
+          const chunks: Buffer[] = [];
+          p.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk));
+          p.stderr?.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+          if (!p.stderr) resolve("");
+        }),
+        new Promise<number>((resolve, reject) => {
+          p.once("error", reject);
+          p.once("close", (exitCode) => resolve(exitCode ?? 1));
+        }),
       ]);
       clearTimeout(timer);
       if (code !== 0) throw new Error(`transcription failed: ${err.trim().slice(0, 300)}`);

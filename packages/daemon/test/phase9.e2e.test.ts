@@ -166,7 +166,11 @@ describe("routines + attachments e2e", () => {
   test("attachments are saved in the workspace, zips extracted, paths given to the agent", async () => {
     const work = tmp("p9-zip-");
     writeFileSync(join(work, "notes.txt"), "zipped content");
-    expect(Bun.spawnSync(["zip", "-q", "bundle.zip", "notes.txt"], { cwd: work }).exitCode).toBe(0);
+    const zipCommand =
+      process.platform === "win32"
+        ? ["tar", "-a", "-cf", "bundle.zip", "notes.txt"]
+        : ["zip", "-q", "bundle.zip", "notes.txt"];
+    expect(Bun.spawnSync(zipCommand, { cwd: work }).exitCode).toBe(0);
     const zip = readFileSync(join(work, "bundle.zip")).toString("base64");
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64");
     const { queueId } = (await c.request("chat.send", {

@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import type { Agent, BrowserTab } from "@upbot/protocol";
 import type { Subprocess } from "bun";
 import type { Broadcast } from "./rpc";
@@ -7,23 +7,59 @@ import type { Broadcast } from "./rpc";
 // Agent-controllable browser: one Chromium-family browser (Chrome/Chromium/Edge/Brave) with
 // its own profile, driven over the Chrome DevTools Protocol. Each agent gets its own tab.
 
-const CANDIDATES = [
+const MAC_CANDIDATES = [
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   "/Applications/Chromium.app/Contents/MacOS/Chromium",
   "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
   "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+];
+const LINUX_CANDIDATES = [
   "/usr/bin/google-chrome",
+  "/usr/bin/google-chrome-stable",
   "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
+  "/snap/bin/chromium",
+  "/usr/bin/microsoft-edge",
+  "/usr/bin/brave-browser",
 ];
 const NAV_TIMEOUT = 20_000;
 const SNAPSHOT_CHARS = 15_000;
 
 type Json = Record<string, unknown>;
 
+function envValue(env: Record<string, string | undefined>, key: string): string | undefined {
+  return Object.entries(env).find(([name]) => name.toLowerCase() === key.toLowerCase())?.[1];
+}
+
+export function browserCandidates(
+  platform: string,
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  if (platform === "darwin") return MAC_CANDIDATES;
+  if (platform === "linux") return LINUX_CANDIDATES;
+  if (platform !== "win32") return [];
+
+  const roots = [
+    envValue(env, "ProgramFiles"),
+    envValue(env, "ProgramFiles(x86)"),
+    envValue(env, "LOCALAPPDATA"),
+  ].filter((value): value is string => Boolean(value));
+  const chrome = roots.map((root) =>
+    win32.join(root, "Google", "Chrome", "Application", "chrome.exe"),
+  );
+  const edge = [envValue(env, "ProgramFiles"), envValue(env, "ProgramFiles(x86)")]
+    .filter((value): value is string => Boolean(value))
+    .map((root) => win32.join(root, "Microsoft", "Edge", "Application", "msedge.exe"));
+  const brave = [envValue(env, "ProgramFiles"), envValue(env, "ProgramFiles(x86)")]
+    .filter((value): value is string => Boolean(value))
+    .map((root) => win32.join(root, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"));
+  return [...chrome, ...edge, ...brave];
+}
+
 export function findBrowser(): string | null {
   const override = process.env.UPBOT_BROWSER_PATH;
   if (override) return existsSync(override) ? override : null;
-  return CANDIDATES.find((p) => existsSync(p)) ?? null;
+  return browserCandidates(process.platform).find((p) => existsSync(p)) ?? null;
 }
 
 class Cdp {
@@ -163,7 +199,12 @@ export class BrowserService {
         ...(headless ? ["--headless=new"] : []),
         "about:blank",
       ],
-      { stdout: "ignore", stderr: "ignore", stdin: "ignore" },
+      {
+        stdout: "ignore",
+        stderr: "ignore",
+        stdin: "ignore",
+        windowsHide: process.platform === "win32",
+      },
     );
     const deadline = Date.now() + 20_000;
     while (!existsSync(portFile) || readFileSync(portFile, "utf8").split("\n").length < 2) {

@@ -3,13 +3,14 @@
 // Firecracker microVM per agent. The MCP bridge reaches back over an `ssh -R` unix socket.
 
 import type { Database } from "bun:sqlite";
-import { type ChildProcess, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import type { AgentPlacement, HostPreflight, Isolation, RemoteHost } from "@upbot/protocol";
 // @ts-expect-error -- Bun text import of the helper source (uploaded verbatim to hosts)
 import helperSource from "../../../host/src/main.ts" with { type: "text" };
 import { spawnEnv } from "../env/login-path";
+import { spawnChild } from "../env/spawn";
 import type { McpServerSpec, RemoteLaunch } from "../providers/types";
 import { ProviderError } from "../providers/types";
 
@@ -75,17 +76,30 @@ async function sshExec(
   timeoutMs = 60_000,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   const [bin, args] = sshArgs(host, [], remoteCmd);
-  const proc = Bun.spawn([bin, ...args], {
+  const proc = spawnChild(bin, args, {
+    cwd: homedir(),
     env: spawnEnv(),
-    stdin: input !== undefined ? new Blob([input]) : "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
+    stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
   });
-  const timer = setTimeout(() => proc.kill("SIGKILL"), timeoutMs);
+  if (input !== undefined) proc.stdin?.end(input);
+  const timer = setTimeout(() => proc.kill(), timeoutMs);
   const [stdout, stderr, code] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
+    new Promise<string>((resolve) => {
+      const chunks: Buffer[] = [];
+      proc.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
+      proc.stdout?.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+      if (!proc.stdout) resolve("");
+    }),
+    new Promise<string>((resolve) => {
+      const chunks: Buffer[] = [];
+      proc.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk));
+      proc.stderr?.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+      if (!proc.stderr) resolve("");
+    }),
+    new Promise<number>((resolve, reject) => {
+      proc.once("error", reject);
+      proc.once("close", (exitCode) => resolve(exitCode ?? 1));
+    }),
   ]);
   clearTimeout(timer);
   return { code, stdout, stderr };
@@ -328,7 +342,7 @@ export function remoteLaunch(
     spawn(cmd: string[], env: Record<string, string>): ChildProcess {
       const forward = bridgePort ? ["-R", `${socket}:127.0.0.1:${bridgePort}`] : [];
       const [bin, args] = sshArgs(host, forward, `${BUN_PATH} exec bun ${shq(helper)} run`);
-      const child = spawn(bin, args, {
+      const child = spawnChild(bin, args, {
         cwd: homedir(),
         stdio: ["pipe", "pipe", "pipe"],
         env: spawnEnv(),

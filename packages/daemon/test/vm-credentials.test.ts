@@ -83,12 +83,15 @@ describe("microVM credentials", () => {
     };
   }
 
-  test("injects credentials into microVM run specs only", async () => {
-    const vm = await specFor("firecracker");
-    expect(vm.spec.env).toEqual({ NO_COLOR: "1", CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-test" });
-    expect(vm.launch.credentials.CLAUDE_CODE_OAUTH_TOKEN).toBe("sk-ant-oat01-test");
-    const proc = await specFor("none");
-    expect(proc.spec.env).toEqual({ NO_COLOR: "1" });
-    expect(proc.launch.credentials).toEqual({});
-  });
+  test.skipIf(process.platform === "win32")(
+    "injects credentials into microVM run specs only",
+    async () => {
+      const vm = await specFor("firecracker");
+      expect(vm.spec.env).toEqual({ NO_COLOR: "1", CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-test" });
+      expect(vm.launch.credentials.CLAUDE_CODE_OAUTH_TOKEN).toBe("sk-ant-oat01-test");
+      const proc = await specFor("none");
+      expect(proc.spec.env).toEqual({ NO_COLOR: "1" });
+      expect(proc.launch.credentials).toEqual({});
+    },
+  );
 });

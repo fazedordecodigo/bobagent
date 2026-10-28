@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { isMac, mod } from "../lib/platform";
 
 export type PaletteItem = {
   id: string;
@@ -102,7 +103,9 @@ export function CommandPalette({
           )}
         </ul>
         <div className="border-t border-zinc-800 px-4 py-2 text-[11px] text-zinc-500">
-          ⌘K buscar · ⌘⇧F bots · ⌘N novo bot · ⌘1–9 trocar de bot · ⌘, configurações · ⌘P páginas
+          {mod}K buscar · {mod}
+          {isMac ? "⇧" : "Shift+"}F bots · {mod}N novo bot · {mod}1–9 trocar de bot · {mod},
+          configurações · {mod}P páginas
         </div>
       </div>
     </div>

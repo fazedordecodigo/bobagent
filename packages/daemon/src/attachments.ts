@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { basename, extname, join } from "node:path";
+import { basename, extname, isAbsolute, join, win32 } from "node:path";
 import type { ChatAttachment } from "@upbot/protocol";
 import { RpcError } from "./runtime/agent-runtime";
 
@@ -47,10 +47,30 @@ export function saveAttachments(
     };
     if (kindOf(att.mime, name) === "zip archive") {
       const out = join(dir, `${basename(name, extname(name))}-unzipped`);
-      // unzip refuses entries escaping the target dir ("../") and absolute paths by default
-      const r = Bun.spawnSync(["unzip", "-qq", "-o", path, "-d", out], {
+      const windows = process.platform === "win32";
+      if (windows) mkdirSync(out, { recursive: true });
+      const command = windows ? "tar" : "unzip";
+      const args = windows ? ["-xf", path, "-C", out] : ["-qq", "-o", path, "-d", out];
+      if (windows) {
+        const listing = Bun.spawnSync(["tar", "-tf", path], {
+          stdout: "pipe",
+          stderr: "ignore",
+          windowsHide: true,
+        });
+        const entries = listing.stdout.toString("utf8").split(/\r?\n/).filter(Boolean);
+        const unsafe = entries.some(
+          (entry) =>
+            isAbsolute(entry) ||
+            win32.isAbsolute(entry) ||
+            /^[A-Za-z]:/.test(entry) ||
+            entry.split(/[\\/]/).includes(".."),
+        );
+        if (listing.exitCode !== 0 || unsafe) return att;
+      }
+      const r = Bun.spawnSync([command, ...args], {
         stdout: "ignore",
         stderr: "ignore",
+        windowsHide: windows,
       });
       if (r.exitCode === 0) att.extractedTo = out;
     }

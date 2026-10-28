@@ -7,7 +7,7 @@ import { DaemonClient, type DaemonHandle, FAKE_AGENT, readPids, startDaemon, tmp
 const TOKEN = `remote-test-${crypto.randomUUID()}`;
 const FAKE_SSH = join(import.meta.dir, "fixtures/fake-ssh.ts");
 
-describe("remote hosts + subagents e2e", () => {
+describe.skipIf(process.platform === "win32")("remote hosts + subagents e2e", () => {
   let dataDir: string;
   let stateDir: string;
   let sshHome: string;

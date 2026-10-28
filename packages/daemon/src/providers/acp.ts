@@ -1,8 +1,9 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import type { ConfigOption, ProviderId } from "@upbot/protocol";
 import { resolveCommand, spawnEnv } from "../env/login-path";
+import { spawnChild } from "../env/spawn";
 import {
   AUTH_RE,
   authMessage,
@@ -487,7 +488,7 @@ export class AcpDriver implements ProviderDriver {
     const credential = Object.values(opts.remote?.credentials ?? {})[0] ?? null;
     const child = opts.remote
       ? opts.remote.spawn([bin, ...cmd.slice(1)], { NO_COLOR: "1", ...opts.remote.credentials })
-      : spawn(bin, cmd.slice(1), {
+      : spawnChild(bin, cmd.slice(1), {
           cwd,
           stdio: ["pipe", "pipe", "pipe"],
           env: spawnEnv({ NO_COLOR: "1" }),

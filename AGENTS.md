@@ -1,6 +1,6 @@
 # UpBot
 
-Local-first macOS desktop hub for a team of collaborating general-purpose AI bots
+Local-first cross-platform desktop hub for a team of collaborating general-purpose AI bots
 (web, files, email, connected apps). Code and RPC names still say "agent"; the UI says "bot".
 Renamed from BobAgent: `src/legacy.ts` moves `~/BobAgent` -> `~/UpBot` and repoints
 workspace paths; Rust moves the `com.bobagent.desktop` data dir; the vault key falls back to
@@ -74,8 +74,9 @@ Channels are "Group chats" in the UI. `ChannelService.post(channelId, text, repl
 `@Name` sends to those members, `@everyone`/`@all` to every member, a reply to a bot's
 message goes to that bot (quoted as `<in_reply_to>`), otherwise the owner. Member replies are
 forwarded to the owner only for bot-originated work (`queue.from_agent_id`). Migration 18 adds
-`channel_messages.reply_to`. UI: `CommandPalette` (⌘K all, ⌘⇧F bots) and shortcuts in
-`App.tsx` (⌘N new bot, ⌘1–9 switch bot, ⌘, settings, ⌘P pages).
+`channel_messages.reply_to`. UI: `CommandPalette` (⌘K all, ⌘⇧F bots on macOS; Ctrl+K and
+Ctrl+Shift+F elsewhere) and shortcuts in `App.tsx` (⌘N new bot, ⌘1–9 switch bot, ⌘, settings,
+⌘P pages on macOS; Ctrl equivalents elsewhere).
 
 ## ACP providers in microVMs
 
@@ -262,7 +263,8 @@ to an agent with `trigger` schedule|webhook|manual. Schedules: `every <n>m|h|d`,
 `queue.meta_json` puts `routine`/`attachments` on the user_message item.
 Attachments: `chat.send {attachments:[{name,mime,dataBase64}]}` (max 10, 25 MB total) are
 written to `<workspace>/attachments/<id>/` (`src/attachments.ts`, basename-sanitized, ZIPs
-extracted with `unzip`) and listed in an `<attachments>` block. Tests: `test/phase9.e2e.test.ts`.
+extracted with `unzip` or Windows `tar`, with unsafe archive paths rejected) and listed in an
+`<attachments>` block. Tests: `test/phase9.e2e.test.ts`.
 
 ## Agent browser (Phase 10)
 
@@ -279,9 +281,13 @@ browser is installed).
 
 ## Vault, connectors, Computer Use, voice (Phase 11)
 
-Vault (`src/vault.ts`, migration 10 `vault` + `settings`): AES-256-GCM secrets; key in the
-macOS Keychain (service `UpBot`, account `vault-key`), else `<data-dir>/vault.key`;
-`UPBOT_VAULT_KEY` (64 hex) overrides for tests. Per-secret agent allowlist. RPC
+Vault (`src/vault.ts`, migration 10 `vault` + `settings`): AES-256-GCM secrets; key precedence
+is `UPBOT_VAULT_KEY` (64 hex, tests), macOS Keychain (service `UpBot`, account `vault-key`),
+an existing `<data-dir>/vault.key`, then Windows DPAPI or Linux Secret Service. Linux writes
+`vault.key.location` after a successful Secret Service store so a locked/unavailable keyring
+cannot silently orphan secrets; when secure storage is unavailable, a 0600 plaintext key file
+is used with a warning. Existing plaintext keys are kept without migration. Per-secret agent
+allowlist. RPC
 `vault.list/set/setAccess/delete` (values never returned), event `vault.changed`; bridge
 `vault_list`, `vault_get`. Connectors (`src/connectors.ts`) use shared secrets without
 returning them: `connector.github` -> `github_api` (REST proxy, token redacted,
@@ -346,9 +352,11 @@ UI `TeamView`. Tests: `test/team.e2e.test.ts` (spawns the relay).
 
 ## CI, releases, updates, branding
 
-- `.github/workflows/ci.yml` (macos-14): lint, typecheck, test, build:daemon, cargo check, vite build.
-- `.github/workflows/release.yml`: on `v*` tags, tauri-action builds `.app` + `.dmg` with
-  `createUpdaterArtifacts`, publishes a GitHub release with `latest.json`. Updater signing
+- `.github/workflows/ci.yml`: lint/typecheck on Ubuntu; tests, daemon build, Rust check and
+  desktop build on macOS, Linux and Windows.
+- `.github/workflows/release.yml`: on `v*` tags, tauri-action builds macOS `.app`/`.dmg`,
+  Linux `.AppImage`/`.deb` and an unsigned per-user Windows NSIS `.exe` into a draft release.
+  It verifies merged updater metadata for all three OSes before publishing. Updater signing
   uses the `TAURI_SIGNING_PRIVATE_KEY` repo secret (pubkey in `tauri.conf.json`
   `plugins.updater`); Apple signing/notarization turn on when `APPLE_CERTIFICATE`,
   `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` (+ `APPLE_ID`, `APPLE_PASSWORD`,
@@ -431,12 +439,15 @@ configs, so it does not reflect stock defaults. Gemini's config path is unverifi
 ## Verified commands (run from repo root)
 
 - `bun install` — install workspace deps.
-- `bun run build:daemon` — compile `upbotd-aarch64-apple-darwin` into
-  `apps/desktop/src-tauri/binaries/` (Tauri externalBin naming).
+- `bun run build:daemon` — compile the daemon for the host OS/architecture into
+  `apps/desktop/src-tauri/binaries/` (Tauri externalBin naming);
+  `bun scripts/build-daemon.ts --target <rust-triple>` selects a supported cross-build target.
 - `bun run dev` — build the sidecar, then `tauri dev` (Vite on :1420).
-- `bun run build:app` — `tauri build --debug --bundles app` ->
-  `apps/desktop/src-tauri/target/debug/bundle/macos/UpBot.app`.
+- `bun run build:app` — build the debug desktop bundle for the host platform (macOS app,
+  Linux AppImage/deb, or Windows NSIS).
 - `bun run test` — `bun test packages/daemon packages/host` (daemon e2e: spawns the real daemon).
+- Computer Use and built-in `say` voice are macOS-only; Linux uses Secret Service for the
+  vault key when available, while Windows uses DPAPI.
 - `bun run lint` — `biome check .`
 - `bun run typecheck` — `tsc -p` for protocol, daemon, relay, host, desktop (sequential).
 - `cd apps/desktop/src-tauri && cargo check` — Rust side.
@@ -444,6 +455,10 @@ configs, so it does not reflect stock defaults. Gemini's config path is unverifi
 ## Conventions
 
 - Dependencies are pinned to exact versions.
+- Windows command lookup follows PATHEXT and searches PATH directories in order; environment
+  PATH keys are case-insensitive and Windows provider CLI launches use `cross-spawn`.
+- On Windows, `mergedPath` skips login shells. On Linux it uses `$SHELL`, falling back to
+  `/bin/bash`; macOS falls back to `/bin/zsh`.
 - All client→daemon calls validate params with the protocol schemas; unknown methods
   and invalid params return `bad_request`.
 - The daemon requires `Authorization: Bearer <token>` on `/health` and `?token=` on

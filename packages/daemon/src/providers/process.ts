@@ -1,6 +1,7 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import type { ProviderId } from "@upbot/protocol";
 import { resolveCommand, spawnEnv } from "../env/login-path";
+import { spawnChild } from "../env/spawn";
 import { ProviderError, type RemoteLaunch } from "./types";
 
 export const STDERR_TAIL_LINES = 50;
@@ -133,7 +134,7 @@ export function spawnProvider(
   const stderrLines: string[] = [];
   const child = remote
     ? remote.spawn([bin, ...args], { NO_COLOR: "1", ...extraEnv })
-    : spawn(bin, args, {
+    : spawnChild(bin, args, {
         cwd,
         stdio: ["pipe", "pipe", "pipe"],
         env: spawnEnv({ NO_COLOR: "1", ...extraEnv }),
