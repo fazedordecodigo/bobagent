@@ -11,7 +11,7 @@
     "dev": "bun run build:daemon && bun run --cwd apps/desktop tauri dev",
     "build:daemon": "bun build --compile --minify --target=bun-darwin-arm64 packages/daemon/src/main.ts --outfile apps/desktop/src-tauri/binaries/upbotd-aarch64-apple-darwin",
     "build:app": "bun run build:daemon && bun run --cwd apps/desktop tauri build --debug --bundles app",
-    "test": "bun test packages/daemon packages/host",
+    "test": "bun test packages/daemon packages/host apps/desktop/test",
     "test:firecracker": "UPBOT_REAL_FIRECRACKER=1 bun test packages/host/test/firecracker.real.test.ts packages/daemon/test/firecracker-ssh.real.test.ts",
     "test:firecracker:providers": "UPBOT_REAL_FIRECRACKER=1 UPBOT_REAL_PROVIDERS=1 bun test packages/host/test/firecracker.real.test.ts packages/daemon/test/firecracker-ssh.real.test.ts",
     "lint": "biome check .",
