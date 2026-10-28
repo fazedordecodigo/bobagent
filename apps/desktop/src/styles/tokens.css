@@ -91,6 +91,10 @@
   --dur-fast: 150ms;   /* cor, fundo, borda */
   --dur-theme: 200ms;  /* troca de tema */
   --dur-layer: 180ms;  /* diálogo, paleta, painel lateral */
+  --dur-status: 1600ms;
+  --dur-spin: 1200ms;
+  --dur-preview: 7000ms;
+  --dur-progress: 400ms;
 }
 
 [data-theme="dark"] {
@@ -111,5 +115,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation: none !important; transition: none !important; }
+  :root { --dur-fast: 0ms; --dur-theme: 0ms; --dur-layer: 0ms; --dur-progress: 0ms; }
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }

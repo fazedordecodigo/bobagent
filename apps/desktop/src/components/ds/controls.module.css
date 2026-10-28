@@ -52,7 +52,7 @@ textarea.input { min-height: 120px; resize: vertical; line-height: 1.5; }
 .err { --st: var(--st-err); }
 .pill { display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 10px 0 9px; border-radius: var(--radius-pill); font-size: var(--fs-meta); font-weight: 500; white-space: nowrap; background: color-mix(in oklch, var(--st) var(--pill-mix), transparent); color: color-mix(in oklch, var(--st) var(--pill-ink), var(--fg)); }
 .pillDot { width: 7px; height: 7px; border-radius: 50%; background: var(--st); }
-.run .pillDot { animation: pulse 1.6s ease-in-out infinite; }
+.run .pillDot { animation: pulse var(--dur-status) ease-in-out infinite; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--st); }
 @keyframes pulse { 50% { opacity: .35; } }
 .counter { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: var(--radius-pill); font: var(--fs-label)/1 var(--font-mono); font-variant-numeric: tabular-nums; background: color-mix(in oklch, var(--st-wait) var(--pill-mix), transparent); color: color-mix(in oklch, var(--st-wait) var(--pill-ink), var(--fg)); }
@@ -63,4 +63,3 @@ textarea.input { min-height: 120px; resize: vertical; line-height: 1.5; }
 .chip svg { width: 15px; height: 15px; color: var(--muted); }
 .chip:hover { border-color: var(--fg); background: var(--fg-soft); }
 .kbd { font: var(--fs-label)/1.5 var(--font-mono); font-variant-numeric: tabular-nums; padding: 2px 6px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: var(--radius-xs); color: var(--muted); background: var(--surface); }
-@media (prefers-reduced-motion: reduce) { .run .pillDot { animation: none; } }
