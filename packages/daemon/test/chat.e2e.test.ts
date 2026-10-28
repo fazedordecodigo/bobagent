@@ -68,11 +68,12 @@ describe("chat e2e (fake acp agent)", () => {
     c = await DaemonClient.connect(daemon.port, TOKEN);
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     c?.close();
     try {
       daemon.proc.kill("SIGKILL");
     } catch {}
+    await daemon.proc.exited;
     rmSync(dataDir, { recursive: true, force: true });
     rmSync(agentsRoot, { recursive: true, force: true });
     rmSync(stateDir, { recursive: true, force: true });

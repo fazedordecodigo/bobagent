@@ -96,12 +96,13 @@ describe("vault, connectors, computer use, voice e2e", () => {
     })) as Agent;
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     c?.close();
     gh?.stop(true);
     try {
       daemon.proc.kill("SIGKILL");
     } catch {}
+    await daemon.proc.exited;
     for (const pid of readPids(stateDir)) {
       try {
         process.kill(pid, "SIGKILL");

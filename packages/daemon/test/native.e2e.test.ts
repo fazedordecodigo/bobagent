@@ -92,11 +92,12 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
     c = await DaemonClient.connect(daemon.port, TOKEN);
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     c?.close();
     try {
       daemon.proc.kill("SIGKILL");
     } catch {}
+    await daemon.proc.exited;
     for (const pid of readPids(stateDir)) {
       try {
         process.kill(pid, "SIGKILL");
@@ -286,6 +287,7 @@ describe("codex signed out", () => {
     } finally {
       c.close();
       d.proc.kill("SIGKILL");
+      await d.proc.exited;
       for (const p of [dataDir, agentsRoot, stateDir]) rmSync(p, { recursive: true, force: true });
     }
   });

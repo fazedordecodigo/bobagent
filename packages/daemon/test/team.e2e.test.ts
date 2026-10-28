@@ -94,7 +94,7 @@ describe("teams via relay e2e", () => {
     })) as Agent;
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     for (const c of clients) c.close();
     relay?.proc.kill();
     for (const h of daemons) {
@@ -102,6 +102,7 @@ describe("teams via relay e2e", () => {
         h.proc.kill("SIGKILL");
       } catch {}
     }
+    await Promise.all(daemons.map((h) => h.proc.exited));
     for (const d of dirs) {
       for (const pid of readPids(d)) {
         try {

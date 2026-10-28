@@ -100,9 +100,9 @@ describe.skipIf(!hasBrowser)("agent browser e2e (headless Chromium over CDP)", (
     expect(await tool("browser_back")).toContain("/result?q=hello+world");
     expect(await tool("browser_click", { ref: 99 })).toContain("tool-error:element [99] not found");
     const shot = await tool("browser_screenshot");
-    const path = /to (\/.+\.png)$/.exec(shot)?.[1];
-    expect(path?.startsWith(a.workspacePath)).toBe(true);
-    expect(existsSync(path!)).toBe(true);
+    const screenshot = /to (.+\.png)$/.exec(shot)?.[1];
+    expect(screenshot?.startsWith(a.workspacePath)).toBe(true);
+    expect(existsSync(screenshot!)).toBe(true);
     expect(await tool("browser_open", { url: "file:///etc/hosts" })).toContain(
       "tool-error:only http(s)",
     );

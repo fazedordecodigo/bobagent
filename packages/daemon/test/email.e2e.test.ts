@@ -120,12 +120,13 @@ describe("email connector e2e", () => {
     })) as Agent;
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     c?.close();
     smtp?.close();
     try {
       daemon.proc.kill("SIGKILL");
     } catch {}
+    await daemon.proc.exited;
     for (const pid of readPids(stateDir)) {
       try {
         process.kill(pid, "SIGKILL");

@@ -216,7 +216,15 @@ describe("upbot-host", () => {
   test("local run executes the command in the agent workspace", () => {
     const root = mkdtempSync(join(tmpdir(), "host-root-"));
     const r = spawnSync("bun", [MAIN, "run"], {
-      input: `${JSON.stringify({ agentId: "ag1", isolation: "none", cmd: ["sh", "-c", "pwd; cat"] })}\nhello`,
+      input: `${JSON.stringify({
+        agentId: "ag1",
+        isolation: "none",
+        cmd: [
+          process.execPath,
+          "-e",
+          "console.log(process.cwd()); process.stdin.pipe(process.stdout)",
+        ],
+      })}\nhello`,
       env: { ...process.env, UPBOT_HOST_ROOT: root },
       encoding: "utf8",
     });

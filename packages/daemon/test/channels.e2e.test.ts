@@ -53,11 +53,12 @@ describe("channels e2e", () => {
     bob = await newAgent("Bob");
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     c?.close();
     try {
       daemon.proc.kill("SIGKILL");
     } catch {}
+    await daemon.proc.exited;
     for (const pid of readPids(stateDir)) {
       try {
         process.kill(pid, "SIGKILL");

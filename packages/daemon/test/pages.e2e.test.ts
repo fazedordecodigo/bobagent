@@ -47,11 +47,12 @@ describe("pages e2e", () => {
     })) as Agent;
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     c?.close();
     try {
       daemon.proc.kill("SIGKILL");
     } catch {}
+    await daemon.proc.exited;
     for (const pid of readPids(stateDir)) {
       try {
         process.kill(pid, "SIGKILL");
@@ -92,7 +93,9 @@ describe("pages e2e", () => {
   });
 
   test("files outside the workspaces are rejected; delete removes the files", async () => {
-    expect(await tool(a, "page_publish", { title: "x", file: "/etc/hosts" })).toContain(
+    const outsideFile = join(dataDir, "outside.txt");
+    writeFileSync(outsideFile, "outside");
+    expect(await tool(a, "page_publish", { title: "x", file: outsideFile })).toContain(
       "must be inside your workspace",
     );
     const [page] = (await c.request("pages.list", {})) as Page[];

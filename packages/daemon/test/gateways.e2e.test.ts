@@ -163,12 +163,13 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
     })) as Agent;
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     c?.close();
     fake?.stop(true);
     try {
       daemon.proc.kill("SIGKILL");
     } catch {}
+    await daemon.proc.exited;
     for (const pid of readPids(stateDir)) {
       try {
         process.kill(pid, "SIGKILL");

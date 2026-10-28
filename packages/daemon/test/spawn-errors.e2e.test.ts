@@ -28,11 +28,12 @@ describe("asynchronous child spawn errors", () => {
     })) as Agent;
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     client?.close();
     try {
       daemon.proc.kill("SIGKILL");
     } catch {}
+    await daemon.proc.exited;
     for (const directory of [dataDir, agentsRoot]) {
       if (directory) rmSync(directory, { recursive: true, force: true });
     }
@@ -53,7 +54,7 @@ describe("asynchronous child spawn errors", () => {
   });
 
   test("provider startup exposes asynchronous spawn failures", async () => {
-    const proc = spawnProvider("definitely-missing-upbot-cmd", [], process.cwd());
+    const proc = spawnProvider(`${process.execPath}-missing-upbot.exe`, [], process.cwd());
     try {
       await expect(proc.waitForSpawn()).rejects.toThrow();
     } finally {

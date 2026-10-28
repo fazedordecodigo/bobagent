@@ -61,7 +61,9 @@ export class Voice {
     const cmd = this.tts();
     if (!cmd) throw new Error("text-to-speech is not available");
     this.stop();
-    const p = spawnChild(this.resolve(cmd[0]!) ?? cmd[0]!, cmd.slice(1), {
+    const bin = this.resolve(cmd[0]!);
+    if (!bin) throw new Error(`text-to-speech command not found: ${cmd[0]}`);
+    const p = spawnChild(bin, cmd.slice(1), {
       stdio: ["pipe", "ignore", "ignore"],
       env: spawnEnv(undefined, process.platform, this.pathEnv()),
     });
@@ -104,7 +106,9 @@ export class Voice {
       const cmd = custom
         ? custom.map((a) => a.replaceAll("{file}", file))
         : [whisper!, file, "--model", "base", "--output_format", "txt", "--output_dir", work];
-      const p = spawnChild(this.resolve(cmd[0]!) ?? cmd[0]!, cmd.slice(1), {
+      const bin = this.resolve(cmd[0]!);
+      if (!bin) throw new Error(`speech-to-text command not found: ${cmd[0]}`);
+      const p = spawnChild(bin, cmd.slice(1), {
         stdio: ["ignore", "pipe", "pipe"],
         env: spawnEnv(undefined, process.platform, this.pathEnv()),
       });

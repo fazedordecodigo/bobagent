@@ -4,6 +4,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Agent, ChatItem, Routine, RoutineRun, Turn } from "@upbot/protocol";
 import { parseSchedule } from "../src/routines";
+import { storedZip } from "./fixtures/stored-zip";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -73,11 +74,12 @@ describe("routines + attachments e2e", () => {
     })) as Agent;
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     c?.close();
     try {
       daemon.proc.kill("SIGKILL");
     } catch {}
+    await daemon.proc.exited;
     for (const pid of readPids(stateDir)) {
       try {
         process.kill(pid, "SIGKILL");
@@ -164,14 +166,9 @@ describe("routines + attachments e2e", () => {
   });
 
   test("attachments are saved in the workspace, zips extracted, paths given to the agent", async () => {
-    const work = tmp("p9-zip-");
-    writeFileSync(join(work, "notes.txt"), "zipped content");
-    const zipCommand =
-      process.platform === "win32"
-        ? ["tar", "-a", "-cf", "bundle.zip", "notes.txt"]
-        : ["zip", "-q", "bundle.zip", "notes.txt"];
-    expect(Bun.spawnSync(zipCommand, { cwd: work }).exitCode).toBe(0);
-    const zip = readFileSync(join(work, "bundle.zip")).toString("base64");
+    const zip = storedZip([
+      { name: "notes.txt", contents: Buffer.from("zipped content") },
+    ]).toString("base64");
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64");
     const { queueId } = (await c.request("chat.send", {
       agentId: a.id,
@@ -199,6 +196,5 @@ describe("routines + attachments e2e", () => {
     expect(p).toContain("<attachments>");
     expect(p).toContain("shot.png (image, image/png, 4 bytes)");
     expect(p).toContain("extracted to");
-    rmSync(work, { recursive: true, force: true });
   });
 });

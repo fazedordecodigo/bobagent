@@ -53,11 +53,12 @@ describe("avatars, memories, skills, agent creation e2e", () => {
     a = await newAgent("Mem");
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     c?.close();
     try {
       daemon.proc.kill("SIGKILL");
     } catch {}
+    await daemon.proc.exited;
     for (const pid of readPids(stateDir)) {
       try {
         process.kill(pid, "SIGKILL");

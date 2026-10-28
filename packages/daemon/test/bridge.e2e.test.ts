@@ -70,11 +70,12 @@ describe("agent-to-agent bridge e2e", () => {
     bob = await newAgent("Bob");
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     c?.close();
     try {
       daemon.proc.kill("SIGKILL");
     } catch {}
+    await daemon.proc.exited;
     for (const pid of readPids(stateDir)) {
       try {
         process.kill(pid, "SIGKILL");
@@ -179,7 +180,9 @@ describe("agent-to-agent bridge e2e", () => {
     const before = existsSync(join(sharedRoot, "Transfers"))
       ? readdirSync(join(sharedRoot, "Transfers")).length
       : 0;
-    await turn(alice.id, 'mcp:share_file {"to":"Bob","path":"/etc/hosts"}');
+    const outsideFile = join(dataDir, "outside.txt");
+    writeFileSync(outsideFile, "outside");
+    await turn(alice.id, `mcp:share_file ${JSON.stringify({ to: "Bob", path: outsideFile })}`);
     expect(await lastText(alice.id)).toContain("tool-error:only files inside your workspace");
     expect(readdirSync(join(sharedRoot, "Transfers")).length).toBe(before);
   });
