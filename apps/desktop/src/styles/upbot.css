@@ -68,6 +68,7 @@
     .side-bot:hover { background: var(--fg-soft); }
     .side-bot[aria-current="true"] { background: var(--fg); color: var(--bg); }
     .side-bot[aria-current="true"] small { color: color-mix(in oklch, var(--bg) 70%, var(--fg)); }
+    .side-bot[aria-current="true"] .dot:is(.s-idle, .s-queue) { background: color-mix(in oklch, var(--bg) 70%, var(--fg)); }
     .side-empty { padding: 8px 10px; color: var(--muted); font-size: var(--fs-small); }
     .side-foot { display: flex; align-items: center; gap: 10px; padding: 10px 12px; min-height: 64px; border-top: 1px solid var(--border); flex: none; }
     .side-avatar { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--fg); color: var(--bg); font: 800 var(--fs-ui) var(--font-display); flex: none; }

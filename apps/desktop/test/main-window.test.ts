@@ -604,6 +604,53 @@ test("sidebar navigation, real approval counts, routines, groups, profile and th
       .click();
     expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe(theme);
     expect(await page.evaluate(() => localStorage.getItem("upbot.theme"))).toBe(theme);
+    for (const status of ["idle", "queue", "wait", "run", "err", "ok"]) {
+      const row = side
+        .locator(".side-bot")
+        .filter({ has: page.locator(`.dot.s-${status}`) })
+        .first();
+      await row.click();
+      expect(await row.getAttribute("aria-current")).toBe("true");
+      const result = await row.evaluate((element, status) => {
+        const dot = element.querySelector(".dot");
+        if (!dot) throw new Error("Missing status dot");
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 1;
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Missing canvas context");
+        const pixel = (color: string) => {
+          context.fillStyle = color;
+          context.fillRect(0, 0, 1, 1);
+          return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3);
+        };
+        const background = pixel(getComputedStyle(element).backgroundColor);
+        const foreground = pixel(getComputedStyle(dot).backgroundColor);
+        const luminance = (rgb: number[]) => {
+          const linear = rgb.map((value) => {
+            const channel = value / 255;
+            return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+          });
+          return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+        };
+        const a = luminance(background);
+        const b = luminance(foreground);
+        const neutral = status === "idle" || status === "queue";
+        const probe = document.createElement("i");
+        probe.style.background = neutral
+          ? "color-mix(in oklch, var(--bg) 70%, var(--fg))"
+          : `var(--st-${status})`;
+        element.append(probe);
+        const matchesToken =
+          getComputedStyle(probe).backgroundColor === getComputedStyle(dot).backgroundColor;
+        probe.remove();
+        return { contrast: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05), matchesToken };
+      }, status);
+      expect(result.matchesToken).toBe(true);
+      expect(result.contrast).toBeGreaterThanOrEqual(
+        status === "idle" || status === "queue" ? 3 : 1.4,
+      );
+    }
+    await side.locator(".side-bot").filter({ hasText: failed.name }).click();
     const dir = process.env.SIDEBAR_SCREEN_DIR;
     if (dir) {
       mkdirSync(dir, { recursive: true });
