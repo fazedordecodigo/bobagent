@@ -337,6 +337,8 @@ test("native bridge navigation and commands retain real daemon data", async () =
             calls.push({ command, args });
             document.body.dataset.nativeCalls = JSON.stringify(calls);
             if (command === "daemon_connection") return connection;
+            if (command === "notifications_initialize") return false;
+            if (command === "notifications_take_actions") return [];
             if (command === "main_ready") {
               const path = "/node_modules/@tauri-apps/api/event.js";
               void import(/* @vite-ignore */ path).then(({ emit }) =>

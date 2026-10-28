@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod menubar;
+mod notifications;
 
 use rand::RngCore;
 use serde::Serialize;
@@ -162,6 +163,7 @@ fn main() {
         .manage(shared)
         .setup(move |app| {
             menubar::setup(app)?;
+            notifications::setup(app.handle()).map_err(std::io::Error::other)?;
             if let Err(e) = spawn_daemon(app) {
                 let state = app.state::<SharedState>();
                 state.inner.lock().unwrap().error = Some(e);
@@ -174,7 +176,12 @@ fn main() {
             menubar::menubar_hide,
             menubar::open_main,
             menubar::main_ready,
-            menubar::quit_app
+            menubar::quit_app,
+            notifications::notifications_initialize,
+            notifications::notifications_post,
+            notifications::notifications_remove,
+            notifications::notifications_take_actions,
+            notifications::notifications_open
         ])
         .build(tauri::generate_context!())
         .expect("error while building UpBot")
