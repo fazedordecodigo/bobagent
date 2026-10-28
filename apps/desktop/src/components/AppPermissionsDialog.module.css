@@ -1,0 +1,10 @@
+.dialog { width: min(600px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); padding: 0; color: var(--fg); background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow-pop); }
+.dialog::backdrop { background: var(--scrim); }
+.header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 24px; border-bottom: 1px solid var(--border); }
+.header h2 { font: 800 22px var(--font-display); }
+.header p, .lock { color: var(--muted); font-size: 13px; }
+.description { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.body { padding: 20px 24px; display: grid; gap: 16px; font-family: var(--font-body); font-size: 14px; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.footer { display: flex; justify-content: space-between; gap: 12px; padding: 16px 24px; border-top: 1px solid var(--border); }
+@media (max-width: 520px) { .row { align-items: flex-start; flex-direction: column; gap: 8px; } }

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { Approval, ApprovalRule } from "@upbot/protocol";
+import { type Approval, type ApprovalRule, defaultAppPermissions } from "@upbot/protocol";
 import { approvalAction, decideApproval } from "../src/lib/approval-decisions";
 import type { DaemonClient } from "../src/lib/daemon";
 
@@ -28,6 +28,79 @@ function client(
 ): Pick<DaemonClient, "request"> {
   return { request: request as DaemonClient["request"] };
 }
+
+const appApproval: Approval = {
+  ...approval,
+  appId: "notes",
+  appName: "Notas",
+  permission: "write",
+  turnId: "turn",
+};
+
+test("app always restores the exact previous level without touching tool rules", async () => {
+  const calls: [string, unknown][] = [];
+  const c = client(async (method, params) => {
+    calls.push([method, params]);
+    if (method === "approvals.respond")
+      return { ...appApproval, status: "approved", previousLevel: "ask" };
+    if (method === "apps.list")
+      return [{ id: "notes", permissions: { ...defaultAppPermissions, write: "allow" } }];
+    if (method === "apps.update") return {};
+    throw new Error(`Unexpected ${method}`);
+  });
+  const result = await decideApproval(c, appApproval, "always");
+  expect(result.message).toContain("Preferência de permissão");
+  expect(result.undo).toBeDefined();
+  await result.undo!();
+  expect(calls).toEqual([
+    ["approvals.respond", { id: approval.id, decision: "always" }],
+    ["apps.list", {}],
+    ["apps.update", { id: "notes", permissions: { write: "ask" } }],
+  ]);
+});
+
+test("app task, deny, sensitive always and missing previous level expose no undo", async () => {
+  for (const decision of ["task", "deny", "always"] as const) {
+    const c = client(async () => ({
+      ...appApproval,
+      status: decision === "deny" ? "denied" : "approved",
+    }));
+    expect((await decideApproval(c, appApproval, decision)).undo).toBeUndefined();
+    expect(
+      (await decideApproval(c, { ...appApproval, permission: "send" }, decision)).undo,
+    ).toBeUndefined();
+  }
+  const c = client(async () => ({ ...appApproval, status: "denied" }));
+  expect((await decideApproval(c, appApproval, "always")).message).toBe("Pedido recusado.");
+});
+
+test("app undo refuses missing or changed apps and surfaces RPC failures", async () => {
+  for (const apps of [
+    [],
+    [{ id: "notes", permissions: { ...defaultAppPermissions, write: "off" } }],
+  ]) {
+    const c = client(async (method) => {
+      if (method === "approvals.respond") return { ...appApproval, previousLevel: "ask" };
+      if (method === "apps.list") return apps;
+      throw new Error("must not update a changed app");
+    });
+    const result = await decideApproval(c, appApproval, "always");
+    await expect(result.undo!()).rejects.toThrow("permissão já mudou");
+  }
+  const c = client(async () => {
+    throw new Error("offline");
+  });
+  await expect(decideApproval(c, appApproval, "always")).rejects.toThrow("offline");
+  const failingUndo = client(async (method) => {
+    if (method === "approvals.respond") return { ...appApproval, previousLevel: "ask" };
+    if (method === "apps.list")
+      return [{ id: "notes", permissions: { ...defaultAppPermissions, write: "allow" } }];
+    throw new Error("update failed");
+  });
+  await expect((await decideApproval(failingUndo, appApproval, "always")).undo!()).rejects.toThrow(
+    "update failed",
+  );
+});
 
 test("consequence labels are derived conservatively, including an empty tool", () => {
   expect(approvalAction("mail-send_message")).toBe("Aprovar e enviar");

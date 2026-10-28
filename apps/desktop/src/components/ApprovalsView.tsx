@@ -1,5 +1,12 @@
-import type { Agent, Approval, ApprovalRule } from "@upbot/protocol";
+import {
+  type Agent,
+  type Approval,
+  type ApprovalDecision,
+  type ApprovalRule,
+  isSensitivePermission,
+} from "@upbot/protocol";
 import { useCallback, useEffect, useState } from "react";
+import { permissionActions, permissionLabels } from "../lib/app-permissions";
 import { approvalAction, decideApproval } from "../lib/approval-decisions";
 import type { DaemonClient } from "../lib/daemon";
 import { btnCls, inputCls } from "./AgentSettings";
@@ -53,7 +60,7 @@ export function ApprovalCard({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const feedback = useApprovalFeedback();
-  const respond = async (decision: "approve" | "always" | "deny" | "done", v?: string) => {
+  const respond = async (decision: ApprovalDecision, v?: string) => {
     if (busy) return;
     setBusy(true);
     setError(null);
@@ -71,7 +78,9 @@ export function ApprovalCard({
       : a.kind === "takeover"
         ? "Sua vez"
         : "Aprovação necessária";
-  const approveLabel = approvalAction(a.tool);
+  const appTool = Boolean(a.appId && a.permission);
+  const sensitive = a.permission && isSensitivePermission(a.permission);
+  const approveLabel = a.permission ? permissionActions[a.permission] : approvalAction(a.tool);
   return (
     <div className={s.card} data-testid="approval">
       <div className={s.head}>
@@ -90,9 +99,21 @@ export function ApprovalCard({
       </div>
       <div className={s.body}>
         <div className={s.meta}>
+          {a.appName}
+          {a.permission ? ` · ${permissionLabels[a.permission]} · ` : ""}
           {botName}
           {a.background ? " · Em segundo plano" : ""}
         </div>
+        {appTool && (
+          <time className={s.meta} dateTime={new Date(a.createdAt).toISOString()}>
+            {new Date(a.createdAt).toLocaleString("pt-BR")}
+          </time>
+        )}
+        {sensitive && (
+          <p className={s.meta}>
+            Este tipo de ação sempre pede aprovação. Não é possível permitir sempre.
+          </p>
+        )}
         <div className={s.title}>{a.kind === "tool" ? a.tool : a.title}</div>
         {a.kind === "tool" ? (
           <pre className={s.detail}>{a.detail}</pre>
@@ -129,7 +150,7 @@ export function ApprovalCard({
               onChange={(e) => setValue(e.target.value)}
             />
           )}
-          {a.kind === "tool" && (
+          {a.kind === "tool" && !appTool && (
             <>
               <Button disabled={busy} onClick={() => respond("always")}>
                 Permitir sempre
@@ -157,7 +178,21 @@ export function ApprovalCard({
           <Button variant="ghost" disabled={busy} onClick={() => respond("deny")}>
             {a.kind === "tool" ? "Recusar" : "Cancelar"}
           </Button>
-          {a.kind === "tool" && (
+          {appTool && !sensitive && (
+            <>
+              <Button disabled={busy} onClick={() => respond("task")}>
+                Só nesta tarefa
+              </Button>
+              <Button
+                variant={primary ? "primary" : "secondary"}
+                disabled={busy}
+                onClick={() => respond("always")}
+              >
+                Permitir
+              </Button>
+            </>
+          )}
+          {a.kind === "tool" && (!appTool || sensitive) && (
             <Button
               variant={primary ? "primary" : "secondary"}
               disabled={busy}
@@ -187,28 +222,26 @@ export function ApprovalCards({ client, agentId }: { client: DaemonClient; agent
 
 export function AppApprovalCards({
   client,
-  slugs,
   agents,
+  primary = true,
 }: {
   client: DaemonClient;
-  slugs: string[];
   agents: Agent[];
+  primary?: boolean;
 }) {
   const pending = useApprovals(client).filter(
-    (a) =>
-      a.status === "pending" &&
-      a.kind === "tool" &&
-      slugs.some((slug) => a.tool?.startsWith(`${slug}-`)),
+    (a) => a.status === "pending" && a.kind === "tool" && Boolean(a.appId),
   );
   if (!pending.length) return null;
   return (
     <section aria-label="Pedidos de apps conectados" className={s.cards}>
+      <h3>Pedidos pendentes</h3>
       {pending.map((a, index) => (
         <ApprovalCard
           key={a.id}
           client={client}
           approval={a}
-          primary={index === 0}
+          primary={primary && index === 0}
           botName={agents.find((bot) => bot.id === a.agentId)?.name ?? "Bot removido"}
         />
       ))}
