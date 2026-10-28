@@ -1,6 +1,7 @@
-import { StrictMode } from "react";
+import { StrictMode, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import Kit from "./components/ds/Kit";
 import "./index.css";
 
 (() => {
@@ -25,8 +26,20 @@ import "./index.css";
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing application root");
 
+function subscribeToHash(callback: () => void) {
+  window.addEventListener("hashchange", callback);
+  return () => window.removeEventListener("hashchange", callback);
+}
+
+function Root() {
+  const hash = useSyncExternalStore(subscribeToHash, () => window.location.hash);
+  const kit = hash === "#/kit";
+  document.documentElement.toggleAttribute("data-ds-kit", kit);
+  return kit ? <Kit /> : <App />;
+}
+
 createRoot(root).render(
   <StrictMode>
-    <App />
+    <Root />
   </StrictMode>,
 );
