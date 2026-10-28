@@ -3,7 +3,14 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Agent, ChatItem, Turn, VaultEntry } from "@upbot/protocol";
-import { DaemonClient, type DaemonHandle, FAKE_AGENT, readPids, startDaemon, tmp } from "./helpers";
+import {
+  DaemonClient,
+  type DaemonHandle,
+  FAKE_AGENT,
+  startDaemon,
+  stopTestChildren,
+  tmp,
+} from "./helpers";
 
 const TOKEN = `p11-test-${crypto.randomUUID()}`;
 
@@ -96,19 +103,16 @@ describe("vault, connectors, computer use, voice e2e", () => {
     })) as Agent;
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     c?.close();
     gh?.stop(true);
     try {
       daemon.proc.kill("SIGKILL");
     } catch {}
-    for (const pid of readPids(stateDir)) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {}
-    }
+    await daemon.proc.exited;
+    await stopTestChildren(stateDir);
     for (const d of [dataDir, agentsRoot, stateDir, work])
-      rmSync(d, { recursive: true, force: true });
+      rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   test("vault encrypts secrets and enforces the per-agent allowlist", async () => {
@@ -138,47 +142,52 @@ describe("vault, connectors, computer use, voice e2e", () => {
     expect(await c.request("vault.list", {})).toEqual([]);
   });
 
-  test("connectors use shared secrets without exposing them", async () => {
-    expect(await tool(a, "github_api", { path: "/user" })).toContain("tool-error:no vault secret");
-    await c.request("vault.set", {
-      name: "connector.github",
-      value: "ghp_TOKEN",
-      agentIds: [a.id],
-    });
-    const out = await tool(a, "github_api", {
-      method: "POST",
-      path: "/repos/o/r/issues",
-      body: { title: "t" },
-    });
-    expect(out).toContain("HTTP 200");
-    expect(out).toContain('"path":"/repos/o/r/issues"');
-    expect(out).toContain('"auth":"Bearer [redacted]"');
-    expect(out).not.toContain("ghp_TOKEN");
-    expect(await tool(a, "github_api", { path: "https://evil.example/" })).toContain(
-      "tool-error:`path` must start",
-    );
-    await c.request("vault.set", {
-      name: "connector.1password",
-      value: "ops_abc",
-      agentIds: [a.id],
-    });
-    expect(await tool(a, "onepassword_read", { reference: "op://Dev/DB/password" })).toBe(
-      "tool-ok:read|op://Dev/DB/password|ops_abc",
-    );
-    await c.request("vault.set", {
-      name: "connector.bitwarden",
-      value: "bwsess",
-      agentIds: [a.id],
-    });
-    expect(await tool(a, "bitwarden_get", { item: "github.com", field: "username" })).toBe(
-      "tool-ok:get|username|github.com|bwsess",
-    );
-    expect(await tool(a, "bitwarden_get", { item: "x", field: "everything" })).toContain(
-      "tool-error:",
-    );
-  });
+  test.skipIf(process.platform === "win32")(
+    "connectors use shared secrets without exposing them",
+    async () => {
+      expect(await tool(a, "github_api", { path: "/user" })).toContain(
+        "tool-error:no vault secret",
+      );
+      await c.request("vault.set", {
+        name: "connector.github",
+        value: "ghp_TOKEN",
+        agentIds: [a.id],
+      });
+      const out = await tool(a, "github_api", {
+        method: "POST",
+        path: "/repos/o/r/issues",
+        body: { title: "t" },
+      });
+      expect(out).toContain("HTTP 200");
+      expect(out).toContain('"path":"/repos/o/r/issues"');
+      expect(out).toContain('"auth":"Bearer [redacted]"');
+      expect(out).not.toContain("ghp_TOKEN");
+      expect(await tool(a, "github_api", { path: "https://evil.example/" })).toContain(
+        "tool-error:`path` must start",
+      );
+      await c.request("vault.set", {
+        name: "connector.1password",
+        value: "ops_abc",
+        agentIds: [a.id],
+      });
+      expect(await tool(a, "onepassword_read", { reference: "op://Dev/DB/password" })).toBe(
+        "tool-ok:read|op://Dev/DB/password|ops_abc",
+      );
+      await c.request("vault.set", {
+        name: "connector.bitwarden",
+        value: "bwsess",
+        agentIds: [a.id],
+      });
+      expect(await tool(a, "bitwarden_get", { item: "github.com", field: "username" })).toBe(
+        "tool-ok:get|username|github.com|bwsess",
+      );
+      expect(await tool(a, "bitwarden_get", { item: "x", field: "everything" })).toContain(
+        "tool-error:",
+      );
+    },
+  );
 
-  test("computer use is opt-in per agent", async () => {
+  test.skipIf(process.platform === "win32")("computer use is opt-in per agent", async () => {
     expect(await tool(a, "computer_click", { x: 10, y: 20 })).toContain(
       "tool-error:Computer Use is not enabled",
     );
@@ -214,7 +223,7 @@ describe("vault, connectors, computer use, voice e2e", () => {
     );
   });
 
-  test("voice: speak and transcribe", async () => {
+  test.skipIf(process.platform === "win32")("voice: speak and transcribe", async () => {
     expect(await c.request("voice.status", {})).toEqual({ tts: true, stt: true });
     await c.request("voice.speak", { text: "Hello from UpBot" });
     await Bun.sleep(300);

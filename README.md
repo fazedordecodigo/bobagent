@@ -1,6 +1,6 @@
 # UpBot
 
-Local-first macOS desktop hub for a team of AI bots that work together on everyday tasks:
+Local-first cross-platform desktop hub for a team of AI bots that work together on everyday tasks:
 research and browse the web, read and organize files, draft emails and documents, and use your
 connected apps. Each bot has its own name, role, memory and chat; they message each other,
 delegate, hand off files through a shared `~/UpBot/Workspace`, and ask before anything
@@ -18,7 +18,8 @@ are the bots' brains.
 - Approvals: "Ask first" / "Allow automatically" rules, background requests that expire after
   10 minutes, secure secret requests and browser take-over for sign-in, 2FA and CAPTCHA
 - Pages: bots publish HTML reports, dashboards and trackers to a local library
-- Group chats with @mentions, @everyone and replies; ⌘K search and keyboard shortcuts
+- Group chats with @mentions, @everyone and replies; ⌘K on macOS, Ctrl+K elsewhere
+  for search and keyboard shortcuts
 - Encrypted vault with GitHub, 1Password and Bitwarden connectors; voice
 - Reach your bots from Telegram, Slack, Discord, your phone (LAN), or share them with a team relay
 - Run bots on your own Linux VPS over SSH, each in its own Firecracker microVM, and let them
@@ -34,14 +35,26 @@ Built with Bun (daemon, relay), SQLite, Tauri 2 (Rust) and React.
 
 ## Install
 
-Download the latest `.dmg` from [Releases](https://github.com/fazedordecodigo/upbot/releases).
-The app updates itself from there.
+Download the installer for your OS from [Releases](https://github.com/fazedordecodigo/upbot/releases):
 
-Builds are not yet notarized by Apple. On first launch macOS says it can't verify the app:
-open System Settings → Privacy & Security and click **Open Anyway** (or run
-`xattr -cr /Applications/UpBot.app`). Versions before 0.2.1 were reported as "damaged";
-use the `xattr` command for those. UpBot was called BobAgent until 0.3.0; updating moves
-`~/BobAgent` to `~/UpBot` and keeps your bots, chats and vault.
+- **macOS:** install the `.dmg`; the app updates itself. Builds are not yet notarized by Apple.
+  On first launch, open System Settings → Privacy & Security and click **Open Anyway** (or run
+  `xattr -cr /Applications/UpBot.app`). Versions before 0.2.1 were reported as "damaged"; use
+  the `xattr` command for those.
+- **Windows x64:** run the per-user `.exe` installer. Builds are unsigned, so SmartScreen may
+  warn you: choose **More info → Run anyway** (in Portuguese, **Mais informações → Executar
+  assim mesmo**).
+- **Linux x64:** use the `.AppImage` for in-app updates (`chmod +x UpBot_*.AppImage`, then run
+  it), or install the `.deb` with `sudo apt install ./UpBot_*.deb`. The `.deb` does not update
+  itself; install newer `.deb` releases manually.
+
+On Linux, install `libsecret-tools` to store the vault key in Secret Service. Otherwise UpBot
+uses a plaintext key file with owner-only permissions and warns at startup. Existing plaintext
+vault keys continue to work; Windows stores new keys using DPAPI, and macOS continues to use
+Keychain. Computer Use and the built-in `say` voice are macOS-only.
+
+UpBot was called BobAgent until 0.3.0; updating moves `~/BobAgent` to `~/UpBot` and keeps your
+bots, chats and vault.
 
 ## Remote hosts and Firecracker microVMs
 
@@ -133,7 +146,7 @@ bun install
 bun run dev          # sidecar + tauri dev
 bun run test         # daemon e2e tests
 bun run lint && bun run typecheck
-bun run build:app    # UpBot.app
+bun run build:app    # debug bundle for the host platform
 ```
 
 Architecture and conventions: [AGENTS.md](AGENTS.md).

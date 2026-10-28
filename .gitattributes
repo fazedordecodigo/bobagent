@@ -1,0 +1,2 @@
+# Marketplace checksums are over LF bytes, regardless of the checkout platform.
+marketplace/** text eol=lf

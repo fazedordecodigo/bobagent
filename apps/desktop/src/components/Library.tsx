@@ -485,8 +485,9 @@ export function VaultView({ client, agents }: { client: DaemonClient; agents: Ag
     <div className="mx-auto max-w-2xl space-y-4 p-6">
       <h2 className="text-lg font-semibold">Vault</h2>
       <p className="text-xs text-zinc-500">
-        Secrets are encrypted with a key kept in the macOS Keychain. Bots only see the secrets you
-        share with them (vault_get); connectors use their secret without revealing it.
+        Secrets are encrypted with a key kept in the system secure store (macOS Keychain, Windows
+        DPAPI or Linux Secret Service). Bots only see the secrets you share with them (vault_get);
+        connectors use their secret without revealing it.
       </p>
       <ul className="space-y-2">
         {entries.map((e) => (

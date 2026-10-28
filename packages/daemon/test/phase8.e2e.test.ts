@@ -7,8 +7,8 @@ import {
   type DaemonHandle,
   FAKE_AGENT,
   readLog,
-  readPids,
   startDaemon,
+  stopTestChildren,
   tmp,
 } from "./helpers";
 
@@ -53,18 +53,15 @@ describe("avatars, memories, skills, agent creation e2e", () => {
     a = await newAgent("Mem");
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     c?.close();
     try {
       daemon.proc.kill("SIGKILL");
     } catch {}
-    for (const pid of readPids(stateDir)) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {}
-    }
+    await daemon.proc.exited;
+    await stopTestChildren(stateDir);
     for (const d of [dataDir, agentsRoot, stateDir, sharedRoot])
-      rmSync(d, { recursive: true, force: true });
+      rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   test("draft turns a description into name, instructions and avatar", async () => {

@@ -1,6 +1,7 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import type { ProviderId } from "@upbot/protocol";
 import { resolveCommand, spawnEnv } from "../env/login-path";
+import { spawnChild, waitForChildSpawn } from "../env/spawn";
 import { ProviderError, type RemoteLaunch } from "./types";
 
 export const STDERR_TAIL_LINES = 50;
@@ -106,6 +107,7 @@ export type ProviderProcess = {
   stderrTail(): string;
   /** True once the process has exited. */
   exited(): boolean;
+  waitForSpawn(): Promise<void>;
   /** Called once on exit unless `markClosed()` ran first. */
   onUnexpectedExit(cb: (message: string) => void): void;
   markClosed(): void;
@@ -131,13 +133,26 @@ export function spawnProvider(
   remote?: RemoteLaunch,
 ): ProviderProcess {
   const stderrLines: string[] = [];
-  const child = remote
-    ? remote.spawn([bin, ...args], { NO_COLOR: "1", ...extraEnv })
-    : spawn(bin, args, {
-        cwd,
-        stdio: ["pipe", "pipe", "pipe"],
-        env: spawnEnv({ NO_COLOR: "1", ...extraEnv }),
-      });
+  let child: ChildProcess;
+  try {
+    child = remote
+      ? remote.spawn([bin, ...args], { NO_COLOR: "1", ...extraEnv })
+      : spawnChild(bin, args, {
+          cwd,
+          stdio: ["pipe", "pipe", "pipe"],
+          env: spawnEnv({ NO_COLOR: "1", ...extraEnv }),
+        });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new ProviderError("provider_unavailable", `${bin} failed to start: ${detail}`);
+  }
+  const spawnReady = waitForChildSpawn(child);
+  void spawnReady.catch(() => {});
+  let hasSpawned = false;
+  let spawnError: Error | null = null;
+  child.on("spawn", () => {
+    hasSpawned = true;
+  });
   child.stderr?.on("data", (d: Buffer) => {
     for (const line of d.toString("utf8").split("\n")) stderrLines.push(line);
     if (stderrLines.length > STDERR_TAIL_LINES * 2) {
@@ -149,7 +164,12 @@ export function spawnProvider(
   let closedByUs = false;
   let exitCb: ((m: string) => void) | null = null;
   const tail = () => redactSecrets(stderrLines.slice(-STDERR_TAIL_LINES).join("\n")).trim();
-  child.on("error", () => {});
+  child.on("error", (error) => {
+    hasExited = true;
+    spawnError = error;
+    if (hasSpawned && !closedByUs && exitCb)
+      exitCb(`process error: ${error.message}${tail() ? `: ${tail()}` : ""}`);
+  });
   child.on("exit", (code, signal) => {
     hasExited = true;
     if (!closedByUs && exitCb) {
@@ -163,8 +183,11 @@ export function spawnProvider(
     child,
     stderrTail: tail,
     exited: () => hasExited,
+    waitForSpawn: () => spawnReady,
     onUnexpectedExit: (cb) => {
       exitCb = cb;
+      if (hasSpawned && spawnError && !closedByUs)
+        cb(`process error: ${spawnError.message}${tail() ? `: ${tail()}` : ""}`);
     },
     markClosed: () => {
       closedByUs = true;

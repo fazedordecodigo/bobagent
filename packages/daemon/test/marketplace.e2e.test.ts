@@ -51,14 +51,15 @@ describe("marketplace e2e", () => {
     c = await DaemonClient.connect(daemon.port, TOKEN);
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     c?.close();
     server?.stop(true);
     try {
       daemon.proc.kill("SIGKILL");
     } catch {}
+    await daemon.proc.exited;
     for (const d of [dataDir, agentsRoot, sharedRoot, market])
-      rmSync(d, { recursive: true, force: true });
+      rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   const list = () =>
