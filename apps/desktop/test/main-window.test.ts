@@ -9,8 +9,8 @@ import {
   type DaemonHandle,
   FAKE_AGENT,
   ROOT,
-  readPids,
   startDaemon,
+  stopTestChildren,
 } from "../../../packages/daemon/test/helpers";
 
 let daemon: DaemonHandle;
@@ -103,7 +103,12 @@ beforeAll(async () => {
       await Bun.sleep(100);
     }
   }
-  browser = await chromium.launch({ channel: "chrome", headless: true });
+  browser = await chromium.launch({
+    ...(process.env.CHROME_PATH
+      ? { executablePath: process.env.CHROME_PATH }
+      : { channel: "chrome" }),
+    headless: true,
+  });
   page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   await page.addInitScript(
     ({ id }) => {
@@ -119,15 +124,17 @@ afterAll(async () => {
   if (out) writeFileSync(join(out, "blue-counts.json"), JSON.stringify(blueCounts, null, 2));
   await browser?.close();
   rpc?.close();
-  daemon?.proc.kill();
-  vite?.kill();
+  try {
+    daemon?.proc.kill();
+  } catch {}
+  try {
+    vite?.kill();
+  } catch {}
+  if (daemon) await daemon.proc.exited;
+  if (vite) await vite.exited;
   if (state) {
-    for (const pid of readPids(join(state, "fake"))) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {}
-    }
-    rmSync(state, { recursive: true, force: true });
+    await stopTestChildren(join(state, "fake"));
+    rmSync(state, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
