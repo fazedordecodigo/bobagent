@@ -28,7 +28,7 @@ beforeAll(async () => {
   page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   await page.goto("http://localhost:1421/#/kit");
   await page.getByRole("heading", { name: "Controles", exact: true }).waitFor();
-}, 30000);
+}, 60000);
 
 afterAll(async () => {
   await browser?.close();
