@@ -80,7 +80,7 @@ describe.skipIf(!hasBrowser)("agent browser e2e (headless Chromium over CDP)", (
     await stopTestChildren(stateDir);
     for (const d of [dataDir, agentsRoot, stateDir])
       rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  });
+  }, 20000);
 
   test("open, snapshot, type+submit, click, back, screenshot, close", async () => {
     const base = `http://127.0.0.1:${site.port}`;
