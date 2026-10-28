@@ -161,6 +161,7 @@ export class ApprovalNotifications {
   private active = new Map<string, Approval>();
   private local = new Set<string>();
   private busy = new Set<string>();
+  private unavailable = new Set<string>();
   private results = new Map<string, { result: ApprovalResult; until: number }>();
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private off: (() => void)[] = [];
@@ -172,7 +173,7 @@ export class ApprovalNotifications {
     private bridge: NotificationBridge,
     private preferences: Preferences,
     private botName: (agentId: string) => string,
-    private review: (view: string) => void,
+    private review: (view: string, notice?: string) => void,
     private error: (message: string) => void,
     private now = Date.now,
     private decide = decideApproval,
@@ -260,7 +261,7 @@ export class ApprovalNotifications {
   }
 
   async respond({ id, action }: NotificationResponse) {
-    if (this.stopped || this.busy.has(id)) return;
+    if (this.stopped || this.busy.has(id) || this.unavailable.has(id)) return;
     if (action === "mute") {
       muteForHour(this.preferences, this.now());
       return;
@@ -274,6 +275,11 @@ export class ApprovalNotifications {
     try {
       if (action === "undo") {
         const saved = this.results.get(id);
+        if (!saved) {
+          const approvals = await this.client.request("approvals.list", {});
+          if (!approvals.some((approval) => approval.id === id)) await this.showUnavailable(id);
+          return;
+        }
         if (!saved?.result.undo || this.now() >= saved.until) return;
         await saved.result.undo();
         this.results.delete(id);
@@ -287,7 +293,11 @@ export class ApprovalNotifications {
         return;
       }
       const approval = (await this.client.request("approvals.list", {})).find((a) => a.id === id);
-      if (approval?.status !== "pending" || approval.expiresAt <= this.now()) {
+      if (!approval) {
+        await this.showUnavailable(id);
+        return;
+      }
+      if (approval.status !== "pending" || approval.expiresAt <= this.now()) {
         await this.bridge.remove(id);
         return;
       }
@@ -309,6 +319,10 @@ export class ApprovalNotifications {
         result = await this.decide(this.client, approval, action as ApprovalDecision);
       } catch (e) {
         this.local.delete(id);
+        if (e instanceof Error && "code" in e && e.code === "not_found") {
+          await this.showUnavailable(id);
+          return;
+        }
         await this.bridge.remove(id);
         throw e;
       }
@@ -333,6 +347,15 @@ export class ApprovalNotifications {
     } finally {
       this.busy.delete(id);
     }
+  }
+
+  private async showUnavailable(id: string) {
+    this.unavailable.add(id);
+    this.review(
+      "approvals",
+      "Esse pedido não está mais disponível. O UpBot foi fechado antes da decisão.",
+    );
+    await Promise.all([this.bridge.open(), this.bridge.remove(id)]);
   }
 
   stop() {

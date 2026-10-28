@@ -41,13 +41,8 @@ impl INotificationActivationCallback_Impl for Activator_Impl {
         let app_id = unsafe { app_id.to_string()? };
         let args = unsafe { args.to_string()? };
         if app_id == AUMID {
-            if let Some((action, id)) = args.split_once('|') {
-                if matches!(
-                    action,
-                    "approve" | "task" | "deny" | "review" | "undo" | "mute" | "apps"
-                ) {
-                    super::respond(&self.app, id.to_string(), action.to_string());
-                }
+            if let Some(response) = super::parse_activation(&args) {
+                super::respond(&self.app, response.id, response.action);
             }
         }
         Ok(())

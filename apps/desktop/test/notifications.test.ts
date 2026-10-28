@@ -173,14 +173,15 @@ function harness(initial: Approval[] = [pending], store = preferences(), result?
   const calls: { method: string; params: unknown }[] = [];
   const errors: string[] = [];
   const views: string[] = [];
-  let fail = false;
+  let failure: Error | null = null;
+  const notices: string[] = [];
   let now = 1000;
   const client = {
     request: async (method: string, params: unknown) => {
       calls.push({ method, params });
       if (method === "approvals.list") return approvals;
       if (method === "approvals.respond") {
-        if (fail) throw new Error("Pedido já resolvido.");
+        if (failure) throw failure;
         const decision = (params as { decision: string }).decision;
         const result = {
           ...pending,
@@ -218,7 +219,10 @@ function harness(initial: Approval[] = [pending], store = preferences(), result?
     bridge,
     store,
     () => "UpBot",
-    (view) => views.push(view),
+    (view, notice) => {
+      views.push(view);
+      if (notice) notices.push(notice);
+    },
     (error) => errors.push(error),
     () => now,
     result ? async () => result : undefined,
@@ -230,14 +234,15 @@ function harness(initial: Approval[] = [pending], store = preferences(), result?
     calls,
     errors,
     views,
+    notices,
     bridge,
     update: async (a: Approval) => {
       approvals = [a];
       handler?.(a);
       await Bun.sleep(0);
     },
-    fail: () => {
-      fail = true;
+    fail: (code?: string) => {
+      failure = Object.assign(new Error("Pedido já resolvido."), { code });
     },
     store,
     time: (value: number) => {
@@ -300,6 +305,51 @@ test("forged or stale actions never respond; mute and review never resolve", asy
     await h.update({ ...pending, status: "approved" });
     await h.controller.respond({ id: pending.id, action: "task" });
     expect(h.calls.filter((c) => c.method === "approvals.respond")).toEqual([]);
+  } finally {
+    h.controller.stop();
+  }
+});
+
+test("startup drain of a lost approval opens Approvals with a notice, removes toast and never retries", async () => {
+  for (const action of ["task", "approve", "review", "undo"]) {
+    const h = harness([]);
+    h.bridge.listen = async (handler) => {
+      handler({ id: "lost-on-restart", action });
+      return () => {};
+    };
+    try {
+      await h.controller.start();
+      await Bun.sleep(0);
+      expect(h.views).toEqual(["approvals", "open"]);
+      expect(h.notices).toEqual([
+        "Esse pedido não está mais disponível. O UpBot foi fechado antes da decisão.",
+      ]);
+      expect(h.removals).toContain("lost-on-restart");
+      expect(h.posts).toEqual([]);
+      expect(h.calls.some((c) => c.method === "approvals.respond")).toBe(false);
+      const calls = h.calls.length;
+      await h.controller.respond({ id: "lost-on-restart", action });
+      expect(h.calls.length).toBe(calls);
+      expect(h.errors).toEqual([]);
+    } finally {
+      h.controller.stop();
+    }
+  }
+});
+
+test("an approval lost between list and respond shows the same notice without retrying", async () => {
+  const h = harness();
+  try {
+    await h.controller.start();
+    h.fail("not_found");
+    await h.controller.respond({ id: pending.id, action: "task" });
+    await h.controller.respond({ id: pending.id, action: "task" });
+    expect(h.calls.filter((c) => c.method === "approvals.respond").length).toBe(1);
+    expect(h.views).toEqual(["approvals", "open"]);
+    expect(h.notices[0]).toContain("Esse pedido não está mais disponível.");
+    expect(h.removals).toContain(pending.id);
+    expect(h.posts.length).toBe(1);
+    expect(h.errors).toEqual([]);
   } finally {
     h.controller.stop();
   }

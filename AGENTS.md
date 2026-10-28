@@ -94,6 +94,12 @@ per-user COM activation registration; mute uses SuppressPopup plus silent audio 
 is also in the toast context menu. General settings expose mute on every platform.
 Native callbacks queue actions until the main frontend can drain them; the daemon
 remains authoritative. Optional dock/taskbar badges are not implemented.
+Pending approvals and their blocked calls are memory-only: after daemon shutdown,
+toast decisions cannot recover them. Missing IDs open Settings → Approvals with an
+unavailable notice and remove the toast, without retrying or fabricating approval.
+Windows registers its COM activator before spawning the daemon; `-ToastActivated`
+payloads and COM callbacks share the native queue. The single-instance plugin forwards
+second-launch arguments and focuses the existing window before another daemon starts.
 
 ## Pages (UpBot)
 
