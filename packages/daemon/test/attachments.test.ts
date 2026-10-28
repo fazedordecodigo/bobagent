@@ -1,14 +1,20 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { saveAttachments, zipEntries } from "../src/attachments";
 import { storedZip } from "./fixtures/stored-zip";
 
 describe("zipEntries", () => {
-  test("reads entries from a normal stored ZIP", () => {
-    const zip = storedZip([{ name: "notes.txt", contents: Buffer.from("hello") }]);
-    expect(zipEntries(zip)).toEqual([{ name: "notes.txt", symlink: false }]);
+  test("reads entries from stored ZIPs with and without data descriptors", () => {
+    const zip = storedZip([
+      { name: "notes.txt", contents: Buffer.from("hello") },
+      { name: "descriptor.txt", contents: Buffer.from("world"), dataDescriptor: true },
+    ]);
+    expect(zipEntries(zip)).toEqual([
+      { name: "notes.txt", symlink: false },
+      { name: "descriptor.txt", symlink: false },
+    ]);
   });
 
   test("identifies symlink entries", () => {
@@ -19,6 +25,33 @@ describe("zipEntries", () => {
   test("reads traversal entry names for extraction validation", () => {
     const zip = storedZip([{ name: "../x" }]);
     expect(zipEntries(zip)).toEqual([{ name: "../x", symlink: false }]);
+  });
+
+  test("rejects local filenames that differ from the central directory", () => {
+    const zip = storedZip([
+      { name: "ok.txt", localName: "../evil.txt", contents: Buffer.from("evil") },
+    ]);
+    expect(zipEntries(zip)).toBeNull();
+  });
+
+  test("rejects unlisted local entries before the central directory", () => {
+    const zip = storedZip([{ name: "listed.txt" }], [{ name: "hidden.txt" }]);
+    expect(zipEntries(zip)).toBeNull();
+  });
+
+  test("rejects duplicate names after slash and case normalization", () => {
+    const zip = storedZip([{ name: "folder\\item.txt" }, { name: "FOLDER/item.TXT" }]);
+    expect(zipEntries(zip)).toBeNull();
+  });
+
+  test("rejects ZIP64 extras in local headers", () => {
+    const zip = storedZip([{ name: "file.txt", localExtra: Buffer.from([1, 0, 0, 0]) }]);
+    expect(zipEntries(zip)).toBeNull();
+  });
+
+  test("rejects mismatched data-descriptor flags", () => {
+    const zip = storedZip([{ name: "file.txt", dataDescriptor: true, localFlags: 0 }]);
+    expect(zipEntries(zip)).toBeNull();
   });
 
   test("does not extract symlink or traversal ZIPs", () => {
@@ -33,6 +66,24 @@ describe("zipEntries", () => {
         ]);
         expect(attachment?.extractedTo).toBeUndefined();
       }
+    } finally {
+      rmSync(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+
+  test("does not extract a ZIP with a traversal local filename", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "upbot-attachments-"));
+    try {
+      const zip = storedZip([
+        { name: "ok.txt", localName: "../evil.txt", contents: Buffer.from("evil") },
+      ]);
+      const attachment = saveAttachments(workspace, [
+        { name: "bundle.zip", mime: "application/zip", dataBase64: zip.toString("base64") },
+      ])[0];
+      if (!attachment) throw new Error("attachment was not saved");
+      expect(attachment.extractedTo).toBeUndefined();
+      expect(existsSync(join(dirname(attachment.path), "evil.txt"))).toBe(false);
+      expect(existsSync(join(workspace, "evil.txt"))).toBe(false);
     } finally {
       rmSync(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }

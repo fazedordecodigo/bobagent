@@ -8,6 +8,19 @@ import { RpcError } from "./runtime/agent-runtime";
 
 const MAX_TOTAL_BYTES = 25 * 1024 * 1024;
 
+function validExtraFields(data: Buffer, start: number, length: number): boolean {
+  const end = start + length;
+  if (end > data.length) return false;
+  while (start < end) {
+    if (start + 4 > end) return false;
+    const id = data.readUInt16LE(start);
+    const extraLength = data.readUInt16LE(start + 2);
+    if (start + 4 + extraLength > end || id === 0x0001) return false;
+    start += 4 + extraLength;
+  }
+  return true;
+}
+
 const kindOf = (mime: string, name: string) => {
   if (mime.startsWith("image/")) return "image";
   if (mime.startsWith("audio/")) return "audio";
@@ -57,11 +70,21 @@ export function zipEntries(data: Buffer): { name: string; symlink: boolean }[] |
       return null;
     }
 
-    const entries: { name: string; symlink: boolean }[] = [];
+    const entries: {
+      name: string;
+      symlink: boolean;
+      localOffset: number;
+      localNameLength: number;
+      localExtraLength: number;
+      compressedSize: number;
+      generalFlags: number;
+    }[] = [];
+    const names = new Set<string>();
     let offset = directoryOffset;
     const directoryEnd = directoryOffset + directorySize;
     for (let i = 0; i < totalEntries; i++) {
       if (offset + 46 > directoryEnd || data.readUInt32LE(offset) !== 0x02014b50) return null;
+      const generalFlags = data.readUInt16LE(offset + 8);
       const compressedSize = data.readUInt32LE(offset + 20);
       const uncompressedSize = data.readUInt32LE(offset + 24);
       const nameLength = data.readUInt16LE(offset + 28);
@@ -82,23 +105,66 @@ export function zipEntries(data: Buffer): { name: string; symlink: boolean }[] |
       }
 
       const nameStart = offset + 46;
-      let extraOffset = nameStart + nameLength;
-      const extraEnd = extraOffset + extraLength;
-      while (extraOffset < extraEnd) {
-        if (extraOffset + 4 > extraEnd) return null;
-        const id = data.readUInt16LE(extraOffset);
-        const length = data.readUInt16LE(extraOffset + 2);
-        if (extraOffset + 4 + length > extraEnd || id === 0x0001) return null;
-        extraOffset += 4 + length;
-      }
+      const nameBytes = data.subarray(nameStart, nameStart + nameLength);
+      const centralExtraStart = nameStart + nameLength;
+      if (!validExtraFields(data, centralExtraStart, extraLength)) return null;
+      const name = nameBytes.toString("utf8");
+      const normalizedName = name.replace(/\\/g, "/").toLowerCase();
+      if (names.has(normalizedName)) return null;
+      names.add(normalizedName);
 
+      const localHeaderEnd = localOffset + 30;
+      if (localHeaderEnd > directoryOffset || data.readUInt32LE(localOffset) !== 0x04034b50) {
+        return null;
+      }
+      const localFlags = data.readUInt16LE(localOffset + 6);
+      const localNameLength = data.readUInt16LE(localOffset + 26);
+      const localExtraLength = data.readUInt16LE(localOffset + 28);
+      const localNameStart = localHeaderEnd;
+      const localNameEnd = localNameStart + localNameLength;
+      const localExtraStart = localNameEnd;
+      if (
+        localExtraStart + localExtraLength > directoryOffset ||
+        ((localFlags ^ generalFlags) & 0x0008) !== 0 ||
+        !data.subarray(localNameStart, localNameEnd).equals(nameBytes) ||
+        !validExtraFields(data, localExtraStart, localExtraLength)
+      ) {
+        return null;
+      }
       entries.push({
-        name: data.toString("utf8", nameStart, nameStart + nameLength),
+        name,
         symlink: ((externalAttrs >>> 16) & 0o170000) === 0o120000,
+        localOffset,
+        localNameLength,
+        localExtraLength,
+        compressedSize,
+        generalFlags,
       });
       offset = entryEnd;
     }
-    return offset === directoryEnd ? entries : null;
+    if (offset !== directoryEnd) return null;
+
+    const localEntries = [...entries].sort((a, b) => a.localOffset - b.localOffset);
+    if (localEntries.length === 0) return directoryOffset === 0 ? [] : null;
+    if (localEntries[0]?.localOffset !== 0) return null;
+    for (let i = 0; i < localEntries.length; i++) {
+      const entry = localEntries[i];
+      if (!entry || (i > 0 && localEntries[i - 1]?.localOffset === entry.localOffset)) return null;
+      let end =
+        entry.localOffset +
+        30 +
+        entry.localNameLength +
+        entry.localExtraLength +
+        entry.compressedSize;
+      if ((entry.generalFlags & 0x0008) !== 0) {
+        if (end + 12 > directoryOffset) return null;
+        end += data.readUInt32LE(end) === 0x08074b50 ? 16 : 12;
+      }
+      if (end > directoryOffset || end !== (localEntries[i + 1]?.localOffset ?? directoryOffset)) {
+        return null;
+      }
+    }
+    return entries.map(({ name, symlink }) => ({ name, symlink }));
   } catch {
     return null;
   }
