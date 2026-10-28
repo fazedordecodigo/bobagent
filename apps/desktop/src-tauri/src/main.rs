@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod notifications;
+
 use rand::RngCore;
 use serde::Serialize;
 use std::ffi::OsStr;
@@ -157,13 +159,21 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(shared)
         .setup(move |app| {
+            notifications::setup(app.handle()).map_err(std::io::Error::other)?;
             if let Err(e) = spawn_daemon(app) {
                 let state = app.state::<SharedState>();
                 state.inner.lock().unwrap().error = Some(e);
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![daemon_connection])
+        .invoke_handler(tauri::generate_handler![
+            daemon_connection,
+            notifications::notifications_initialize,
+            notifications::notifications_post,
+            notifications::notifications_remove,
+            notifications::notifications_take_actions,
+            notifications::notifications_open
+        ])
         .build(tauri::generate_context!())
         .expect("error while building UpBot")
         .run(|app_handle, event| {

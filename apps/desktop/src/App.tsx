@@ -14,12 +14,14 @@ import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
 import { IconButton } from "./components/ds/controls";
 import { Icon } from "./components/icons";
 import { AvatarEditor, ComputerUsePanel, MemoriesPanel, RoutinesPanel } from "./components/Library";
+import { NotificationSettings } from "./components/NotificationSettings";
 import { PagesView } from "./components/PagesView";
 import { RunPanel } from "./components/RunPanel";
 import { TABS, ToolBody, type ToolTab } from "./components/ToolsView";
 import { UpdateButton } from "./components/UpdateButton";
 import { useOverview } from "./hooks/useOverview";
 import { DaemonClient } from "./lib/daemon";
+import { useNativeNotifications } from "./lib/native-notifications";
 import { mod } from "./lib/platform";
 import { MonoAv, mono, Pill, role, type UiStatus } from "./lib/ui";
 
@@ -207,6 +209,17 @@ export default function App() {
     },
     [navigate],
   );
+
+  const reviewNotification = useCallback(
+    (target: string) => {
+      if (target === "apps") {
+        setSettingsTab("apps");
+        navigate("settings");
+      } else openAgent(target);
+    },
+    [navigate, openAgent],
+  );
+  useNativeNotifications(client, clientReady, agents, reviewNotification, setError);
 
   useEffect(() => {
     if (!clientReady || !agents.length) return;
@@ -1035,6 +1048,7 @@ function SettingsView({
           </div>
           {selected === "general" ? (
             <>
+              <NotificationSettings />
               <div className="set-group" data-od-id="settings-appearance">
                 <div>
                   <h2 style={{ fontSize: "var(--fs-h3)" }}>Tema</h2>
