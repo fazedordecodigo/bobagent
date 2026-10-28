@@ -144,7 +144,7 @@ export function ChatView({
 
   return (
     <div className="main" style={{ flex: 1 }} data-od-id="chat-view">
-      <header className="main-head">
+      <header className="main-head" data-tauri-drag-region>
         <MonoAv agent={agent} status={displayStatus} lg />
         <div className="title">
           <h2>{agent.name}</h2>

@@ -40,14 +40,36 @@ vault as `app.<id>.<KEY>` (hidden from `vault.list`); tool output has secrets re
 The bridge appends app tools to `tools/list` as `<slug>-<tool>` and routes calls to them
 (`agentIds` empty = every bot). RPC `apps.catalog/list/connect/update/refresh/delete`, event
 `apps.changed`; UI Settings → Apps. Tests: `test/apps.e2e.test.ts` + `fixtures/fake-mcp-server.ts`.
+Migration 19 adds `permissions_json`: `read | write | send | pay | book | del` map to
+`off | ask | allow`. New and migrated apps default to read=allow and all others=ask.
+Sensitive kinds (send/pay/book/del) reject allow in both protocol schemas and AppsService.
+`apps.connect/update` accept partial permissions. `src/app-permissions.ts` classifies the
+operation after `<slug>-` on underscores, hyphens and camelCase. The leading verb determines
+the kind; verbs after and/or/then can escalate it (del > pay > book > send > write > read).
+Read-object nouns do not escalate. An unknown leading token falls back to known verbs
+anywhere in the name; no known verb fails closed to write.
+This is a naming heuristic, not argument or semantic inspection.
+The Apps permissions dialog edits stored levels; disconnect confirms removal of saved
+secrets, while enable/disable remains reversible. No account or last-used data is invented.
 Grok rejects `__` in MCP tool names because it uses that separator to qualify server and tool names.
 
 ## Approvals (UpBot)
 
 `src/approvals.ts` (`ApprovalService`): every bridge tool call passes `gate()`. Rules
 (`settings.approval_rules`, glob on tool names, per bot or `agentId: null`): "ask" beats
-"allow"; with no rule, connected-app tools whose operation looks like a write ask first.
-A lone `*` allow does not bypass that connected-app write default; only a matching non-`*` allow does.
+"allow". App permissions are authoritative: off denies without an approval, allow passes
+only for read/write, ask creates an approval. Explicit ask rules still require review;
+neither specific nor wildcard allow rules bypass app permissions. Sensitive app tools
+always ask unless off (then deny). App-tool approvals carry appId, appName and permission.
+Unknown operations use write (ask by default), never the default read allow.
+For app requests, `task` approves once and grants the same app+kind for the current turn
+only (non-sensitive kinds); turn end clears grants. `always` sets a non-sensitive app
+kind to allow and returns previousLevel for undo via apps.update. For sensitive kinds,
+task/always approve only this call, leave ask unchanged and never create an allow rule.
+Non-app approvals retain tool-name-rule behavior. Decisions emit approval.updated;
+permission changes also emit apps.changed. Apps, composer, Approvals and RunPanel
+refresh from these events. Undo restores only the previous preference, never an executed
+external action; task and deny expose no undo.
 A pending approval blocks the call; background turns (from another bot, routine, gateway,
 team or group chat — `AgentRuntime.currentTurn().background`) expire after
 `UPBOT_APPROVAL_BACKGROUND_TTL_MS` (10 min), others after `UPBOT_APPROVAL_TTL_MS` (60 min);
@@ -445,7 +467,7 @@ configs, so it does not reflect stock defaults. Gemini's config path is unverifi
 - `bun run dev` — build the sidecar, then `tauri dev` (Vite on :1420).
 - `bun run build:app` — build the debug desktop bundle for the host platform (macOS app,
   Linux AppImage/deb, or Windows NSIS).
-- `bun run test` — `bun test packages/daemon packages/host` (daemon e2e: spawns the real daemon).
+- `bun run test` — `bun test packages/daemon packages/host apps/desktop/test` (daemon e2e and desktop browser tests).
 - Computer Use and built-in `say` voice are macOS-only; Linux uses Secret Service for the
   vault key when available, while Windows uses DPAPI.
 - `bun run lint` — `biome check .`

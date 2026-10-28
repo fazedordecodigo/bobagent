@@ -1,7 +1,8 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Agent, Approval, ChatItem, ConnectedApp, Turn, VaultEntry } from "@upbot/protocol";
+import { defaultAppPermissions } from "@upbot/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -22,6 +23,7 @@ describe("approvals e2e", () => {
   let daemon: DaemonHandle;
   let c: DaemonClient;
   let a: Agent;
+  let app: ConnectedApp;
 
   async function tool(agent: Agent, name: string, args: Record<string, unknown> = {}) {
     const { queueId } = (await c.request("chat.send", {
@@ -73,12 +75,17 @@ describe("approvals e2e", () => {
       provider: "devin",
       instructions: "",
     })) as Agent;
-    (await c.request("apps.connect", {
+    app = (await c.request("apps.connect", {
       catalogId: "custom-stdio",
       name: "Notes",
       command: ["bun", FAKE_MCP],
-      secrets: {},
+      secrets: { FAKE_APP_PERMISSIONS: "1" },
     })) as ConnectedApp;
+  });
+
+  beforeEach(async () => {
+    await c.request("apps.update", { id: app.id, permissions: defaultAppPermissions });
+    await c.request("approvals.setRules", { rules: [] });
   });
 
   afterAll(async () => {
@@ -93,7 +100,12 @@ describe("approvals e2e", () => {
   });
 
   test("reads run without asking; app writes ask first and can be approved or declined", async () => {
-    expect(await tool(a, "notes-echo", { text: "x" })).toBe("tool-ok:echo:x");
+    expect(await tool(a, "notes-get_note", { text: "x" })).toBe("tool-ok:echo:x");
+    const unknown = await withApproval("notes-echo", { text: "unknown" }, (ap) =>
+      c.request("approvals.respond", { id: ap.id, decision: "approve" }),
+    );
+    expect(unknown.approval.permission).toBe("write");
+    expect(unknown.text).toBe("tool-ok:echo:unknown");
     const ok = await withApproval("notes-create_note", { title: "t" }, (ap) =>
       c.request("approvals.respond", { id: ap.id, decision: "approve" }),
     );
@@ -110,13 +122,16 @@ describe("approvals e2e", () => {
     expect(no.text).toContain("declined");
   });
 
-  test("always allow adds a rule; ask rules beat allow rules", async () => {
+  test("always allows the app kind without adding a rule; explicit ask still wins", async () => {
     await withApproval("notes-create_note", {}, (ap) =>
       c.request("approvals.respond", { id: ap.id, decision: "always" }),
     );
     expect(await tool(a, "notes-create_note")).toBe("tool-ok:note-created");
     const rules = (await c.request("approvals.rules", {})) as { pattern: string }[];
-    expect(rules.map((r) => r.pattern)).toEqual(["notes-create_note"]);
+    expect(rules).toEqual([]);
+    expect(((await c.request("apps.list", {})) as ConnectedApp[])[0]?.permissions.write).toBe(
+      "allow",
+    );
     await c.request("approvals.setRules", {
       rules: [
         ...rules,
@@ -152,7 +167,7 @@ describe("approvals e2e", () => {
     );
     expect(write.approval.tool).toBe("notes-create_note");
     expect(write.text).toBe("tool-ok:note-created");
-    expect(await tool(a, "notes-echo", { text: "read" })).toBe("tool-ok:echo:read");
+    expect(await tool(a, "notes-get_note", { text: "read" })).toBe("tool-ok:echo:read");
     expect(await tool(a, "list_agents")).toContain("A");
 
     await c.request("approvals.setRules", {
@@ -165,7 +180,10 @@ describe("approvals e2e", () => {
         },
       ],
     });
-    expect(await tool(a, "notes-create_note")).toBe("tool-ok:note-created");
+    const specific = await withApproval("notes-create_note", {}, (ap) =>
+      c.request("approvals.respond", { id: ap.id, decision: "approve" }),
+    );
+    expect(specific.text).toBe("tool-ok:note-created");
     await c.request("approvals.setRules", { rules: [] });
   });
 
@@ -178,6 +196,124 @@ describe("approvals e2e", () => {
     const text = await tool(a, "notes-create_note");
     await pending;
     expect(text).toContain("did not approve");
+  });
+
+  test("permission defaults and sensitive allow validation through RPC", async () => {
+    expect(app.permissions).toEqual(defaultAppPermissions);
+    for (const kind of ["send", "pay", "book", "del"]) {
+      await expect(
+        c.request("apps.update", { id: app.id, permissions: { [kind]: "allow" } }),
+      ).rejects.toThrow();
+      await expect(
+        c.request("apps.connect", {
+          catalogId: "custom-stdio",
+          name: `Invalid ${kind}`,
+          command: ["bun", FAKE_MCP],
+          secrets: {},
+          permissions: { [kind]: "allow" },
+        }),
+      ).rejects.toThrow();
+    }
+    expect(((await c.request("apps.list", {})) as ConnectedApp[]).length).toBe(1);
+  });
+
+  test("off auto-denies without approval; allow passes; ask creates labeled approval", async () => {
+    await c.request("apps.update", { id: app.id, permissions: { write: "off" } });
+    const before = (await c.request("approvals.list", {})) as Approval[];
+    expect(await tool(a, "notes-create_note")).toContain("Notes não permite write");
+    expect(((await c.request("approvals.list", {})) as Approval[]).map((x) => x.id)).toEqual(
+      before.map((x) => x.id),
+    );
+    await c.request("apps.update", { id: app.id, permissions: { write: "allow" } });
+    expect(await tool(a, "notes-create_note")).toBe("tool-ok:note-created");
+    await c.request("apps.update", { id: app.id, permissions: { write: "ask" } });
+    const asked = await withApproval("notes-create_note", {}, (ap) =>
+      c.request("approvals.respond", { id: ap.id, decision: "deny" }),
+    );
+    expect(asked.approval).toMatchObject({
+      appId: app.id,
+      appName: "Notes",
+      permission: "write",
+      agentId: a.id,
+    });
+  });
+
+  test("sensitive calls cannot be bypassed by rules, always or task decisions", async () => {
+    await c.request("approvals.setRules", {
+      rules: [
+        { id: "all", pattern: "*", action: "allow", agentId: null },
+        { id: "send", pattern: "notes-send_message", action: "allow", agentId: a.id },
+      ],
+    });
+    const before = await c.request("approvals.rules", {});
+    for (const decision of ["always", "task", "approve"] as const) {
+      const called = await withApproval("notes-send_message", {}, (ap) =>
+        c.request("approvals.respond", { id: ap.id, decision }),
+      );
+      expect(called.approval.permission).toBe("send");
+      expect(called.text).toBe("tool-ok:message-sent");
+      expect(((await c.request("apps.list", {})) as ConnectedApp[])[0]?.permissions.send).toBe(
+        "ask",
+      );
+      expect(await c.request("approvals.rules", {})).toEqual(before);
+    }
+  });
+
+  test("task grant passes another call in the same turn but not the next turn", async () => {
+    const waiting = c.waitForEventWhere(
+      "approval.updated",
+      (d) => (d as Approval).status === "pending",
+    ) as Promise<Approval>;
+    const sent = (await c.request("chat.send", {
+      agentId: a.id,
+      text: `mcp-sequence:${JSON.stringify([
+        { tool: "notes-create_note", args: {} },
+        { tool: "notes-create_note", args: {} },
+        { tool: "notes-echo", args: { text: "done" } },
+      ])}`,
+    })) as { queueId: string };
+    const ap = await waiting;
+    await c.request("approvals.respond", { id: ap.id, decision: "task" });
+    await c.waitForEventWhere("turn.ended", (d) => (d as Turn).queueId === sent.queueId);
+    const approvals = (await c.request("approvals.list", {})) as Approval[];
+    expect(approvals.filter((x) => x.turnId === ap.turnId)).toHaveLength(1);
+    const { items } = (await c.request("chat.history", { agentId: a.id })) as { items: ChatItem[] };
+    expect(
+      items
+        .filter((x) => x.turnId === ap.turnId && x.kind === "agent_message")
+        .map((x) => ("text" in x ? x.text : ""))
+        .join(""),
+    ).toContain("tool-ok:note-createdtool-ok:note-createdtool-ok:echo:done");
+    expect(((await c.request("apps.list", {})) as ConnectedApp[])[0]?.permissions.write).toBe(
+      "ask",
+    );
+    const next = await withApproval("notes-create_note", {}, (approval) =>
+      c.request("approvals.respond", { id: approval.id, decision: "deny" }),
+    );
+    expect(next.approval.turnId).not.toBe(ap.turnId);
+    expect(next.text).toContain("declined");
+  });
+
+  test("always reports the previous level for honest app-level undo", async () => {
+    let result: Approval | undefined;
+    await withApproval("notes-create_note", {}, async (ap) => {
+      result = (await c.request("approvals.respond", {
+        id: ap.id,
+        decision: "always",
+      })) as Approval;
+    });
+    expect(result).toMatchObject({
+      previousLevel: "ask",
+      permission: "write",
+      appId: app.id,
+      status: "approved",
+    });
+    expect(await c.request("approvals.rules", {})).toEqual([]);
+    await c.request("apps.update", { id: app.id, permissions: { write: result!.previousLevel } });
+    const asked = await withApproval("notes-create_note", {}, (ap) =>
+      c.request("approvals.respond", { id: ap.id, decision: "deny" }),
+    );
+    expect(asked.text).toContain("declined");
   });
 
   test("secure secret request stores the value in the vault for that bot only", async () => {

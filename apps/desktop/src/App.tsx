@@ -11,6 +11,7 @@ import { AgentSettings, PROVIDERS } from "./components/AgentSettings";
 import { ChannelCreateForm, ChannelView } from "./components/ChannelView";
 import { ChatView } from "./components/ChatView";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
+import { IconButton } from "./components/ds/controls";
 import { Icon } from "./components/icons";
 import { AvatarEditor, ComputerUsePanel, MemoriesPanel, RoutinesPanel } from "./components/Library";
 import { PagesView } from "./components/PagesView";
@@ -220,13 +221,21 @@ export default function App() {
 
   const shortcutsRef = useRef<(e: KeyboardEvent) => void>(() => {});
   shortcutsRef.current = (e) => {
-    if (e.key === "Escape" && sideOpen) {
-      setSideOpen(false);
+    if (e.defaultPrevented) return;
+    if (e.key === "Escape") {
+      if (palette) setPalette(null);
+      else if (creating) setCreating(false);
+      else if (document.querySelector("dialog[open]")) return;
+      else if (sideOpen) setSideOpen(false);
+      else if (panelOpen) setPanelOpen(false);
+      else return;
+      e.preventDefault();
       return;
     }
     if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
     const key = e.key.toLowerCase();
-    if (key === "k") setPalette({});
+    if (key === "." && view === "chat" && selectedId) togglePanel();
+    else if (key === "k") setPalette({});
     else if (key === "f" && e.shiftKey) setPalette({ group: "Bots" });
     else if (key === "n" && !e.shiftKey) {
       navigate("chat");
@@ -427,17 +436,19 @@ export default function App() {
   return (
     <div className={appClass}>
       <nav className="rail" aria-label="Navegação principal">
+        <div className="rail-titlebar" data-tauri-drag-region />
         <div className="logo" role="img" aria-label="UpBot">
           <svg
-            viewBox="0 0 24 24"
+            viewBox="0 0 48 48"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2.2"
+            strokeWidth="6"
             strokeLinecap="round"
             strokeLinejoin="round"
             aria-hidden="true"
           >
-            <path d="M12 19V6M6.5 11.5 12 6l5.5 5.5" />
+            <path d="M9.2 24V29a10 10 0 0 0 20 0V14" />
+            <circle cx="38.2" cy="9.5" r="3.6" fill="currentColor" stroke="none" />
           </svg>
         </div>
         {(
@@ -458,7 +469,7 @@ export default function App() {
               if (
                 railView === "chat" &&
                 view === "chat" &&
-                window.matchMedia("(max-width: 860px)").matches
+                window.matchMedia("(max-width: 759px)").matches
               ) {
                 setSideOpen((open) => !open);
               } else navigate(railView);
@@ -490,6 +501,7 @@ export default function App() {
       </nav>
 
       <aside className="side" aria-label="Bots e tarefas">
+        <div className="side-titlebar" data-tauri-drag-region />
         <div className="side-head">
           <div className="row">
             <span className="brand">UpBot</span>
@@ -631,6 +643,13 @@ export default function App() {
       )}
 
       <main className="main">
+        <IconButton
+          aria-label="Abrir barra lateral"
+          className="window-menu"
+          onClick={() => setSideOpen((open) => !open)}
+        >
+          <Icon name="panel" />
+        </IconButton>
         {error ? (
           <section className="view on">
             <div className="empty">

@@ -245,4 +245,5 @@ export const migrations: string[] = [
   )`,
   // 18: replies in group chats
   `ALTER TABLE channel_messages ADD COLUMN reply_to TEXT`,
+  `ALTER TABLE connected_apps ADD COLUMN permissions_json TEXT NOT NULL DEFAULT '{"read":"allow","write":"ask","send":"ask","pay":"ask","book":"ask","del":"ask"}'`,
 ];

@@ -296,7 +296,7 @@ describe("daemon e2e", () => {
 
     const db = new Database(join(dataDir, "upbot.db"), { readonly: true });
     const rows = db.query("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number };
-    expect(rows.n).toBe(18);
+    expect(rows.n).toBe(19);
     db.close();
   });
 

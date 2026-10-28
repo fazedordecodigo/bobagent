@@ -197,7 +197,7 @@ async function main() {
   bridge.email = email;
   const apps = new AppsService(db, vault, broadcast);
   bridge.apps = apps;
-  const approvals = new ApprovalService(db, vault, () => runtimes, broadcast);
+  const approvals = new ApprovalService(db, vault, () => runtimes, broadcast, apps);
   bridge.approvals = approvals;
   const pages = new PageLibrary(db, workspaceRoot, broadcast);
   bridge.pages = pages;

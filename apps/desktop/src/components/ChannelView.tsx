@@ -102,7 +102,7 @@ export function ChannelView({
         : { className: "", dot: "s-idle", label: "Arquivada" };
   return (
     <div className="main channel-view" style={{ flex: 1 }}>
-      <header className="main-head channel-head">
+      <header className="main-head channel-head" data-tauri-drag-region>
         <span className="mono-av lg">#</span>
         <div className="title">
           <h2>{channel.name}</h2>

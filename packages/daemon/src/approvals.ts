@@ -1,13 +1,14 @@
 import type { Database } from "bun:sqlite";
 import type { Approval, ApprovalDecision, ApprovalRule } from "@upbot/protocol";
+import { isSensitivePermission } from "@upbot/protocol";
+import { classifyAppTool } from "./app-permissions";
+import type { AppsService } from "./apps";
 import { RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
 import type { Vault } from "./vault";
 
-// Approvals gate bot tool calls on the bridge. Rules match tool names (glob, `*`), per bot or
-// for every bot; "ask" wins over "allow". Without a rule, connected-app tools that look like
-// writes (create/update/delete/send/...) ask first unless a specific rule allows them.
-// A lone wildcard allow never bypasses that connected-app write default. A pending approval blocks the tool call
+// Approvals gate bot tool calls on the bridge. App permissions cannot be bypassed by
+// allow rules; explicit ask rules still require review. A pending approval blocks the tool call
 // until the user decides; approvals raised by background work (routines, other bots,
 // gateways, group chats) expire after UPBOT_APPROVAL_BACKGROUND_TTL_MS (default 10 min),
 // others after UPBOT_APPROVAL_TTL_MS (default 60 min). The same queue carries secure secret
@@ -18,9 +19,6 @@ type Waiter = {
   resolve: (a: Approval, value?: string) => void;
   timer: ReturnType<typeof setTimeout>;
 };
-
-const WRITE_VERB =
-  /(^|[_-])(create|update|delete|remove|send|post|publish|pay|charge|refund|transfer|merge|write|edit|archive|invite|cancel|move|rename|upload|patch|put|set|add|insert|close)/i;
 
 function globRe(pattern: string): RegExp {
   const esc = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
@@ -37,12 +35,15 @@ export class ApprovalService {
   private pending = new Map<string, Approval>();
   private waiters = new Map<string, Waiter>();
   private recent: Approval[] = [];
+  private grants = new Map<string, Set<string>>();
+  private responding = new Set<string>();
 
   constructor(
     private db: Database,
     private vault: Vault,
     private runtimes: () => RuntimeManager,
     private broadcast: Broadcast,
+    private apps: AppsService,
   ) {}
 
   rules(): ApprovalRule[] {
@@ -68,9 +69,20 @@ export class ApprovalService {
         (globRe(r.pattern).test(tool) || globRe(legacyPattern(r.pattern)).test(tool)),
     );
     if (hits.some((r) => r.action === "ask")) return "ask";
+    const app = isAppTool ? this.apps.appForTool(tool) : undefined;
+    if (app) {
+      const kind = classifyAppTool(tool);
+      const turn = this.runtimes().currentTurn(agentId);
+      if (
+        !isSensitivePermission(kind) &&
+        turn &&
+        this.grants.get(`${agentId}:${turn.id}`)?.has(`${app.id}:${kind}`)
+      )
+        return "allow";
+      return app.permissions[kind] === "allow" ? "allow" : "ask";
+    }
     if (hits.some((r) => r.action === "allow" && r.pattern !== "*")) return "allow";
-    const op = isAppTool ? tool.slice(tool.indexOf("-") + 1) : "";
-    return isAppTool && WRITE_VERB.test(op) ? "ask" : "allow";
+    return "allow";
   }
 
   list(agentId?: string): Approval[] {
@@ -82,7 +94,10 @@ export class ApprovalService {
 
   private open(
     agentId: string,
-    p: Pick<Approval, "kind" | "title" | "detail" | "tool" | "secretName">,
+    p: Pick<
+      Approval,
+      "kind" | "title" | "detail" | "tool" | "secretName" | "appId" | "appName" | "permission"
+    >,
   ): Promise<{ approval: Approval; value?: string }> {
     const cur = this.runtimes().currentTurn(agentId);
     const background = cur?.background ?? true;
@@ -112,6 +127,7 @@ export class ApprovalService {
   }
 
   private finish(id: string, status: Approval["status"], value?: string): Approval | null {
+    if (status === "expired" && this.responding.has(id)) return null;
     const a = this.pending.get(id);
     if (!a) return null;
     this.pending.delete(id);
@@ -127,39 +143,83 @@ export class ApprovalService {
     return done;
   }
 
-  respond(p: { id: string; decision: ApprovalDecision; value?: string }): Approval {
+  async respond(p: { id: string; decision: ApprovalDecision; value?: string }): Promise<Approval> {
     const a = this.pending.get(p.id);
     if (!a) throw new RpcError("not_found", "approval not found or no longer pending");
-    if (a.kind === "secret") {
-      if (p.decision === "deny") return this.finish(a.id, "denied")!;
-      if (!p.value) throw new RpcError("bad_request", "enter the secret value");
-      const name = a.secretName!;
-      let agentIds = [a.agentId];
-      try {
-        const existing = this.vault.list().find((v) => v.name === name);
-        if (existing) agentIds = [...new Set([...existing.agentIds, a.agentId])];
-      } catch {}
-      this.vault.set(name, p.value, agentIds);
-      return this.finish(a.id, "approved")!;
+    if (this.responding.has(p.id))
+      throw new RpcError("busy", "approval decision is already being saved");
+    if (a.expiresAt <= Date.now()) {
+      this.finish(a.id, "expired");
+      throw new RpcError("not_found", "approval not found or no longer pending");
     }
-    if (a.kind === "takeover") return this.finish(a.id, p.decision === "deny" ? "denied" : "done")!;
-    if (p.decision === "always" && a.tool) {
-      this.setRules([
-        ...this.rules(),
-        { id: crypto.randomUUID(), pattern: a.tool, action: "allow", agentId: a.agentId },
-      ]);
+    if (a.kind === "secret" && p.decision !== "deny" && !p.value)
+      throw new RpcError("bad_request", "enter the secret value");
+    this.responding.add(p.id);
+    const waiter = this.waiters.get(p.id);
+    if (waiter) clearTimeout(waiter.timer);
+    try {
+      if (a.kind === "secret") {
+        if (p.decision === "deny") return this.finish(a.id, "denied")!;
+        if (!p.value) throw new RpcError("bad_request", "enter the secret value");
+        const name = a.secretName!;
+        let agentIds = [a.agentId];
+        try {
+          const existing = this.vault.list().find((v) => v.name === name);
+          if (existing) agentIds = [...new Set([...existing.agentIds, a.agentId])];
+        } catch {}
+        this.vault.set(name, p.value, agentIds);
+        return this.finish(a.id, "approved")!;
+      }
+      if (a.kind === "takeover")
+        return this.finish(a.id, p.decision === "deny" ? "denied" : "done")!;
+      if (a.appId && a.permission) {
+        if (p.decision === "deny" || this.apps.get(a.appId).permissions[a.permission] === "off")
+          return this.finish(a.id, "denied")!;
+        if (p.decision === "always" && !isSensitivePermission(a.permission)) {
+          const app = this.apps.get(a.appId);
+          a.previousLevel = app.permissions[a.permission];
+          try {
+            await this.apps.update({ id: a.appId, permissions: { [a.permission]: "allow" } });
+          } catch (error) {
+            this.apps.restorePermission(a.appId, a.permission, a.previousLevel);
+            throw error;
+          }
+        }
+        if (p.decision === "task" && a.turnId && !isSensitivePermission(a.permission)) {
+          const key = `${a.agentId}:${a.turnId}`;
+          const grants = this.grants.get(key) ?? new Set<string>();
+          grants.add(`${a.appId}:${a.permission}`);
+          this.grants.set(key, grants);
+        }
+      } else if (p.decision === "always" && a.tool) {
+        this.setRules([
+          ...this.rules(),
+          { id: crypto.randomUUID(), pattern: a.tool, action: "allow", agentId: a.agentId },
+        ]);
+      }
+      return this.finish(a.id, p.decision === "deny" ? "denied" : "approved")!;
+    } catch (error) {
+      this.finish(a.id, "denied");
+      throw error;
+    } finally {
+      this.responding.delete(p.id);
     }
-    return this.finish(a.id, p.decision === "deny" ? "denied" : "approved")!;
   }
 
   /** Ends approvals left by a finished turn. */
   onTurnEnded(agentId: string, turnId: string): void {
+    this.grants.delete(`${agentId}:${turnId}`);
     for (const a of this.pending.values())
       if (a.agentId === agentId && a.turnId === turnId) this.finish(a.id, "expired");
   }
 
   /** Blocks until a tool call is allowed; throws when denied or expired. */
   async gate(agentId: string, tool: string, args: unknown, isAppTool: boolean): Promise<void> {
+    const app = isAppTool ? this.apps.appForTool(tool) : undefined;
+    if (isAppTool && !app) throw new RpcError("not_found", "app not found");
+    const permission = classifyAppTool(tool);
+    if (app?.permissions[permission] === "off")
+      throw new Error(`${app.name} não permite ${permission}`);
     if (this.decide(agentId, tool, isAppTool) === "allow") return;
     const detail = JSON.stringify(args ?? {}, null, 2).slice(0, 4000);
     const { approval } = await this.open(agentId, {
@@ -168,6 +228,7 @@ export class ApprovalService {
       detail,
       tool,
       secretName: null,
+      ...(app ? { appId: app.id, appName: app.name, permission } : {}),
     });
     if (approval.status === "approved") return;
     throw new Error(

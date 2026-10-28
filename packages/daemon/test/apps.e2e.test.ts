@@ -91,6 +91,7 @@ describe("connected apps (MCP) e2e", () => {
     app = (await c.request("apps.connect", {
       catalogId: "custom-stdio",
       name: "Fake App",
+      permissions: { write: "allow" },
       command: ["bun", FAKE_MCP],
       secrets: { FAKE_APP_TOKEN: APP_SECRET },
       agentIds: [a.id],
