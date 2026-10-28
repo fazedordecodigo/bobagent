@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright-core";
 import { chromium } from "playwright-core";
 
@@ -8,7 +9,7 @@ let server: ReturnType<typeof Bun.spawn>;
 
 beforeAll(async () => {
   server = Bun.spawn(["bun", "run", "dev", "--port", "1421"], {
-    cwd: new URL("..", import.meta.url).pathname,
+    cwd: fileURLToPath(new URL("..", import.meta.url)),
     stdout: "ignore",
     stderr: "inherit",
   });
@@ -18,7 +19,12 @@ beforeAll(async () => {
     } catch {}
     await Bun.sleep(100);
   }
-  browser = await chromium.launch({ channel: "chrome", headless: true });
+  browser = await chromium.launch({
+    ...(process.env.CHROME_PATH
+      ? { executablePath: process.env.CHROME_PATH }
+      : { channel: "chrome" }),
+    headless: true,
+  });
   page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   await page.goto("http://localhost:1421/#/kit");
   await page.getByRole("heading", { name: "Controles", exact: true }).waitFor();
@@ -27,6 +33,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await browser?.close();
   server?.kill();
+  if (server) await server.exited;
 });
 
 test("fields expose labels, empty, invalid, multiline and disabled states", async () => {
