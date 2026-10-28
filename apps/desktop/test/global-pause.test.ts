@@ -1,6 +1,12 @@
 import { expect, test } from "bun:test";
 import type { DaemonClient } from "../src/lib/daemon";
-import { GLOBAL_PAUSE_KEY, globallyPaused, toggleGlobalPause } from "../src/lib/global-pause";
+import {
+  GLOBAL_PAUSE_KEY,
+  globallyPaused,
+  globalPauseState,
+  reconcileGlobalPause,
+  toggleGlobalPause,
+} from "../src/lib/global-pause";
 
 function harness(initial: Record<string, boolean> = {}) {
   const queues = new Map(Object.entries(initial));
@@ -40,6 +46,7 @@ test("global pause owns only queues it paused; resume survives reload and ignore
   const h = harness({ individual: true, first: false, second: false });
   await toggleGlobalPause(h.client, h.storage);
   expect(globallyPaused(h.storage)).toEqual(["first", "second"]);
+  expect(globalPauseState(h.storage).mode).toBe("paused");
   h.queues.set("new-paused", true);
   h.queues.set("new-running", false);
   await toggleGlobalPause(h.client, { ...h.storage });
@@ -59,6 +66,22 @@ test("global pause owns only queues it paused; resume survives reload and ignore
   ]);
 });
 
+test("individual resume then re-pause relinquishes ownership and stays paused on global resume", async () => {
+  const h = harness({ first: false, second: false });
+  await toggleGlobalPause(h.client, h.storage);
+  reconcileGlobalPause(h.storage, { agentId: "first", paused: false });
+  h.queues.set("first", true);
+  reconcileGlobalPause(h.storage, { agentId: "first", paused: true });
+  await toggleGlobalPause(h.client, h.storage);
+  expect(h.queues).toEqual(
+    new Map([
+      ["first", true],
+      ["second", false],
+    ]),
+  );
+  expect(globallyPaused(h.storage)).toEqual([]);
+});
+
 test("empty, already paused and deleted queues never cause unrelated resumes", async () => {
   const h = harness();
   await toggleGlobalPause(h.client, h.storage);
@@ -76,12 +99,22 @@ test("partial failures retain successful ownership and failed resumes can be ret
   h.failOn("second");
   await expect(toggleGlobalPause(h.client, h.storage)).rejects.toThrow("offline");
   expect(globallyPaused(h.storage)).toEqual(["first"]);
-  h.failOn("first");
-  await expect(toggleGlobalPause(h.client, h.storage)).rejects.toThrow("offline");
-  expect(globallyPaused(h.storage)).toEqual(["first"]);
+  expect(globalPauseState(h.storage).mode).toBe("pausing");
   h.failOn();
   await toggleGlobalPause(h.client, h.storage);
-  expect(Object.fromEntries(h.queues)).toEqual({ first: false, second: false });
+  expect(Object.fromEntries(h.queues)).toEqual({ first: true, second: true });
+  expect(globalPauseState(h.storage).mode).toBe("paused");
+});
+
+test("resume failures keep ownership for a later retry", async () => {
+  const h = harness({ first: true, second: true });
+  h.values.set(GLOBAL_PAUSE_KEY, JSON.stringify({ mode: "paused", owned: ["first", "second"] }));
+  h.failOn("second");
+  await expect(toggleGlobalPause(h.client, h.storage)).rejects.toThrow("offline");
+  expect(globallyPaused(h.storage)).toEqual(["second"]);
+  h.failOn();
+  await toggleGlobalPause(h.client, h.storage);
+  expect(globallyPaused(h.storage)).toEqual([]);
 });
 
 test("unavailable storage prevents mutation; corrupt ownership never authorizes resume", async () => {

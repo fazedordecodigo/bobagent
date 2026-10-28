@@ -2,38 +2,107 @@ import type { DaemonClient } from "./daemon";
 
 export const GLOBAL_PAUSE_KEY = "upbot.menubar.pausedQueues.v1";
 
+export type GlobalPauseState = { mode: "pausing" | "paused"; owned: string[] };
 type Storage = Pick<globalThis.Storage, "getItem" | "setItem">;
+type QueueUpdate = { agentId: string; paused: boolean };
 
-export function globallyPaused(storage: Storage): string[] {
+function parseState(value: unknown): GlobalPauseState {
+  if (Array.isArray(value) && value.every((id) => typeof id === "string"))
+    return { mode: value.length ? "paused" : "pausing", owned: [...new Set(value)] };
+  if (value && typeof value === "object") {
+    const candidate = value as { mode?: unknown; owned?: unknown };
+    if (
+      (candidate.mode === "pausing" || candidate.mode === "paused") &&
+      Array.isArray(candidate.owned) &&
+      candidate.owned.every((id) => typeof id === "string")
+    )
+      return { mode: candidate.mode, owned: [...new Set(candidate.owned)] };
+  }
+  return { mode: "pausing", owned: [] };
+}
+
+export function globalPauseState(storage: Storage): GlobalPauseState {
   try {
-    const value: unknown = JSON.parse(storage.getItem(GLOBAL_PAUSE_KEY) ?? "[]");
-    return Array.isArray(value) && value.every((id) => typeof id === "string")
-      ? [...new Set(value)]
-      : [];
+    return parseState(JSON.parse(storage.getItem(GLOBAL_PAUSE_KEY) ?? "null"));
   } catch {
-    return [];
+    return { mode: "pausing", owned: [] };
   }
 }
 
-export async function toggleGlobalPause(client: Pick<DaemonClient, "request">, storage: Storage) {
-  let owned = globallyPaused(storage);
+export function globallyPaused(storage: Storage): string[] {
+  return globalPauseState(storage).owned;
+}
+
+function save(storage: Storage, value: GlobalPauseState) {
+  storage.setItem(GLOBAL_PAUSE_KEY, JSON.stringify(value));
+}
+
+export function reconcileGlobalPause(
+  storage: Storage,
+  queue: QueueUpdate,
+  inFlight: ReadonlySet<string> = new Set(),
+) {
+  if (queue.paused || inFlight.has(queue.agentId)) return;
+  const current = globalPauseState(storage);
+  if (current.owned.includes(queue.agentId))
+    save(storage, { ...current, owned: current.owned.filter((id) => id !== queue.agentId) });
+}
+
+export async function toggleGlobalPause(
+  client: Pick<DaemonClient, "request">,
+  storage: Storage,
+  inFlight: Set<string> = new Set(),
+) {
+  let current = globalPauseState(storage);
   const agents = await client.request("agents.list", {});
-  const resume = owned.length > 0;
-  storage.setItem(GLOBAL_PAUSE_KEY, JSON.stringify(owned));
-  if (resume) {
-    const present = new Set(agents.map((agent) => agent.id));
-    for (const id of [...owned]) {
-      if (present.has(id)) await client.request("queue.resume", { agentId: id });
-      owned = owned.filter((item) => item !== id);
-      storage.setItem(GLOBAL_PAUSE_KEY, JSON.stringify(owned));
+  const present = new Set(agents.map((agent) => agent.id));
+  const errors: unknown[] = [];
+  if (current.mode === "paused" && current.owned.length > 0) {
+    for (const id of [...current.owned]) {
+      if (!present.has(id)) {
+        current = { ...current, owned: current.owned.filter((item) => item !== id) };
+        save(storage, current);
+        continue;
+      }
+      inFlight.add(id);
+      try {
+        await client.request("queue.resume", { agentId: id });
+        current = { ...current, owned: current.owned.filter((item) => item !== id) };
+        save(storage, current);
+      } catch (error) {
+        errors.push(error);
+      } finally {
+        inFlight.delete(id);
+      }
     }
-  } else {
-    for (const agent of agents) {
-      const queue = await client.request("queue.get", { agentId: agent.id });
-      if (queue.paused) continue;
+    if (errors.length) throw errors[0];
+    save(storage, { mode: "pausing", owned: [] });
+    return;
+  }
+  current = { mode: "pausing", owned: current.owned };
+  save(storage, current);
+  for (const agent of agents) {
+    if (current.owned.includes(agent.id)) continue;
+    const queue = await client.request("queue.get", { agentId: agent.id });
+    if (queue.paused) continue;
+    inFlight.add(agent.id);
+    try {
       await client.request("queue.pause", { agentId: agent.id });
-      owned.push(agent.id);
-      storage.setItem(GLOBAL_PAUSE_KEY, JSON.stringify(owned));
+      current = { mode: "pausing", owned: [...current.owned, agent.id] };
+      save(storage, current);
+    } catch (error) {
+      errors.push(error);
+    } finally {
+      inFlight.delete(agent.id);
     }
   }
+  const active = await Promise.all(
+    agents.map(async (agent) => (await client.request("queue.get", { agentId: agent.id })).paused),
+  );
+  current = {
+    mode: active.every(Boolean) && !errors.length ? "paused" : "pausing",
+    owned: current.owned,
+  };
+  save(storage, current);
+  if (errors.length) throw errors[0];
 }

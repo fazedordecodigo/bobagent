@@ -10,7 +10,12 @@ import { permissionActions } from "../lib/app-permissions";
 import { approvalAction, decideApproval } from "../lib/approval-decisions";
 import { describeApproval, requiresFullReview } from "../lib/approval-description";
 import { DaemonClient } from "../lib/daemon";
-import { GLOBAL_PAUSE_KEY, globallyPaused, toggleGlobalPause } from "../lib/global-pause";
+import {
+  GLOBAL_PAUSE_KEY,
+  globalPauseState,
+  reconcileGlobalPause,
+  toggleGlobalPause,
+} from "../lib/global-pause";
 import { addMenuResult, expireMenuResults, type MenuResult } from "../lib/menu-results";
 import { nativeCommand } from "../lib/native";
 import { useThemePref } from "../lib/theme";
@@ -63,6 +68,7 @@ export default function MenuBar() {
   const [done, setDone] = useState<MenuResult[]>([]);
   const [busy, setBusy] = useState<string[]>([]);
   const working = useRef(new Set<string>());
+  const globalOperation = useRef(new Set<string>());
   const generation = useRef(0);
   const [text, setText] = useState("");
   const [now, setNow] = useState(Date.now());
@@ -82,7 +88,7 @@ export default function MenuBar() {
     setStatuses(status);
     setApprovals(pending.filter((item) => item.status === "pending"));
     setDrafts(mail.filter((item) => item.status === "pending" || item.status === "failed"));
-    setPaused(globallyPaused(localStorage).length > 0);
+    setPaused(globalPauseState(localStorage).mode === "paused");
     setReady(true);
   }, [client]);
   useEffect(() => {
@@ -103,7 +109,10 @@ export default function MenuBar() {
       client.on("agent.updated", refresh),
       client.on("agent.deleted", refresh),
       client.on("agent.status", refresh),
-      client.on("queue.updated", refresh),
+      client.on("queue.updated", (queue) => {
+        reconcileGlobalPause(localStorage, queue, globalOperation.current);
+        refresh();
+      }),
     ];
     const timer = setInterval(() => setNow(Date.now()), 30000);
     return () => {
@@ -211,7 +220,7 @@ export default function MenuBar() {
                 onSelect: () =>
                   void perform("queues", async () => {
                     try {
-                      await toggleGlobalPause(client, localStorage);
+                      await toggleGlobalPause(client, localStorage, globalOperation.current);
                     } finally {
                       await load();
                     }
