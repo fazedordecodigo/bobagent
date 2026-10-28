@@ -154,6 +154,13 @@ fn main() {
     });
 
     tauri::Builder::default()
+        .manage(notifications::NotificationState::from_args(
+            &std::env::args().collect::<Vec<_>>(),
+        ))
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            notifications::forward_launch(app, &args);
+            let _ = notifications::notifications_open(app.clone());
+        }))
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())

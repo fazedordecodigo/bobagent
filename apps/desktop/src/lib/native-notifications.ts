@@ -13,7 +13,7 @@ export function useNativeNotifications(
   client: DaemonClient,
   ready: boolean,
   agents: Agent[],
-  review: (view: string) => void,
+  review: (view: string, notice?: string) => void,
   onError: (message: string) => void,
 ) {
   const names = useRef(agents);

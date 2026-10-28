@@ -198,9 +198,10 @@ export default function App() {
   );
 
   const reviewNotification = useCallback(
-    (target: string) => {
-      if (target === "apps") {
-        setSettingsTab("apps");
+    (target: string, message?: string) => {
+      if (message) setNotice(message);
+      if (target === "apps" || target === "approvals") {
+        setSettingsTab(target);
         navigate("settings");
       } else openAgent(target);
     },
@@ -672,6 +673,14 @@ export default function App() {
       )}
 
       <main className="main">
+        {notice && view !== "chat" && (
+          <div className="notice" role="status">
+            {notice}
+            <button type="button" aria-label="Dispensar aviso" onClick={() => setNotice(null)}>
+              ×
+            </button>
+          </div>
+        )}
         <IconButton
           aria-label="Abrir barra lateral"
           className="window-menu"
