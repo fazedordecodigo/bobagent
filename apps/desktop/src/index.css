@@ -25,15 +25,14 @@ button.bg-sky-600, button.bg-sky-700 {
 @media (max-width: 759px) {
   .side-titlebar { display: none; }
   .side > button[aria-label="Fechar barra lateral"] { position: absolute; top: 4px; right: 4px; }
-  .side-open .side-head { padding-right: 52px; }
   .app.side-open .side {
     position: fixed;
     top: 0;
-    bottom: 60px;
+    bottom: 0;
     left: 0;
     z-index: 31;
     display: flex;
-    width: 272px;
+    width: var(--sidebar-width);
     background: var(--surface);
     box-shadow: 12px 0 40px -20px color-mix(in oklch, var(--shade) 40%, transparent);
   }
@@ -41,7 +40,7 @@ button.bg-sky-600, button.bg-sky-700 {
   .side-scrim {
     position: fixed;
     z-index: 30;
-    inset: 0 0 60px;
+    inset: 0;
     background: var(--scrim);
   }
 }
