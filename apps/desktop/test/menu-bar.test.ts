@@ -209,6 +209,9 @@ test("keyboard app approval becomes done, count decreases and honest undo restor
   expect(((await rpc.request("apps.list", {})) as ConnectedApp[])[0]?.permissions.write).toBe(
     "ask",
   );
+  await done.waitFor({ state: "detached", timeout: 10000 });
+  expect(await page.getByTestId("menubar-done").count()).toBe(0);
+  await page.getByText("Nada aguardando você.", { exact: true }).waitFor();
 }, 30000);
 
 test("main-window decisions remove menubar requests; sensitive calls never offer permanent allow", async () => {

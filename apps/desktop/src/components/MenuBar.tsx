@@ -7,10 +7,11 @@ import type {
 } from "@upbot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { permissionActions } from "../lib/app-permissions";
-import { type ApprovalResult, approvalAction, decideApproval } from "../lib/approval-decisions";
+import { approvalAction, decideApproval } from "../lib/approval-decisions";
 import { describeApproval, requiresFullReview } from "../lib/approval-description";
 import { DaemonClient } from "../lib/daemon";
 import { GLOBAL_PAUSE_KEY, globallyPaused, toggleGlobalPause } from "../lib/global-pause";
+import { addMenuResult, expireMenuResults, type MenuResult } from "../lib/menu-results";
 import { nativeCommand } from "../lib/native";
 import { useThemePref } from "../lib/theme";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -30,7 +31,6 @@ import { Menu } from "./ds/Menu";
 import { Icon } from "./icons";
 import s from "./MenuBar.module.css";
 
-type Done = ApprovalResult & { id: string; createdAt: number };
 const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 function relativeTime(createdAt: number, now: number) {
   const minutes = Math.max(0, Math.floor((now - createdAt) / 60000));
@@ -60,7 +60,7 @@ export default function MenuBar() {
   const [paused, setPaused] = useState(false);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<Done[]>([]);
+  const [done, setDone] = useState<MenuResult[]>([]);
   const [busy, setBusy] = useState<string[]>([]);
   const working = useRef(new Set<string>());
   const generation = useRef(0);
@@ -138,6 +138,15 @@ export default function MenuBar() {
   }, []);
   const count = approvals.length + drafts.length;
   useEffect(() => {
+    if (!done.length) return;
+    const expiresAt = Math.min(...done.map((item) => item.expiresAt));
+    const timer = setTimeout(
+      () => setDone((items) => expireMenuResults(items)),
+      Math.max(0, expiresAt - Date.now()),
+    );
+    return () => clearTimeout(timer);
+  }, [done]);
+  useEffect(() => {
     if (ready)
       void nativeCommand("set_tray_count", { count }).catch((e: unknown) =>
         setError(errorMessage(e)),
@@ -159,10 +168,9 @@ export default function MenuBar() {
     void perform(approval.id, async () => {
       const result = await decideApproval(client, approval, decision);
       setApprovals((previous) => previous.filter((item) => item.id !== approval.id));
-      setDone((previous) => [
-        { ...result, id: approval.id, createdAt: approval.createdAt },
-        ...previous,
-      ]);
+      setDone((previous) =>
+        addMenuResult(previous, { ...result, id: approval.id, createdAt: approval.createdAt }),
+      );
       await load();
     });
   const running = agents.filter(
@@ -263,6 +271,7 @@ export default function MenuBar() {
                                   ? {
                                       id: item.id,
                                       createdAt: item.createdAt,
+                                      expiresAt: item.expiresAt,
                                       message:
                                         "Preferência restaurada. A ação já aprovada não foi desfeita.",
                                     }
