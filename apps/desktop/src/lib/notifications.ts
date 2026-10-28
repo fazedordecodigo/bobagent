@@ -254,7 +254,9 @@ export class ApprovalNotifications {
     await this.bridge.post(notification);
     if (this.stopped) return;
     this.seen.add(approval.id);
-    this.preferences.setItem(SEEN_KEY, JSON.stringify([...this.seen].slice(-1000)));
+    try {
+      this.preferences.setItem(SEEN_KEY, JSON.stringify([...this.seen].slice(-1000)));
+    } catch {}
   }
 
   async respond({ id, action }: NotificationResponse) {

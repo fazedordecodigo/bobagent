@@ -134,6 +134,26 @@ function preferences() {
   };
 }
 
+test("seen-ID storage failures preserve in-memory deduplication and subsequent delivery", async () => {
+  const h = harness([pending], {
+    getItem: () => null,
+    setItem: () => {
+      throw new Error("storage full");
+    },
+  });
+  try {
+    await h.controller.start();
+    expect(h.posts.map((item) => item.id)).toEqual([pending.id]);
+    await h.update(pending);
+    expect(h.posts.length).toBe(1);
+    await h.update({ ...pending, id: "another-decision" });
+    expect(h.posts.map((item) => item.id)).toEqual([pending.id, "another-decision"]);
+    expect(h.errors).toEqual([]);
+  } finally {
+    h.controller.stop();
+  }
+});
+
 test("mute is a persisted finite timestamp with exactly one hour duration", () => {
   const store = preferences();
   expect(muteUntil(store)).toBe(0);
