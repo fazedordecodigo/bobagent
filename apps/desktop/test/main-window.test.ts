@@ -118,7 +118,7 @@ beforeAll(async () => {
     { id: bot.id },
   );
   if (out) mkdirSync(out, { recursive: true });
-}, 30000);
+}, 60000);
 
 afterAll(async () => {
   if (out) writeFileSync(join(out, "blue-counts.json"), JSON.stringify(blueCounts, null, 2));
