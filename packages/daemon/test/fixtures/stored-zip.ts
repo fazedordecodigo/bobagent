@@ -17,9 +17,11 @@ export function storedZip(entries: ZipEntry[]): Buffer {
     const name = Buffer.from(entry.name);
     const contents = entry.contents ?? Buffer.alloc(0);
     const crc = crc32(contents);
+    const dosDate = 0x0021;
     const localHeader = Buffer.alloc(30);
     localHeader.writeUInt32LE(0x04034b50, 0);
     localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(dosDate, 12);
     localHeader.writeUInt32LE(crc, 14);
     localHeader.writeUInt32LE(contents.length, 18);
     localHeader.writeUInt32LE(contents.length, 22);
@@ -30,6 +32,7 @@ export function storedZip(entries: ZipEntry[]): Buffer {
     centralHeader.writeUInt32LE(0x02014b50, 0);
     centralHeader.writeUInt16LE((3 << 8) | 20, 4);
     centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt16LE(dosDate, 14);
     centralHeader.writeUInt32LE(crc, 16);
     centralHeader.writeUInt32LE(contents.length, 20);
     centralHeader.writeUInt32LE(contents.length, 24);
