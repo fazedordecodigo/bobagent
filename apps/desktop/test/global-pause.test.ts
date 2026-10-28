@@ -3,6 +3,7 @@ import type { DaemonClient } from "../src/lib/daemon";
 import {
   GLOBAL_PAUSE_KEY,
   globallyPaused,
+  globalPauseAction,
   globalPauseState,
   reconcileGlobalPause,
   toggleGlobalPause,
@@ -88,10 +89,25 @@ test("empty, already paused and deleted queues never cause unrelated resumes", a
   h.queues.set("individual", true);
   await toggleGlobalPause(h.client, h.storage);
   expect(h.calls).toEqual([]);
+  expect(globalPauseAction(h.storage)).toBe("pause");
+  expect(globalPauseState(h.storage)).toEqual({ mode: "pausing", owned: [] });
   h.values.set(GLOBAL_PAUSE_KEY, '["deleted"]');
   await toggleGlobalPause(h.client, h.storage);
   expect(h.calls).toEqual([]);
   expect(globallyPaused(h.storage)).toEqual([]);
+});
+
+test("all individually paused is idle; creating a bot never pauses it and stale resume cannot pause", async () => {
+  const h = harness({ individual: true });
+  await toggleGlobalPause(h.client, h.storage);
+  expect(globalPauseAction(h.storage)).toBe("pause");
+  h.queues.set("new-bot", false);
+  await toggleGlobalPause(h.client, h.storage, new Set(), "resume");
+  expect(h.queues.get("new-bot")).toBe(false);
+  expect(h.calls).toEqual([]);
+  await toggleGlobalPause(h.client, h.storage);
+  expect(h.calls).toEqual(["queue.pause:new-bot"]);
+  expect(globalPauseAction(h.storage)).toBe("resume");
 });
 
 test("partial failures retain successful ownership and failed resumes can be retried", async () => {

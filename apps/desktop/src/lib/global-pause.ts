@@ -3,6 +3,7 @@ import type { DaemonClient } from "./daemon";
 export const GLOBAL_PAUSE_KEY = "upbot.menubar.pausedQueues.v1";
 
 export type GlobalPauseState = { mode: "pausing" | "paused"; owned: string[] };
+export type GlobalPauseAction = "pause" | "resume";
 type Storage = Pick<globalThis.Storage, "getItem" | "setItem">;
 type QueueUpdate = { agentId: string; paused: boolean };
 
@@ -33,6 +34,11 @@ export function globallyPaused(storage: Storage): string[] {
   return globalPauseState(storage).owned;
 }
 
+export function globalPauseAction(storage: Storage): GlobalPauseAction {
+  const current = globalPauseState(storage);
+  return current.mode === "paused" && current.owned.length > 0 ? "resume" : "pause";
+}
+
 function save(storage: Storage, value: GlobalPauseState) {
   storage.setItem(GLOBAL_PAUSE_KEY, JSON.stringify(value));
 }
@@ -52,12 +58,13 @@ export async function toggleGlobalPause(
   client: Pick<DaemonClient, "request">,
   storage: Storage,
   inFlight: Set<string> = new Set(),
+  action = globalPauseAction(storage),
 ) {
   let current = globalPauseState(storage);
   const agents = await client.request("agents.list", {});
   const present = new Set(agents.map((agent) => agent.id));
   const errors: unknown[] = [];
-  if (current.mode === "paused" && current.owned.length > 0) {
+  if (action === "resume") {
     for (const id of [...current.owned]) {
       if (!present.has(id)) {
         current = { ...current, owned: current.owned.filter((item) => item !== id) };
@@ -100,7 +107,8 @@ export async function toggleGlobalPause(
     agents.map(async (agent) => (await client.request("queue.get", { agentId: agent.id })).paused),
   );
   current = {
-    mode: active.every(Boolean) && !errors.length ? "paused" : "pausing",
+    mode:
+      current.owned.length > 0 && active.every(Boolean) && !errors.length ? "paused" : "pausing",
     owned: current.owned,
   };
   save(storage, current);

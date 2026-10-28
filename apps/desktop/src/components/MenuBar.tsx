@@ -12,7 +12,8 @@ import { describeApproval, requiresFullReview } from "../lib/approval-descriptio
 import { DaemonClient } from "../lib/daemon";
 import {
   GLOBAL_PAUSE_KEY,
-  globalPauseState,
+  type GlobalPauseAction,
+  globalPauseAction,
   reconcileGlobalPause,
   toggleGlobalPause,
 } from "../lib/global-pause";
@@ -62,7 +63,7 @@ export default function MenuBar() {
   const [statuses, setStatuses] = useState<Record<string, AgentStatusInfo>>({});
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [drafts, setDrafts] = useState<EmailDraft[]>([]);
-  const [paused, setPaused] = useState(false);
+  const [queueAction, setQueueAction] = useState<GlobalPauseAction>("pause");
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<MenuResult[]>([]);
@@ -88,7 +89,7 @@ export default function MenuBar() {
     setStatuses(status);
     setApprovals(pending.filter((item) => item.status === "pending"));
     setDrafts(mail.filter((item) => item.status === "pending" || item.status === "failed"));
-    setPaused(globalPauseState(localStorage).mode === "paused");
+    setQueueAction(globalPauseAction(localStorage));
     setReady(true);
   }, [client]);
   useEffect(() => {
@@ -215,12 +216,20 @@ export default function MenuBar() {
             items={[
               { label: "Abrir o UpBot", onSelect: () => open() },
               {
-                label: paused ? "Retomar bots" : "Pausar bots",
-                disabled: !ready || (!paused && agents.length === 0) || busy.includes("queues"),
+                label: queueAction === "resume" ? "Retomar bots" : "Pausar bots",
+                disabled:
+                  !ready ||
+                  (queueAction === "pause" && agents.length === 0) ||
+                  busy.includes("queues"),
                 onSelect: () =>
                   void perform("queues", async () => {
                     try {
-                      await toggleGlobalPause(client, localStorage, globalOperation.current);
+                      await toggleGlobalPause(
+                        client,
+                        localStorage,
+                        globalOperation.current,
+                        queueAction,
+                      );
                     } finally {
                       await load();
                     }
