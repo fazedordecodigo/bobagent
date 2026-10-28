@@ -122,7 +122,7 @@ function unprotectWithDpapi(value: string): Buffer {
     "$base64 = [Console]::In.ReadToEnd().Trim()",
     "$bytes = [Convert]::FromBase64String($base64)",
     "$plain = [Security.Cryptography.ProtectedData]::Unprotect($bytes, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)",
-    "$hex = -join ($plain | ForEach-Object { $_.ToString('x2') })",
+    "-join ($plain | ForEach-Object { $_.ToString('x2') })",
   ].join("; ");
   const result = spawnSync(
     "powershell.exe",
