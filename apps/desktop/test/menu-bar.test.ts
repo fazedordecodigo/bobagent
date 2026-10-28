@@ -120,8 +120,11 @@ afterAll(async () => {
   }
 });
 
-async function pending(agent = bot, tool = "create_note") {
-  await rpc.request("chat.send", { agentId: agent.id, text: `mcp:notas-${tool} {}` });
+async function pending(agent = bot, tool = "create_note", args: Record<string, unknown> = {}) {
+  await rpc.request("chat.send", {
+    agentId: agent.id,
+    text: `mcp:notas-${tool} ${JSON.stringify(args)}`,
+  });
   for (let attempt = 0; attempt < 100; attempt++) {
     const approval = ((await rpc.request("approvals.list", {})) as Approval[]).find(
       (item) => item.status === "pending" && item.agentId === agent.id,
@@ -179,6 +182,17 @@ test("empty state, guarded browser controls and footer error recovery use real d
 test("keyboard app approval becomes done, count decreases and honest undo restores preference", async () => {
   await pending();
   await page.getByText("1 tarefa aguardando você", { exact: true }).waitFor();
+  await page
+    .getByTestId("menubar-approval")
+    .getByText("UpBot quer criar uma nota em Notas.", { exact: true })
+    .waitFor();
+  await main
+    .getByTestId("approval")
+    .getByText("UpBot quer criar uma nota em Notas.", { exact: true })
+    .waitFor();
+  expect(await page.getByTestId("menubar-approval").innerText()).not.toMatch(
+    /Run |create_note|\{\}/,
+  );
   await keyboardButton("Permitir");
   const done = page.getByTestId("menubar-done");
   await done.filter({ hasText: "Preferência de permissão salva para este app." }).waitFor();
@@ -196,8 +210,21 @@ test("keyboard app approval becomes done, count decreases and honest undo restor
 }, 30000);
 
 test("main-window decisions remove menubar requests; sensitive calls never offer permanent allow", async () => {
-  await pending();
+  await pending(bot, "create_note", { title: "Revisão da semana", content: "Organizar entregas" });
   await page.getByTestId("menubar-approval").waitFor();
+  for (const card of [page.getByTestId("menubar-approval"), main.getByTestId("approval")]) {
+    const summary = card.getByText("título: Revisão da semana · conteúdo: Organizar entregas", {
+      exact: true,
+    });
+    await summary.waitFor();
+    const style = await summary.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { whiteSpace: style.whiteSpace, font: style.fontFamily };
+    });
+    expect(style.whiteSpace).toBe("nowrap");
+    expect(style.font).toContain("monospace");
+    expect(await card.innerText()).not.toMatch(/Run |create_note|[{}]/);
+  }
   await main.getByTestId("approval").getByRole("button", { name: "Recusar", exact: true }).click();
   await page.getByText("Nada aguardando você", { exact: true }).waitFor();
   expect(await page.getByTestId("menubar-approval").count()).toBe(0);
@@ -349,12 +376,25 @@ test("multiple real pending items stay secondary after first; light/dark capture
   await pending(bot, "send_message");
   await pending(second);
   await page.getByText("2 tarefas aguardando você", { exact: true }).waitFor();
+  const running = page.getByRole("region", { name: "Em execução (2)", exact: true });
+  await running.waitFor();
+  expect(await running.getByRole("button").count()).toBe(2);
+  expect(await running.innerText()).toContain(bot.name);
+  expect(await running.innerText()).toContain(second.name);
   for (const theme of ["light", "dark"]) {
     await main.evaluate((theme) => localStorage.setItem("upbot.theme", theme), theme);
     await page.waitForFunction((theme) => document.documentElement.dataset.theme === theme, theme);
     await page.addStyleTag({ content: "*{transition:none!important;animation:none!important}" });
     await page.evaluate(() => document.fonts.ready);
     expect(await page.getByTestId("menubar-approval").count()).toBe(2);
+    await page
+      .getByTestId("menubar-approval")
+      .getByText("Relatório semanal quer criar uma nota em Notas.", { exact: true })
+      .waitFor();
+    await page
+      .getByTestId("menubar-approval")
+      .getByText("UpBot quer enviar uma mensagem em Notas.", { exact: true })
+      .waitFor();
     const blue = await page
       .getByTestId("menubar-approval")
       .getByRole("button")
@@ -369,6 +409,25 @@ test("multiple real pending items stay secondary after first; light/dark capture
       });
     expect(blue).toBe(1);
     if (out) await page.screenshot({ path: join(out, `menubar-${theme}.png`) });
+    const lastBot = running.getByRole("button").last();
+    const scroller = running.locator("..");
+    expect(await scroller.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
+      true,
+    );
+    const before = await lastBot.boundingBox();
+    const viewport = await scroller.boundingBox();
+    expect((before?.y ?? 0) + (before?.height ?? 0)).toBeGreaterThan(
+      (viewport?.y ?? 0) + (viewport?.height ?? 0),
+    );
+    await lastBot.scrollIntoViewIfNeeded();
+    const after = await lastBot.boundingBox();
+    expect((after?.y ?? 0) + (after?.height ?? 0)).toBeLessThanOrEqual(
+      (viewport?.y ?? 0) + (viewport?.height ?? 0),
+    );
+    if (out) await page.screenshot({ path: join(out, `menubar-running-scrolled-${theme}.png`) });
+    await scroller.evaluate((element) => {
+      element.scrollTop = 0;
+    });
   }
   for (const approval of (await rpc.request("approvals.list", {})) as Approval[]) {
     if (approval.status === "pending")

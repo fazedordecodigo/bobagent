@@ -317,7 +317,11 @@ test("app requests, permissions dialog and sensitive conversation decisions stay
     await page.getByRole("tab", { name: "Apps", exact: true }).click();
     const requests = page.getByRole("region", { name: "Pedidos de apps conectados" });
     await requests.getByRole("button", { name: "Permitir", exact: true }).waitFor();
-    expect(await requests.getByText(bot.name, { exact: false }).isVisible()).toBe(true);
+    expect(
+      await requests
+        .getByText(`${bot.name} quer criar uma nota em Notas.`, { exact: true })
+        .isVisible(),
+    ).toBe(true);
     expect(await requests.getByText("Notas · Criar e editar", { exact: false }).isVisible()).toBe(
       true,
     );

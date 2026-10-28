@@ -20,7 +20,8 @@
 .itemHead b { flex: 1; min-width: 0; font-size: var(--fs-ui); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .item p { font-size: var(--fs-meta); color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
 .description { max-height: 80px; overflow-y: auto; }
-.detail { white-space: pre-wrap; }
+.item .context { font-size: var(--fs-small); }
+.item .arguments { font-family: var(--font-mono); font-size: var(--fs-small); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .actions button { border-radius: var(--radius-sm); }
 .done { grid-template-columns: 22px minmax(0, 1fr); font-size: var(--fs-meta); }

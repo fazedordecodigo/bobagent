@@ -9,6 +9,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { permissionActions } from "../lib/app-permissions";
 import { type ApprovalResult, approvalAction, decideApproval } from "../lib/approval-decisions";
+import { describeApproval } from "../lib/approval-description";
 import { DaemonClient } from "../lib/daemon";
 import { nativeCommand } from "../lib/native";
 import { useThemePref } from "../lib/theme";
@@ -300,6 +301,7 @@ export default function MenuBar() {
                 </article>
               );
             const a = row.approval;
+            const copy = a.kind === "tool" ? describeApproval(a, nameOf(a.agentId)) : null;
             const sensitive = a.permission && isSensitivePermission(a.permission);
             const appTool = Boolean(a.appId && a.permission);
             const variant = a.id === firstPending ? "primary" : "secondary";
@@ -319,16 +321,10 @@ export default function MenuBar() {
                     <b>{a.appName ?? nameOf(a.agentId)}</b>
                     <time className={s.meta}>{relativeTime(a.createdAt, now)}</time>
                   </div>
-                  <p className={s.description}>
-                    {appTool && `${nameOf(a.agentId)} · `}
-                    {a.title}
-                    {a.detail && (
-                      <>
-                        {" "}
-                        <span className={s.detail}>{a.detail}</span>
-                      </>
-                    )}
-                  </p>
+                  <p className={s.description}>{copy ? copy.description : a.title}</p>
+                  {copy?.context && <p className={s.context}>{copy.context}</p>}
+                  {copy?.arguments && <p className={s.arguments}>{copy.arguments}</p>}
+                  {!copy && a.detail && <p>{a.detail}</p>}
                   {sensitive && <p>Esta ação sempre pede aprovação.</p>}
                   <div className={s.actions}>
                     {a.kind !== "tool" ? (
