@@ -32,7 +32,7 @@ export class DaemonClient {
     const opening = (async () => {
       // Dev-only browser path: vite dev server outside Tauri has no invoke bridge.
       if (!("__TAURI_INTERNALS__" in window) && import.meta.env.DEV) {
-        const p = new URLSearchParams(location.hash.slice(1));
+        const p = new URLSearchParams(location.hash.split("?")[1] ?? location.hash.slice(1));
         this.connection = { port: Number(p.get("port")), token: p.get("token") ?? "" };
       } else {
         this.connection = await invoke<DaemonConnection>("daemon_connection");
