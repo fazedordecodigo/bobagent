@@ -1,4 +1,5 @@
 import type { Agent, AgentStatusInfo, Turn } from "@upbot/protocol";
+import { StatusPill } from "../components/ds/controls";
 
 export const ST = {
   run: "Em execução",
@@ -82,6 +83,7 @@ export function MonoAv({
 }
 
 export function Pill({ st }: { st: UiStatus }) {
+  if (st !== "idle" && st !== "queue") return <StatusPill status={st} />;
   return (
     <span className={`status ${st}`}>
       <i className={`dot s-${st}`} />

@@ -1,6 +1,7 @@
 import { StrictMode, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import { ApprovalFeedback } from "./components/ApprovalFeedback";
 import Kit from "./components/ds/Kit";
 import "./index.css";
 
@@ -35,7 +36,13 @@ function Root() {
   const hash = useSyncExternalStore(subscribeToHash, () => window.location.hash);
   const kit = hash === "#/kit";
   document.documentElement.toggleAttribute("data-ds-kit", kit);
-  return kit ? <Kit /> : <App />;
+  return kit ? (
+    <Kit />
+  ) : (
+    <ApprovalFeedback>
+      <App />
+    </ApprovalFeedback>
+  );
 }
 
 createRoot(root).render(

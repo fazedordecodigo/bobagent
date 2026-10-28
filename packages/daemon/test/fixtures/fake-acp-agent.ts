@@ -209,6 +209,17 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
     return { stopReason: "end_turn" };
   }
 
+  if (text.startsWith("mcp-sequence:")) {
+    const calls = JSON.parse(text.slice("mcp-sequence:".length)) as {
+      tool: string;
+      args: Record<string, unknown>;
+    }[];
+    const spec = sessionMcp.get(sessionId)?.find((x) => x.name === "upbot");
+    if (!spec) throw new Error("no-upbot-mcp");
+    for (const call of calls)
+      await say("agent_message_chunk", await callMcp(spec, call.tool, call.args));
+    return { stopReason: "end_turn" };
+  }
   if (text.startsWith("mcp:")) {
     const m = /^mcp:([A-Za-z0-9_-]+)\s*([\s\S]*)$/.exec(text);
     const spec = sessionMcp.get(sessionId)?.find((x) => x.name === "upbot");

@@ -572,7 +572,36 @@ export const ApprovalRule = z.object({
   agentId: z.string().nullable(),
 });
 export type ApprovalRule = z.infer<typeof ApprovalRule>;
-export const ApprovalDecision = z.enum(["approve", "always", "deny", "done"]);
+export const AppPermissionKind = z.enum(["read", "write", "send", "pay", "book", "del"]);
+export type AppPermissionKind = z.infer<typeof AppPermissionKind>;
+export const AppPermissionLevel = z.enum(["off", "ask", "allow"]);
+export type AppPermissionLevel = z.infer<typeof AppPermissionLevel>;
+const SensitiveAppPermissionLevel = z.enum(["off", "ask"], {
+  error: "Permissões sensíveis aceitam apenas off ou ask; allow não é permitido.",
+});
+export const AppPermissions = z
+  .object({
+    read: AppPermissionLevel,
+    write: AppPermissionLevel,
+    send: SensitiveAppPermissionLevel,
+    pay: SensitiveAppPermissionLevel,
+    book: SensitiveAppPermissionLevel,
+    del: SensitiveAppPermissionLevel,
+  })
+  .strict();
+export type AppPermissions = z.infer<typeof AppPermissions>;
+export const defaultAppPermissions: AppPermissions = {
+  read: "allow",
+  write: "ask",
+  send: "ask",
+  pay: "ask",
+  book: "ask",
+  del: "ask",
+};
+export function isSensitivePermission(kind: AppPermissionKind): boolean {
+  return kind !== "read" && kind !== "write";
+}
+export const ApprovalDecision = z.enum(["approve", "always", "task", "deny", "done"]);
 export type ApprovalDecision = z.infer<typeof ApprovalDecision>;
 export const Approval = z.object({
   id: z.string(),
@@ -583,6 +612,10 @@ export const Approval = z.object({
   detail: z.string(),
   tool: z.string().nullable(),
   secretName: z.string().nullable(),
+  appId: z.string().optional(),
+  appName: z.string().optional(),
+  permission: AppPermissionKind.optional(),
+  previousLevel: AppPermissionLevel.optional(),
   background: z.boolean(),
   status: z.enum(["pending", "approved", "denied", "expired", "done"]),
   createdAt: z.number(),
@@ -609,6 +642,7 @@ export const AppCatalogEntry = z.object({
 });
 export type AppCatalogEntry = z.infer<typeof AppCatalogEntry>;
 export const ConnectedApp = z.object({
+  permissions: AppPermissions,
   id: z.string(),
   catalogId: z.string(),
   name: z.string(),
@@ -977,6 +1011,7 @@ export const methodMap = {
     params: z
       .object({
         catalogId: z.string(),
+        permissions: AppPermissions.partial().optional(),
         name: z.string().trim().min(1).max(40).optional(),
         secrets: AppSecrets,
         command: z.array(z.string().max(1000)).min(1).max(50).optional(),
@@ -991,6 +1026,7 @@ export const methodMap = {
     params: z
       .object({
         id: z.string(),
+        permissions: AppPermissions.partial().optional(),
         enabled: z.boolean().optional(),
         agentIds: z.array(z.string()).max(200).optional(),
         secrets: AppSecrets.optional(),

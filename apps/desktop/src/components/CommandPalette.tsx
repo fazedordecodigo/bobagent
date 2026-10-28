@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import s from "./CommandPalette.module.css";
 
 export type PaletteItem = {
   id: string;
@@ -21,7 +22,11 @@ export function CommandPalette({
   const [q, setQ] = useState("");
   const [index, setIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  useEffect(() => inputRef.current?.focus(), []);
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    inputRef.current?.focus();
+    return () => previous?.focus();
+  }, []);
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return items
@@ -42,20 +47,17 @@ export function CommandPalette({
   };
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: clicking the backdrop closes the dialog
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-24"
-      onMouseDown={onClose}
-      role="presentation"
-    >
+    <div className={s.backdrop} onMouseDown={onClose} role="presentation">
       <div
-        className="w-[32rem] overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl"
+        className={s.palette}
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
+        aria-modal="true"
         aria-label="Buscar"
       >
         <input
           ref={inputRef}
-          className="w-full border-b border-zinc-800 bg-transparent px-4 py-3 text-sm outline-none"
+          className={s.search}
           placeholder={
             initialGroup
               ? `Buscar ${initialGroup.toLowerCase()}…`
@@ -67,8 +69,13 @@ export function CommandPalette({
             setIndex(0);
           }}
           onKeyDown={(e) => {
-            if (e.key === "Escape") onClose();
-            else if (e.key === "ArrowDown") {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              onClose();
+            } else if (e.key === "Tab") {
+              e.preventDefault();
+              inputRef.current?.focus();
+            } else if (e.key === "ArrowDown") {
               e.preventDefault();
               setIndex((i) => Math.min(i + 1, shown.length - 1));
             } else if (e.key === "ArrowUp") {
@@ -80,28 +87,26 @@ export function CommandPalette({
             }
           }}
         />
-        <ul className="max-h-80 overflow-y-auto py-1">
+        <ul className={s.results}>
           {shown.map((i, k) => (
             <li key={i.id}>
               <button
                 type="button"
+                tabIndex={-1}
                 onMouseEnter={() => setIndex(k)}
                 onClick={() => pick(i)}
-                className={`flex w-full items-center gap-2 px-4 py-2 text-left text-sm ${
-                  k === index ? "bg-zinc-800" : ""
-                }`}
+                className={s.result}
+                aria-current={k === index ? "true" : undefined}
               >
-                <span className="w-20 shrink-0 text-xs text-zinc-500">{i.group}</span>
+                <span className={s.group}>{i.group}</span>
                 <span className="truncate">{i.label}</span>
-                {i.hint && <span className="ml-auto truncate text-xs text-zinc-500">{i.hint}</span>}
+                {i.hint && <span className={s.hint}>{i.hint}</span>}
               </button>
             </li>
           ))}
-          {shown.length === 0 && (
-            <li className="px-4 py-3 text-sm text-zinc-500">Nenhum resultado.</li>
-          )}
+          {shown.length === 0 && <li className={s.empty}>Nenhum resultado.</li>}
         </ul>
-        <div className="border-t border-zinc-800 px-4 py-2 text-[11px] text-zinc-500">
+        <div className={s.footer}>
           ⌘K buscar · ⌘⇧F bots · ⌘N novo bot · ⌘1–9 trocar de bot · ⌘, configurações · ⌘P páginas
         </div>
       </div>

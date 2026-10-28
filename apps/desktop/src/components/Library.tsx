@@ -34,7 +34,7 @@ export function AvatarBadge({
         width: size,
         height: size,
         fontSize: size * 0.6,
-        background: agent.avatar?.color ?? "#3f3f46",
+        background: agent.avatar?.color ?? "var(--fg-soft)",
       }}
     >
       {emoji}
@@ -49,8 +49,22 @@ export function AvatarEditor({
   agent: Agent;
   onSave: (avatar: AgentAvatar | null) => Promise<void>;
 }) {
-  const [emoji, setEmoji] = useState(agent.avatar?.emoji ?? "🤖");
-  const [color, setColor] = useState(agent.avatar?.color ?? "#0ea5e9");
+  const [emoji, setEmoji] = useState(agent.avatar?.emoji ?? agent.name.slice(0, 1));
+  const [color, setColor] = useState(() => {
+    if (agent.avatar?.color) return agent.avatar.color;
+    const probe = document.createElement("span");
+    probe.style.color = "var(--fg)";
+    document.body.append(probe);
+    const rgb = getComputedStyle(probe).color.match(/\d+/g) ?? [];
+    probe.remove();
+    return (
+      String.fromCharCode(35) +
+      rgb
+        .slice(0, 3)
+        .map((n) => Number(n).toString(16).padStart(2, "0"))
+        .join("")
+    );
+  });
   return (
     <section className="mx-auto max-w-lg space-y-2 px-6 pb-4">
       <h3 className="text-sm font-semibold text-zinc-300">Avatar</h3>
