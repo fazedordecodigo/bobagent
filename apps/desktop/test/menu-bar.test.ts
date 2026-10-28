@@ -9,8 +9,8 @@ import {
   type DaemonHandle,
   FAKE_AGENT,
   ROOT,
-  readPids,
   startDaemon,
+  stopTestChildren,
 } from "../../../packages/daemon/test/helpers";
 
 let daemon: DaemonHandle;
@@ -108,15 +108,17 @@ beforeAll(async () => {
 afterAll(async () => {
   await browser?.close();
   rpc?.close();
-  daemon?.proc.kill();
-  vite?.kill();
+  try {
+    daemon?.proc.kill();
+  } catch {}
+  try {
+    vite?.kill();
+  } catch {}
+  if (daemon) await daemon.proc.exited;
+  if (vite) await vite.exited;
   if (state) {
-    for (const pid of readPids(join(state, "fake"))) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {}
-    }
-    rmSync(state, { recursive: true, force: true });
+    await stopTestChildren(join(state, "fake"));
+    rmSync(state, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
