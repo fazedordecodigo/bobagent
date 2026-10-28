@@ -49,6 +49,35 @@ async function withApprovals(
   }
 }
 
+test("read nouns pass the gate with read allow even when sensitive permissions are off", async () => {
+  await withApprovals(async (approvals, apps) => {
+    await apps.update({
+      id: "notes",
+      permissions: { read: "allow", send: "off", book: "off", pay: "off", del: "off" },
+    });
+    for (const operation of [
+      "list_comments",
+      "get_text",
+      "get_mailbox",
+      "list_chats",
+      "get_share_link",
+      "search_messages",
+      "list_bookings",
+      "get_payment",
+    ]) {
+      await approvals.gate("bot", `notes-${operation}`, {}, true);
+    }
+    expect(approvals.list()).toEqual([]);
+    await expect(approvals.gate("bot", "notes-send_email", {}, true)).rejects.toThrow(
+      "Notes não permite send",
+    );
+    await expect(approvals.gate("bot", "notes-get_and_delete", {}, true)).rejects.toThrow(
+      "Notes não permite del",
+    );
+    expect(approvals.list()).toEqual([]);
+  });
+});
+
 test("expired decisions persist neither permanent permissions nor task grants", async () => {
   await withApprovals(async (approvals, apps) => {
     const update = spyOn(apps, "update");

@@ -44,8 +44,10 @@ Migration 19 adds `permissions_json`: `read | write | send | pay | book | del` m
 `off | ask | allow`. New and migrated apps default to read=allow and all others=ask.
 Sensitive kinds (send/pay/book/del) reject allow in both protocol schemas and AppsService.
 `apps.connect/update` accept partial permissions. `src/app-permissions.ts` classifies the
-operation after `<slug>-` by name, with delete/payment/booking/send verbs before other
-write verbs. Only explicit read verbs classify as read; unknown operations fail closed to write.
+operation after `<slug>-` on underscores, hyphens and camelCase. The leading verb determines
+the kind; verbs after and/or/then can escalate it (del > pay > book > send > write > read).
+Read-object nouns do not escalate. An unknown leading token falls back to known verbs
+anywhere in the name; no known verb fails closed to write.
 This is a naming heuristic, not argument or semantic inspection.
 The Apps permissions dialog edits stored levels; disconnect confirms removal of saved
 secrets, while enable/disable remains reversible. No account or last-used data is invented.

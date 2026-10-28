@@ -84,23 +84,91 @@ test("classifier recognizes sensitive verbs before general writes and ignores th
     expect(classifyAppTool(`app-${verb}_items`)).toBe("read");
     expect(classifyAppTool(`app-${verb}Items`)).toBe("read");
   }
-  for (const tool of [
-    "app-echo",
-    "app-whoami",
-    "app-frobnicate",
-    "app-getaway",
-    "app-do_get",
-    "app-",
-    "",
-  ])
+  for (const tool of ["app-echo", "app-whoami", "app-frobnicate", "app-getaway", "app-", ""])
     expect(classifyAppTool(tool)).toBe("write");
   expect(classifyAppTool("app-dispatch_message")).toBe("send");
   expect(classifyAppTool("app-deliver_notification")).toBe("send");
   expect(classifyAppTool("app-get_and_delete")).toBe("del");
-  expect(classifyAppTool("app-send_payment")).toBe("pay");
-  expect(classifyAppTool("app-send_booking")).toBe("book");
+  expect(classifyAppTool("app-send_payment")).toBe("send");
+  expect(classifyAppTool("app-send_booking")).toBe("send");
   expect(classifyAppTool("app-create_and_send")).toBe("send");
-  expect(classifyAppTool("app-update_reserve")).toBe("book");
+  expect(classifyAppTool("app-update_reserve")).toBe("write");
+});
+
+test("read objects are nouns, while connectors chain actions with sensitivity precedence", () => {
+  for (const noun of [
+    "comments",
+    "text",
+    "mailbox",
+    "chats",
+    "share_link",
+    "messages",
+    "bookings",
+    "payment",
+    "send",
+    "post",
+    "publish",
+    "invite",
+    "reply",
+    "forward",
+    "mail",
+    "email",
+    "message",
+    "dispatch",
+    "deliver",
+    "notify",
+    "broadcast",
+    "sms",
+    "chat",
+    "push",
+    "share",
+    "comment",
+    "dm",
+    "tweet",
+    "delete",
+    "pay",
+    "book",
+    "write",
+  ]) {
+    expect(classifyAppTool(`notes-get_${noun}`)).toBe("read");
+    expect(classifyAppTool(`notes-list_${noun}`)).toBe("read");
+    expect(classifyAppTool(`notes-search_${noun}`)).toBe("read");
+  }
+  for (const verb of [
+    "send_email",
+    "post_comment",
+    "dispatch_message",
+    "deliver_notification",
+    "share_file",
+    "reply",
+  ])
+    expect(classifyAppTool(`notes-${verb}`)).toBe("send");
+  const cases = {
+    get_and_delete: "del",
+    fetch_then_send: "send",
+    read_or_archive: "write",
+    list_then_book: "book",
+    send_and_pay: "pay",
+    pay_or_delete: "del",
+    delete_then_send: "del",
+    book_then_write: "book",
+    getAndDelete: "del",
+    "fetch-then-send": "send",
+    readOrArchive: "write",
+    GETText: "read",
+    listBookings: "read",
+    getPayment: "read",
+    book_room: "book",
+    message_send: "send",
+    page_create: "write",
+    page_get: "read",
+    page_send_and_delete: "del",
+    unknown: "write",
+    get_and_unknown: "read",
+    get_then_payment: "read",
+  } as const;
+  for (const [operation, kind] of Object.entries(cases))
+    expect(classifyAppTool(`notes-${operation}`)).toBe(kind);
 });
 
 test("migration backfills existing apps and service validation rejects sensitive allow", async () => {
