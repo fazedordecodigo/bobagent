@@ -8,6 +8,7 @@ export type PaletteItem = {
   label: string;
   hint?: string;
   searchTerms?: string[];
+  matchHint?: string;
   run: () => void;
 };
 
@@ -98,9 +99,9 @@ export function CommandPalette({
           {shown.map((i, k) => {
             const needle = q.trim().toLocaleLowerCase("pt-BR");
             const hint =
-              (needle &&
-                i.searchTerms?.find((text) => text.toLocaleLowerCase("pt-BR").includes(needle))) ||
-              i.hint;
+              needle && i.matchHint?.toLocaleLowerCase("pt-BR").includes(needle)
+                ? i.matchHint
+                : i.hint;
             return (
               <div key={i.id} role="presentation">
                 <button

@@ -671,11 +671,12 @@ test("sidebar navigation, real approval counts, routines, groups, profile and th
   await rpc.request("channels.archive", { channelId: group.id });
 }, 30000);
 
-test("Buscar matches bot roles, full instructions and live overview tasks", async () => {
+test("Buscar matches instructions without exposing them and shows live overview tasks", async () => {
   const agent = (await rpc.request("agents.create", {
     name: "Farol",
     provider: "devin",
-    instructions: "Especialista em logística reversa.\nPrioriza fornecedores regionais.",
+    instructions:
+      "Especialista em logística reversa.\nPrioriza fornecedores regionais.\ntoken sk-test-123",
   })) as Agent;
   const target = await browser.newPage();
   try {
@@ -686,12 +687,22 @@ test("Buscar matches bot roles, full instructions and live overview tasks", asyn
     const result = target
       .getByRole("option")
       .filter({ has: target.getByText(agent.name, { exact: true }) });
-    for (const phrase of ["LOGÍSTICA REVERSA", "fornecedores regionais", "Farol", "Devin"]) {
+    const palette = target.getByRole("dialog", { name: "Buscar", exact: true });
+    for (const phrase of [
+      "LOGÍSTICA REVERSA",
+      "fornecedores regionais",
+      "sk-test",
+      "Farol",
+      "Devin",
+    ]) {
       await input.fill(phrase);
       await result.waitFor();
-      expect((await result.textContent())?.toLocaleLowerCase("pt-BR")).toContain(
-        phrase.toLocaleLowerCase("pt-BR"),
-      );
+      expect(await result.textContent()).toContain("Farol");
+      expect(await result.textContent()).toContain("Devin");
+      const html = await palette.evaluate((element) => element.outerHTML);
+      expect(html).not.toContain("sk-test-123");
+      expect(html).not.toContain("Especialista em logística reversa.");
+      expect(html).not.toContain("Prioriza fornecedores regionais.");
     }
     await input.fill("nenhum bot corresponde a esta consulta");
     await target.getByText("Nenhum resultado.", { exact: true }).waitFor();

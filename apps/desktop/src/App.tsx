@@ -327,6 +327,7 @@ export default function App() {
         label: agent.name,
         hint: statusProvider(agent.provider),
         searchTerms: [role(agent), agent.instructions, overview[agent.id]?.task ?? ""],
+        matchHint: overview[agent.id]?.task ?? "",
         run: () => openAgent(agent.id),
       })),
       ...channels.map((channel) => ({
