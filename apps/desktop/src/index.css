@@ -30,7 +30,7 @@ button.bg-sky-600, button.bg-sky-700 {
     left: 0;
     z-index: 31;
     display: flex;
-    width: var(--sidebar-width);
+    width: 272px;
     background: var(--surface);
     box-shadow: 12px 0 40px -20px color-mix(in oklch, var(--shade) 40%, transparent);
   }

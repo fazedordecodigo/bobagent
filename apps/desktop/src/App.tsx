@@ -20,6 +20,7 @@ import { PagesView } from "./components/PagesView";
 import { RunPanel } from "./components/RunPanel";
 import { TABS, ToolBody, type ToolTab } from "./components/ToolsView";
 import { UpdateButton } from "./components/UpdateButton";
+import { useLayerFocus, useMediaQuery } from "./hooks/useLayerFocus";
 import { useOverview } from "./hooks/useOverview";
 import { DaemonClient } from "./lib/daemon";
 import { nativeCommand } from "./lib/native";
@@ -115,6 +116,12 @@ export default function App() {
   const [noPanel, setNoPanel] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [sideOpen, setSideOpen] = useState(false);
+  const sideRef = useRef<HTMLElement>(null);
+  const narrow = useMediaQuery("(max-width: 759px)");
+  useLayerFocus(sideRef, sideOpen && narrow);
+  useEffect(() => {
+    if (!narrow) setSideOpen(false);
+  }, [narrow]);
 
   const refreshAll = useCallback(async () => {
     const [list, nextStatuses, nextChannels] = await Promise.all([
@@ -530,7 +537,18 @@ export default function App() {
         </div>
       </nav>
 
-      <aside className="side" aria-label="Bots e tarefas">
+      <aside
+        ref={sideRef}
+        id="bot-drawer"
+        className="side"
+        aria-label="Bots e tarefas"
+        {...(sideOpen && narrow ? { role: "dialog" as const, "aria-modal": true } : {})}
+      >
+        {sideOpen && narrow && (
+          <IconButton aria-label="Fechar barra lateral" onClick={() => setSideOpen(false)}>
+            <Icon name="x" />
+          </IconButton>
+        )}
         <div className="side-titlebar" data-tauri-drag-region />
         <div className="side-head">
           <div className="row">
@@ -667,6 +685,7 @@ export default function App() {
         <button
           type="button"
           className="side-scrim"
+          tabIndex={-1}
           aria-label="Fechar painel de bots"
           onClick={() => setSideOpen(false)}
         />
@@ -683,6 +702,8 @@ export default function App() {
         )}
         <IconButton
           aria-label="Abrir barra lateral"
+          aria-expanded={sideOpen && narrow}
+          aria-controls="bot-drawer"
           className="window-menu"
           onClick={() => setSideOpen((open) => !open)}
         >
@@ -807,6 +828,7 @@ export default function App() {
           client={client}
           agent={selected}
           overview={selectedOverview}
+          overlayOpen={panelOpen && !sideOpen}
           onClose={togglePanel}
           onOpenApps={() => {
             setSettingsTab("apps");

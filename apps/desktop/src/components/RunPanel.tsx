@@ -1,6 +1,7 @@
 import type { Agent, AgentPlacement, ApprovalRule } from "@upbot/protocol";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "../hooks/useChat";
+import { useLayerFocus, useMediaQuery } from "../hooks/useLayerFocus";
 import type { AgentOverview } from "../hooks/useOverview";
 import type { DaemonClient } from "../lib/daemon";
 import { Pill, type UiStatus } from "../lib/ui";
@@ -31,13 +32,18 @@ export function RunPanel({
   overview,
   onClose,
   onOpenApps,
+  overlayOpen,
 }: {
   client: DaemonClient;
   agent: Agent;
   overview: AgentOverview;
   onClose: () => void;
   onOpenApps: () => void;
+  overlayOpen: boolean;
 }) {
+  const panelRef = useRef<HTMLElement>(null);
+  const overlay = useMediaQuery("(max-width: 1180px)");
+  useLayerFocus(panelRef, overlay && overlayOpen);
   const chat = useChat(client, agent.id);
   const [rules, setRules] = useState<ApprovalRule[]>([]);
   const [placement, setPlacement] = useState<AgentPlacement | null>(null);
@@ -174,7 +180,14 @@ export function RunPanel({
   ];
 
   return (
-    <aside className="panel" id="panel" aria-label="Execução" data-od-id="run-panel">
+    <aside
+      ref={panelRef}
+      className="panel"
+      id="panel"
+      aria-label="Execução"
+      data-od-id="run-panel"
+      {...(overlay && overlayOpen ? { role: "dialog" as const, "aria-modal": true } : {})}
+    >
       <div className="panel-head">
         <h3>Execução</h3>
         <button type="button" className="icon-btn" aria-label="Fechar painel" onClick={onClose}>
