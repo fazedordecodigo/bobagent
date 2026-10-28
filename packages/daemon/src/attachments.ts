@@ -153,7 +153,9 @@ export function saveAttachments(
       );
       if (entries && !unsafe) {
         if (windows) mkdirSync(out, { recursive: true });
-        const command = windows ? "tar" : "unzip";
+        const command = windows
+          ? win32.join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe")
+          : "unzip";
         const args = windows ? ["-xf", path, "-C", out] : ["-qq", "-o", path, "-d", out];
         const r = Bun.spawnSync([command, ...args], {
           stdout: "ignore",

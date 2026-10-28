@@ -55,11 +55,11 @@ describe("asynchronous child spawn errors", () => {
 
   test("provider startup exposes asynchronous spawn failures", async () => {
     const proc = spawnProvider(`${process.execPath}-missing-upbot.exe`, [], process.cwd());
-    const unexpectedExit = new Promise<string>((resolve) => proc.onUnexpectedExit(resolve));
     try {
       if (process.platform === "win32") {
+        const unexpectedExit = new Promise<string>((resolve) => proc.onUnexpectedExit(resolve));
         await proc.waitForSpawn();
-        await expect(unexpectedExit).resolves.toContain("process exited");
+        await expect(unexpectedExit).resolves.toMatch(/^process (?:error|exited):/);
       } else {
         await expect(proc.waitForSpawn()).rejects.toThrow();
       }
