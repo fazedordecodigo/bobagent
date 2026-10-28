@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod menubar;
+
 use rand::RngCore;
 use serde::Serialize;
 use std::ffi::OsStr;
@@ -155,15 +157,24 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(shared)
         .setup(move |app| {
+            menubar::setup(app)?;
             if let Err(e) = spawn_daemon(app) {
                 let state = app.state::<SharedState>();
                 state.inner.lock().unwrap().error = Some(e);
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![daemon_connection])
+        .invoke_handler(tauri::generate_handler![
+            daemon_connection,
+            menubar::set_tray_count,
+            menubar::menubar_hide,
+            menubar::open_main,
+            menubar::quit_app
+        ])
         .build(tauri::generate_context!())
         .expect("error while building UpBot")
         .run(|app_handle, event| {
