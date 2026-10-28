@@ -461,10 +461,22 @@ class AcpSession implements ProviderSession {
   }
 }
 
+class AcpResumeError extends Error {}
+
 export class AcpDriver implements ProviderDriver {
   constructor(private provider: ProviderId) {}
 
   async start(opts: StartOpts): Promise<ProviderSession> {
+    try {
+      return await this.startSession(opts);
+    } catch (error) {
+      if (!(error instanceof AcpResumeError)) throw error;
+      opts.hooks.onResumeFailed?.();
+      return this.startSession({ ...opts, resumeSessionId: null });
+    }
+  }
+
+  private async startSession(opts: StartOpts): Promise<ProviderSession> {
     const { cwd, resumeSessionId, hooks } = opts;
     const mcpServers = (opts.mcpServers ?? []).map((m) => ({
       name: m.name,
@@ -710,19 +722,13 @@ export class AcpDriver implements ProviderDriver {
           rawConfig = normalizeConfigOptions(lr ?? {});
           sessionId = resumeSessionId;
           resumed = true;
-        } catch {
-          const res = (await startupRequest(
-            boundedRequest(
-              this.provider,
-              "session/new",
-              conn.agent.request("session/new", {
-                cwd,
-                mcpServers,
-              } as never),
-            ),
-          )) as { sessionId: string; configOptions?: unknown };
-          sessionId = res.sessionId;
-          rawConfig = normalizeConfigOptions(res);
+        } catch (error) {
+          const tail = stderrLines.slice(-STDERR_TAIL_LINES).join("\n");
+          const authError =
+            mapAcpAuthError(this.provider, error, credential) ??
+            mapAcpAuthError(this.provider, new Error(tail), credential);
+          if (authError) throw authError;
+          throw new AcpResumeError(errorDetail(error));
         } finally {
           loading = false;
         }
@@ -746,6 +752,10 @@ export class AcpDriver implements ProviderDriver {
         conn.close();
       } catch {}
       child.kill("SIGKILL");
+      if (child.exitCode === null && child.signalCode === null) {
+        await new Promise<void>((resolve) => child.once("close", () => resolve()));
+      }
+      if (e instanceof AcpResumeError || e instanceof ProviderError) throw e;
       const authError = mapAcpAuthError(this.provider, e, credential);
       if (authError) throw authError;
       if (exited) {

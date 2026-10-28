@@ -32,6 +32,7 @@ export type NormalizedUpdate =
   | { type: "ignored"; kind: string };
 
 export interface ProviderHooks {
+  onResumeFailed?(): void;
   onUpdate(u: NormalizedUpdate): void;
   requestPermission(req: {
     title: string;

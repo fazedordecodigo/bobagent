@@ -372,6 +372,9 @@ acp
   })
   .onRequest("session/new", async (ctx) => {
     logRequest("session/new", ctx.params);
+    if (process.env.FAKE_ACP_NEW_ERROR) {
+      throw new acp.RequestError(-32603, process.env.FAKE_ACP_NEW_ERROR);
+    }
     const delay = Number.parseInt(process.env.FAKE_ACP_NEW_DELAY_MS ?? "", 10) || 0;
     if (delay > 0) await sleep(delay);
     const sessions = loadSessions();
@@ -384,6 +387,9 @@ acp
   .onRequest("session/load", async (ctx) => {
     const params = ctx.params as { sessionId: string; cwd?: string; mcpServers?: McpSpec[] };
     logRequest("session/load", params);
+    if (process.env.FAKE_ACP_LOAD_BEHAVIOR === "close") process.exit(1);
+    if (process.env.FAKE_ACP_LOAD_BEHAVIOR === "error") throw new Error("session load failed");
+    if (process.env.FAKE_ACP_LOAD_BEHAVIOR === "auth") throw acp.RequestError.authRequired();
     sessionMcp.set(params.sessionId, params.mcpServers ?? []);
     const sessions = loadSessions();
     if (!sessions[params.sessionId]) {
