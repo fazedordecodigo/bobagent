@@ -81,28 +81,31 @@ async function sshExec(
     env: spawnEnv(),
     stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
   });
-  if (input !== undefined) proc.stdin?.end(input);
+  if (input !== undefined) proc.stdin?.on("error", () => {});
+  const stdoutPromise = new Promise<string>((resolve) => {
+    const chunks: Buffer[] = [];
+    proc.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
+    proc.stdout?.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    if (!proc.stdout) resolve("");
+  });
+  const stderrPromise = new Promise<string>((resolve) => {
+    const chunks: Buffer[] = [];
+    proc.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk));
+    proc.stderr?.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    if (!proc.stderr) resolve("");
+  });
+  const codePromise = new Promise<number>((resolve, reject) => {
+    proc.once("error", reject);
+    proc.once("close", (exitCode) => resolve(exitCode ?? 1));
+  });
   const timer = setTimeout(() => proc.kill("SIGKILL"), timeoutMs);
-  const [stdout, stderr, code] = await Promise.all([
-    new Promise<string>((resolve) => {
-      const chunks: Buffer[] = [];
-      proc.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
-      proc.stdout?.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-      if (!proc.stdout) resolve("");
-    }),
-    new Promise<string>((resolve) => {
-      const chunks: Buffer[] = [];
-      proc.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk));
-      proc.stderr?.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-      if (!proc.stderr) resolve("");
-    }),
-    new Promise<number>((resolve, reject) => {
-      proc.once("error", reject);
-      proc.once("close", (exitCode) => resolve(exitCode ?? 1));
-    }),
-  ]);
-  clearTimeout(timer);
-  return { code, stdout, stderr };
+  try {
+    if (input !== undefined) proc.stdin?.end(input);
+    const [stdout, stderr, code] = await Promise.all([stdoutPromise, stderrPromise, codePromise]);
+    return { code, stdout, stderr };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export class HostStore {
@@ -347,6 +350,7 @@ export function remoteLaunch(
         stdio: ["pipe", "pipe", "pipe"],
         env: spawnEnv(),
       });
+      child.on("error", () => {});
       child.stdin?.on("error", () => {});
       child.stdin?.write(
         `${JSON.stringify({

@@ -163,13 +163,18 @@ describe("Linux Secret Service vault key", () => {
   );
 });
 
-test.skipIf(process.platform !== "win32")("Windows DPAPI vault key roundtrip", () => {
-  const dataDir = join(testRoot(), "data");
-  setEnv("UPBOT_VAULT_KEY", undefined);
-  const first = loadVaultKey(dataDir, "win32");
-  const second = loadVaultKey(dataDir, "win32");
-  expect(second.equals(first)).toBe(true);
-  expect(readFileSync(join(dataDir, "vault.key.dpapi"), "utf8")).not.toContain(
-    first.toString("hex"),
-  );
-});
+test.skipIf(process.platform !== "win32")(
+  "Windows DPAPI vault key roundtrip",
+  () => {
+    const dataDir = join(testRoot(), "data");
+    setEnv("UPBOT_VAULT_KEY", undefined);
+    const first = loadVaultKey(dataDir, "win32");
+    const second = loadVaultKey(dataDir, "win32");
+    expect(second.equals(first)).toBe(true);
+    expect(readFileSync(join(dataDir, "vault.key.dpapi"), "utf8")).not.toContain(
+      first.toString("hex"),
+    );
+    expect(existsSync(join(dataDir, "vault.key.dpapi.tmp"))).toBe(false);
+  },
+  15_000,
+);

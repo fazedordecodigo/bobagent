@@ -2,7 +2,8 @@ name: Release
 
 # Push a v* tag (matching apps/desktop/src-tauri/tauri.conf.json "version") to build the
 # macOS app/dmg, Linux AppImage/deb, and unsigned Windows NSIS installer. The release remains
-# a draft until every platform's updater metadata has been verified. Dispatch requires a tag.
+# a draft until updater metadata has been composed from every platform's assets.
+# Dispatch requires a tag.
 # macOS signing/notarization run when the APPLE_* secrets are configured.
 
 on:
@@ -132,13 +133,16 @@ jobs:
           args: --bundles ${{ matrix.bundles }} --config src-tauri/tauri.updater.conf.json
           releaseId: ${{ needs.create-release.outputs.id }}
           tagName: ${{ needs.create-release.outputs.tag }}
-          includeUpdaterJson: true
+          includeUpdaterJson: false
 
   publish:
     needs: [create-release, build]
     runs-on: ubuntu-22.04
     steps:
-      - name: Verify updater metadata and publish release
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-release.outputs.tag }}
+      - name: Compose and upload updater metadata
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -146,23 +150,23 @@ jobs:
         run: |
           dir="$RUNNER_TEMP/upbot-release"
           mkdir -p "$dir"
-          gh release download "$TAG" --pattern latest.json --dir "$dir"
-          python3 - "$dir/latest.json" <<'PY'
-          import json
-          import sys
-          from pathlib import Path
-          path = Path(sys.argv[1])
-          data = json.loads(path.read_text())
-          platforms = data.get("platforms", {})
-          required = ("darwin-aarch64", "linux-x86_64", "windows-x86_64")
-          missing = [prefix for prefix in required if not any(key.startswith(prefix) for key in platforms)]
-          if missing:
-              print(
-                  "latest.json is missing updater platforms: "
-                  + ", ".join(missing)
-                  + ". Re-run the failed platform build job to restore the merged metadata.",
-                  file=sys.stderr,
-              )
-              sys.exit(1)
-          PY
+          gh release view "$TAG" --json assets > "$dir/assets.json"
+          gh release view "$TAG" --json body --jq .body > "$dir/notes.md"
+          gh release download "$TAG" --pattern '*.sig' --dir "$dir"
+          version="$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)"
+          python3 scripts/compose-latest.py \
+            --assets-json "$dir/assets.json" \
+            --signatures-dir "$dir" \
+            --repository "$GH_REPO" \
+            --tag "$TAG" \
+            --expected-version "$version" \
+            --notes-file "$dir/notes.md" \
+            --output "$dir/latest.json"
+          gh release upload "$TAG" "$dir/latest.json" --clobber
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.create-release.outputs.tag }}
+        run: |
           gh release edit "$TAG" --draft=false --latest

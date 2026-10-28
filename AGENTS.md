@@ -356,8 +356,8 @@ UI `TeamView`. Tests: `test/team.e2e.test.ts` (spawns the relay).
   desktop build on macOS, Linux and Windows.
 - `.github/workflows/release.yml`: on `v*` tags, tauri-action builds macOS `.app`/`.dmg`,
   Linux `.AppImage`/`.deb` and an unsigned per-user Windows NSIS `.exe` into a draft release.
-  It verifies merged updater metadata for all three OSes before publishing. Updater signing
-  uses the `TAURI_SIGNING_PRIVATE_KEY` repo secret (pubkey in `tauri.conf.json`
+  It composes `latest.json` from each platform's updater asset and signature before publishing.
+  Updater signing uses the `TAURI_SIGNING_PRIVATE_KEY` repo secret (pubkey in `tauri.conf.json`
   `plugins.updater`); Apple signing/notarization turn on when `APPLE_CERTIFICATE`,
   `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` (+ `APPLE_ID`, `APPLE_PASSWORD`,
   `APPLE_TEAM_ID`) secrets exist. Bump `version` in `tauri.conf.json` before tagging.

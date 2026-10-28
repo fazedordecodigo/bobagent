@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, extname, isAbsolute, join, win32 } from "node:path";
 import type { ChatAttachment } from "@upbot/protocol";
 import { RpcError } from "./runtime/agent-runtime";
@@ -21,6 +21,99 @@ function safeName(name: string): string {
     .replace(/[^\p{L}\p{N}._ -]/gu, "_")
     .replace(/^\.+/, "_");
   return n.slice(0, 200) || "file";
+}
+
+export function zipEntries(data: Buffer): { name: string; symlink: boolean }[] | null {
+  try {
+    const minOffset = Math.max(0, data.length - 65_557);
+    let end = -1;
+    for (let offset = data.length - 22; offset >= minOffset; offset--) {
+      if (
+        data.readUInt32LE(offset) === 0x06054b50 &&
+        offset + 22 + data.readUInt16LE(offset + 20) === data.length
+      ) {
+        end = offset;
+        break;
+      }
+    }
+    if (end < 0) return null;
+
+    const disk = data.readUInt16LE(end + 4);
+    const directoryDisk = data.readUInt16LE(end + 6);
+    const diskEntries = data.readUInt16LE(end + 8);
+    const totalEntries = data.readUInt16LE(end + 10);
+    const directorySize = data.readUInt32LE(end + 12);
+    const directoryOffset = data.readUInt32LE(end + 16);
+    if (
+      disk !== 0 ||
+      directoryDisk !== 0 ||
+      diskEntries === 0xffff ||
+      totalEntries === 0xffff ||
+      diskEntries !== totalEntries ||
+      directorySize === 0xffffffff ||
+      directoryOffset === 0xffffffff ||
+      directoryOffset + directorySize > end
+    ) {
+      return null;
+    }
+
+    const entries: { name: string; symlink: boolean }[] = [];
+    let offset = directoryOffset;
+    const directoryEnd = directoryOffset + directorySize;
+    for (let i = 0; i < totalEntries; i++) {
+      if (offset + 46 > directoryEnd || data.readUInt32LE(offset) !== 0x02014b50) return null;
+      const compressedSize = data.readUInt32LE(offset + 20);
+      const uncompressedSize = data.readUInt32LE(offset + 24);
+      const nameLength = data.readUInt16LE(offset + 28);
+      const extraLength = data.readUInt16LE(offset + 30);
+      const commentLength = data.readUInt16LE(offset + 32);
+      const startDisk = data.readUInt16LE(offset + 34);
+      const externalAttrs = data.readUInt32LE(offset + 38);
+      const localOffset = data.readUInt32LE(offset + 42);
+      const entryEnd = offset + 46 + nameLength + extraLength + commentLength;
+      if (
+        entryEnd > directoryEnd ||
+        compressedSize === 0xffffffff ||
+        uncompressedSize === 0xffffffff ||
+        startDisk === 0xffff ||
+        localOffset === 0xffffffff
+      ) {
+        return null;
+      }
+
+      const nameStart = offset + 46;
+      let extraOffset = nameStart + nameLength;
+      const extraEnd = extraOffset + extraLength;
+      while (extraOffset < extraEnd) {
+        if (extraOffset + 4 > extraEnd) return null;
+        const id = data.readUInt16LE(extraOffset);
+        const length = data.readUInt16LE(extraOffset + 2);
+        if (extraOffset + 4 + length > extraEnd || id === 0x0001) return null;
+        extraOffset += 4 + length;
+      }
+
+      entries.push({
+        name: data.toString("utf8", nameStart, nameStart + nameLength),
+        symlink: ((externalAttrs >>> 16) & 0o170000) === 0o120000,
+      });
+      offset = entryEnd;
+    }
+    return offset === directoryEnd ? entries : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasSymlink(path: string): boolean {
+  try {
+    const stat = lstatSync(path);
+    return (
+      stat.isSymbolicLink() ||
+      (stat.isDirectory() && readdirSync(path).some((name) => hasSymlink(join(path, name))))
+    );
+  } catch {
+    return true;
+  }
 }
 
 export function saveAttachments(
@@ -48,31 +141,30 @@ export function saveAttachments(
     if (kindOf(att.mime, name) === "zip archive") {
       const out = join(dir, `${basename(name, extname(name))}-unzipped`);
       const windows = process.platform === "win32";
-      if (windows) mkdirSync(out, { recursive: true });
-      const command = windows ? "tar" : "unzip";
-      const args = windows ? ["-xf", path, "-C", out] : ["-qq", "-o", path, "-d", out];
-      if (windows) {
-        const listing = Bun.spawnSync(["tar", "-tf", path], {
-          stdout: "pipe",
+      const entries = zipEntries(f.data);
+      const unsafe = entries?.some(
+        ({ name: entry, symlink }) =>
+          symlink ||
+          isAbsolute(entry) ||
+          win32.isAbsolute(entry) ||
+          /^[A-Za-z]:/.test(entry) ||
+          entry.includes("\0") ||
+          entry.split(/[\\/]/).includes(".."),
+      );
+      if (entries && !unsafe) {
+        if (windows) mkdirSync(out, { recursive: true });
+        const command = windows ? "tar" : "unzip";
+        const args = windows ? ["-xf", path, "-C", out] : ["-qq", "-o", path, "-d", out];
+        const r = Bun.spawnSync([command, ...args], {
+          stdout: "ignore",
           stderr: "ignore",
-          windowsHide: true,
+          windowsHide: windows,
         });
-        const entries = listing.stdout.toString("utf8").split(/\r?\n/).filter(Boolean);
-        const unsafe = entries.some(
-          (entry) =>
-            isAbsolute(entry) ||
-            win32.isAbsolute(entry) ||
-            /^[A-Za-z]:/.test(entry) ||
-            entry.split(/[\\/]/).includes(".."),
-        );
-        if (listing.exitCode !== 0 || unsafe) return att;
+        if (r.exitCode === 0) {
+          if (hasSymlink(out)) rmSync(out, { recursive: true, force: true });
+          else att.extractedTo = out;
+        }
       }
-      const r = Bun.spawnSync([command, ...args], {
-        stdout: "ignore",
-        stderr: "ignore",
-        windowsHide: windows,
-      });
-      if (r.exitCode === 0) att.extractedTo = out;
     }
     return att;
   });

@@ -11,3 +11,22 @@ export function spawnChild(
   }
   return nodeSpawn(command, args, options);
 }
+
+export function waitForChildSpawn(child: ChildProcess): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      child.off("spawn", onSpawn);
+      child.off("error", onError);
+    };
+    const onSpawn = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    child.once("spawn", onSpawn);
+    child.once("error", onError);
+  });
+}

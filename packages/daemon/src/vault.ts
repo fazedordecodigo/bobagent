@@ -1,7 +1,14 @@
 import type { Database } from "bun:sqlite";
 import { spawnSync } from "node:child_process";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import type { VaultEntry } from "@upbot/protocol";
 import { resolveCommand } from "./env/login-path";
@@ -165,6 +172,7 @@ export function loadVaultKey(
   mkdirSync(dataDir, { recursive: true });
   if (platform === "win32") {
     const protectedFile = join(dataDir, "vault.key.dpapi");
+    const tempFile = `${protectedFile}.tmp`;
     if (existsSync(protectedFile)) {
       try {
         return unprotectWithDpapi(readFileSync(protectedFile, "utf8").trim());
@@ -176,9 +184,13 @@ export function loadVaultKey(
     }
     const key = randomBytes(32);
     try {
-      writeFileSync(protectedFile, protectWithDpapi(key.toString("hex")), { mode: 0o600 });
+      writeFileSync(tempFile, protectWithDpapi(key.toString("hex")), { mode: 0o600 });
+      renameSync(tempFile, protectedFile);
       return key;
     } catch {
+      try {
+        unlinkSync(tempFile);
+      } catch {}
       console.error(
         "UpBot could not use Windows DPAPI; storing the vault key in a plaintext file.",
       );

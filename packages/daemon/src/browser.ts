@@ -50,9 +50,9 @@ export function browserCandidates(
   const edge = [envValue(env, "ProgramFiles"), envValue(env, "ProgramFiles(x86)")]
     .filter((value): value is string => Boolean(value))
     .map((root) => win32.join(root, "Microsoft", "Edge", "Application", "msedge.exe"));
-  const brave = [envValue(env, "ProgramFiles"), envValue(env, "ProgramFiles(x86)")]
-    .filter((value): value is string => Boolean(value))
-    .map((root) => win32.join(root, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"));
+  const brave = roots.map((root) =>
+    win32.join(root, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+  );
   return [...chrome, ...edge, ...brave];
 }
 

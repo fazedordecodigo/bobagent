@@ -57,7 +57,7 @@ export class Voice {
     };
   }
 
-  speak(text: string): void {
+  async speak(text: string): Promise<void> {
     const cmd = this.tts();
     if (!cmd) throw new Error("text-to-speech is not available");
     this.stop();
@@ -65,8 +65,20 @@ export class Voice {
       stdio: ["pipe", "ignore", "ignore"],
       env: spawnEnv(undefined, process.platform, this.pathEnv()),
     });
-    p.stdin?.end(text.slice(0, 20_000));
     this.speaking = p;
+    p.stdin?.on("error", () => {});
+    p.on("error", () => {
+      if (this.speaking === p) this.speaking = null;
+    });
+    p.once("close", () => {
+      if (this.speaking === p) this.speaking = null;
+    });
+    const spawned = new Promise<void>((resolve, reject) => {
+      p.once("spawn", resolve);
+      p.once("error", reject);
+    });
+    p.stdin?.end(text.slice(0, 20_000));
+    await spawned;
   }
 
   stop(): void {
@@ -97,28 +109,31 @@ export class Voice {
         env: spawnEnv(undefined, process.platform, this.pathEnv()),
       });
       const timer = setTimeout(() => p.kill(), 120_000);
-      const [out, err, code] = await Promise.all([
-        new Promise<string>((resolve) => {
-          const chunks: Buffer[] = [];
-          p.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
-          p.stdout?.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-          if (!p.stdout) resolve("");
-        }),
-        new Promise<string>((resolve) => {
-          const chunks: Buffer[] = [];
-          p.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk));
-          p.stderr?.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-          if (!p.stderr) resolve("");
-        }),
-        new Promise<number>((resolve, reject) => {
-          p.once("error", reject);
-          p.once("close", (exitCode) => resolve(exitCode ?? 1));
-        }),
-      ]);
-      clearTimeout(timer);
-      if (code !== 0) throw new Error(`transcription failed: ${err.trim().slice(0, 300)}`);
-      if (custom) return out.trim();
-      return (await Bun.file(join(work, "audio.txt")).text()).trim();
+      try {
+        const [out, err, code] = await Promise.all([
+          new Promise<string>((resolve) => {
+            const chunks: Buffer[] = [];
+            p.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
+            p.stdout?.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+            if (!p.stdout) resolve("");
+          }),
+          new Promise<string>((resolve) => {
+            const chunks: Buffer[] = [];
+            p.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk));
+            p.stderr?.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+            if (!p.stderr) resolve("");
+          }),
+          new Promise<number>((resolve, reject) => {
+            p.once("error", reject);
+            p.once("close", (exitCode) => resolve(exitCode ?? 1));
+          }),
+        ]);
+        if (code !== 0) throw new Error(`transcription failed: ${err.trim().slice(0, 300)}`);
+        if (custom) return out.trim();
+        return (await Bun.file(join(work, "audio.txt")).text()).trim();
+      } finally {
+        clearTimeout(timer);
+      }
     } finally {
       rmSync(work, { recursive: true, force: true });
     }

@@ -83,6 +83,7 @@ describe("browser candidates", () => {
       "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
       "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
       "C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
+      "C:\\Users\\me\\AppData\\Local\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
     ]);
   });
 });
