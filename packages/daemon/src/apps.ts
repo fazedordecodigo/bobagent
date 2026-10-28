@@ -8,6 +8,7 @@ import {
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { AppCatalogEntry, ConnectedApp } from "@upbot/protocol";
+import { AppPermissions, defaultAppPermissions } from "@upbot/protocol";
 import { RpcError } from "./runtime/agent-runtime";
 import type { Vault } from "./vault";
 
@@ -103,6 +104,7 @@ export const APP_CATALOG: AppCatalogEntry[] = [
 ];
 
 type Row = {
+  permissions_json: string;
   id: string;
   catalog_id: string;
   config_json: string;
@@ -193,6 +195,7 @@ export class AppsService {
     const c = this.config(r);
     const l = this.live.get(r.id);
     return {
+      permissions: AppPermissions.parse(JSON.parse(r.permissions_json)),
       id: r.id,
       catalogId: r.catalog_id,
       name: c.name,
@@ -223,6 +226,7 @@ export class AppsService {
   }
 
   connect(p: {
+    permissions?: Partial<AppPermissions>;
     catalogId: string;
     name?: string;
     secrets: Record<string, string>;
@@ -231,6 +235,7 @@ export class AppsService {
     headers?: Record<string, string>;
     agentIds?: string[];
   }): ConnectedApp {
+    const permissions = AppPermissions.parse({ ...defaultAppPermissions, ...p.permissions });
     const entry = APP_CATALOG.find((e) => e.id === p.catalogId);
     let config: Config;
     if (entry) {
@@ -282,21 +287,23 @@ export class AppsService {
     for (const [k, v] of Object.entries(p.secrets)) this.vault.set(`app.${id}.${k}`, v, []);
     this.db
       .query(
-        "INSERT INTO connected_apps (id, catalog_id, config_json, enabled, created_at) VALUES (?, ?, ?, 1, ?)",
+        "INSERT INTO connected_apps (id, catalog_id, config_json, permissions_json, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)",
       )
-      .run(id, p.catalogId, JSON.stringify(config), Date.now());
+      .run(id, p.catalogId, JSON.stringify(config), JSON.stringify(permissions), Date.now());
     this.changed();
     void this.ensure(id).catch(() => {});
     return this.get(id);
   }
 
   async update(p: {
+    permissions?: Partial<AppPermissions>;
     id: string;
     enabled?: boolean;
     agentIds?: string[];
     secrets?: Record<string, string>;
   }): Promise<ConnectedApp> {
     const r = this.row(p.id);
+    const permissions = AppPermissions.parse({ ...this.toApp(r).permissions, ...p.permissions });
     const c = this.config(r);
     if (p.agentIds) c.agentIds = p.agentIds;
     if (p.secrets) {
@@ -307,8 +314,10 @@ export class AppsService {
     }
     const enabled = p.enabled ?? r.enabled === 1;
     this.db
-      .query("UPDATE connected_apps SET config_json = ?, enabled = ? WHERE id = ?")
-      .run(JSON.stringify(c), enabled ? 1 : 0, p.id);
+      .query(
+        "UPDATE connected_apps SET config_json = ?, permissions_json = ?, enabled = ? WHERE id = ?",
+      )
+      .run(JSON.stringify(c), JSON.stringify(permissions), enabled ? 1 : 0, p.id);
     if (p.secrets || !enabled) await this.stop(p.id);
     this.changed();
     if (enabled) void this.ensure(p.id).catch(() => {});
@@ -458,6 +467,10 @@ export class AppsService {
     if (i <= 0) return false;
     const slug = name.slice(0, i);
     return this.rows().some((x) => slugFor(this.config(x).name) === slug);
+  }
+
+  appForTool(name: string): ConnectedApp | undefined {
+    return this.list().find((app) => name.startsWith(`${app.slug}-`));
   }
 
   /** Runs `<slug>-<tool>`; null when the name is not an app tool. */

@@ -21,7 +21,7 @@ let vite: ReturnType<typeof Bun.spawn> | undefined;
 let state: string;
 let bot: Agent;
 const token = `window-test-${crypto.randomUUID()}`;
-const out = process.env.PHASE2_SCREEN_DIR;
+const out = process.env.PHASE3_SCREEN_DIR ?? process.env.PHASE2_SCREEN_DIR;
 const blueCounts: Record<string, number> = {};
 
 async function capture(name: string, target = page) {
@@ -81,7 +81,7 @@ beforeAll(async () => {
     catalogId: "custom-stdio",
     name: "Notas",
     command: ["bun", join(ROOT, "packages/daemon/test/fixtures/fake-mcp-server.ts")],
-    secrets: {},
+    secrets: { FAKE_APP_PERMISSIONS: "1" },
   })) as ConnectedApp;
   for (let i = 0; i < 100; i++) {
     const apps = (await rpc.request("apps.list", {})) as ConnectedApp[];
@@ -205,18 +205,18 @@ test("real chat, approval once/always/undo, details, palette, settings and drawe
     await page.getByRole("tab", { name: "Apps", exact: true }).click();
     await page
       .getByRole("region", { name: "Pedidos de apps conectados" })
-      .getByRole("button", { name: "Aprovar e executar" })
+      .getByRole("button", { name: "Permitir", exact: true })
       .waitFor();
     await capture(`apps-approval-${theme}`);
     await page.getByRole("tab", { name: "Aprovações", exact: true }).click();
-    await page.getByRole("button", { name: "Aprovar e executar" }).waitFor();
+    await page.getByRole("button", { name: "Permitir", exact: true }).waitFor();
     await capture(`settings-approval-${theme}`);
     await page.keyboard.press("Meta+1");
     await card.waitFor();
-    await card.getByRole("button", { name: "Aprovar e executar" }).click();
+    await card.getByRole("button", { name: "Só nesta tarefa" }).click();
     await page
       .getByRole("status")
-      .filter({ hasText: "Ação aprovada para execução uma vez." })
+      .filter({ hasText: "Permissão concedida somente nesta tarefa." })
       .waitFor();
     expect(await page.getByRole("button", { name: "Desfazer", exact: true }).count()).toBe(0);
     await capture(`toast-once-${theme}`);
@@ -224,17 +224,23 @@ test("real chat, approval once/always/undo, details, palette, settings and drawe
     await page.getByRole("button", { name: "Enviar", exact: true }).waitFor();
     await send("mcp:notas-create_note {}");
     await card.waitFor();
-    await card.getByRole("button", { name: "Permitir sempre" }).click();
+    await card.getByRole("button", { name: "Permitir", exact: true }).click();
     await page.getByRole("button", { name: "Desfazer", exact: true }).waitFor();
     await capture(`toast-always-${theme}`);
     expect(
       ((await rpc.request("approvals.rules", {})) as ApprovalRule[]).filter(
         (rule) => rule.pattern === "notas-create_note",
       ).length,
-    ).toBe(1);
+    ).toBe(0);
+    expect(((await rpc.request("apps.list", {})) as ConnectedApp[])[0]?.permissions.write).toBe(
+      "allow",
+    );
     await page.getByRole("button", { name: "Desfazer", exact: true }).click();
     await page.getByRole("status").filter({ hasText: "não foi desfeita" }).waitFor();
     expect(((await rpc.request("approvals.rules", {})) as ApprovalRule[]).length).toBe(0);
+    expect(((await rpc.request("apps.list", {})) as ConnectedApp[])[0]?.permissions.write).toBe(
+      "ask",
+    );
     await page.getByRole("button", { name: "Fechar aviso" }).click();
     await page.keyboard.press("Meta+.");
     expect(await page.locator(".panel").isVisible()).toBe(true);
@@ -260,7 +266,7 @@ test("real chat, approval once/always/undo, details, palette, settings and drawe
     ).toBe(true);
     await capture(`settings-${theme}`);
     await page.getByRole("tab", { name: "Apps", exact: true }).click();
-    await page.getByRole("button", { name: /Custom MCP \(command\)/ }).click();
+    await page.getByRole("button", { name: /MCP personalizado \(comando\)/ }).click();
     expect(
       await page
         .locator("button.bg-sky-600")
@@ -295,6 +301,94 @@ test("real chat, approval once/always/undo, details, palette, settings and drawe
   }
 }, 90000);
 
+test("app requests, permissions dialog and sensitive conversation decisions stay synchronized", async () => {
+  for (const theme of ["light", "dark"] as const) {
+    await page.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+    await page.evaluate((theme) => localStorage.setItem("upbot.theme", theme), theme);
+    await page.reload();
+    await page
+      .locator(".main-head")
+      .getByRole("heading", { name: bot.name, exact: true })
+      .waitFor();
+    if (await page.locator(".panel").isVisible()) await page.keyboard.press("Meta+.");
+    await rpc.request("chat.send", { agentId: bot.id, text: "mcp:notas-create_note {}" });
+    await page.getByTestId("approval").waitFor();
+    await page.keyboard.press("Meta+,");
+    await page.getByRole("tab", { name: "Apps", exact: true }).click();
+    const requests = page.getByRole("region", { name: "Pedidos de apps conectados" });
+    await requests.getByRole("button", { name: "Permitir", exact: true }).waitFor();
+    expect(await requests.getByText(bot.name, { exact: false }).isVisible()).toBe(true);
+    expect(await requests.getByText("Notas · Criar e editar", { exact: false }).isVisible()).toBe(
+      true,
+    );
+    await capture(`apps-pending-${theme}`);
+    await page.getByRole("button", { name: "Permissões", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Permissões de Notas", exact: true });
+    await dialog.waitFor();
+    for (const kind of ["Enviar", "Pagar", "Reservar", "Excluir"]) {
+      expect(
+        await dialog
+          .getByRole("group", { name: kind, exact: true })
+          .getByRole("button", { name: "Sempre", exact: true })
+          .isDisabled(),
+      ).toBe(true);
+    }
+    expect(await dialog.getByText("sempre pedem aprovação", { exact: false }).isVisible()).toBe(
+      true,
+    );
+    const read = dialog.getByRole("group", { name: "Ler", exact: true });
+    await read.getByRole("button", { name: "Perguntar", exact: true }).click();
+    await page.waitForFunction(
+      () =>
+        document.querySelector('fieldset[aria-label="Ler"] button[aria-pressed="true"]')
+          ?.textContent === "Perguntar",
+    );
+    expect(((await rpc.request("apps.list", {})) as ConnectedApp[])[0]?.permissions.read).toBe(
+      "ask",
+    );
+    await read.getByRole("button", { name: "Sempre", exact: true }).click();
+    await page.waitForFunction(
+      () =>
+        document.querySelector('fieldset[aria-label="Ler"] button[aria-pressed="true"]')
+          ?.textContent === "Sempre",
+    );
+    await capture(`permissions-dialog-${theme}`);
+    await dialog.getByRole("button", { name: "Desconectar", exact: true }).click();
+    const confirm = page.getByRole("dialog", { name: "Desconectar Notas?", exact: true });
+    await confirm.waitFor();
+    expect(await confirm.getByText("segredos salvos", { exact: false }).isVisible()).toBe(true);
+    await page.keyboard.press("Escape");
+    expect(await confirm.count()).toBe(0);
+    expect(await dialog.isVisible()).toBe(true);
+    await page.keyboard.press("Escape");
+    expect(await dialog.count()).toBe(0);
+    await requests.getByRole("button", { name: "Recusar", exact: true }).click();
+    await page.getByRole("status").filter({ hasText: "Pedido recusado." }).waitFor();
+    expect(await page.getByRole("button", { name: "Desfazer", exact: true }).count()).toBe(0);
+    await page.getByRole("button", { name: "Fechar aviso" }).click();
+    await page.keyboard.press("Meta+1");
+    await rpc.request("chat.send", { agentId: bot.id, text: "mcp:notas-send_message {}" });
+    const sensitive = page.getByTestId("approval");
+    await sensitive.getByRole("button", { name: "Aprovar e enviar", exact: true }).waitFor();
+    expect(await sensitive.getByRole("button", { name: "Permitir", exact: true }).count()).toBe(0);
+    expect(
+      await sensitive.getByRole("button", { name: "Só nesta tarefa", exact: true }).count(),
+    ).toBe(0);
+    await capture(`sensitive-conversation-${theme}`);
+    await sensitive.getByRole("button", { name: "Aprovar e enviar", exact: true }).click();
+    await page
+      .getByRole("status")
+      .filter({ hasText: "Ação aprovada para execução uma vez." })
+      .waitFor();
+    expect(await page.getByRole("button", { name: "Desfazer", exact: true }).count()).toBe(0);
+    expect(((await rpc.request("apps.list", {})) as ConnectedApp[])[0]?.permissions.send).toBe(
+      "ask",
+    );
+    await page.getByRole("button", { name: "Fechar aviso" }).click();
+    await page.getByText("tool-ok:message-sent", { exact: true }).last().waitFor();
+  }
+}, 60000);
+
 test("capture matching prototype states when visual verification is requested", async () => {
   if (!out || !process.env.PHASE2_PROTOTYPE) return;
   const prototype = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
@@ -319,6 +413,11 @@ test("capture matching prototype states when visual verification is requested", 
     await prototype.keyboard.press("Escape");
     await prototype.keyboard.press("Meta+,");
     await capture(`prototype-settings-${theme}`, prototype);
+    await prototype.keyboard.press("Escape");
+    await prototype.locator('[data-view="apps"]').first().click();
+    await capture(`prototype-apps-${theme}`, prototype);
+    await prototype.locator('[data-app="sheets"]').click();
+    await capture(`prototype-permissions-dialog-${theme}`, prototype);
   }
   await prototype.close();
 }, 30000);

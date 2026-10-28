@@ -26,7 +26,7 @@ export function ApprovalFeedback({ children }: { children: ReactNode }) {
                 try {
                   await feedback.undo?.();
                   setFeedback({
-                    message: "Permissão permanente removida. A ação aprovada não foi desfeita.",
+                    message: "Preferência anterior restaurada. A ação aprovada não foi desfeita.",
                   });
                 } catch (error) {
                   setFeedback({
