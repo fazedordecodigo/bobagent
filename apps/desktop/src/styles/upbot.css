@@ -1,4 +1,4 @@
-    :root {
+    :root:not([data-ds-kit]) {
       --bg:      oklch(99% 0.002 240);
       --surface: oklch(100% 0 0);
       --fg:      oklch(18% 0.012 250);
@@ -33,7 +33,7 @@
     }
 
     /* tema escuro — neutros invertem; os mesmos 4 estados ganham luminância e croma para não apagar no fundo escuro */
-    :root[data-theme="dark"] {
+    :root[data-theme="dark"]:not([data-ds-kit]) {
       --bg:      oklch(15% 0.008 250);
       --surface: oklch(19% 0.008 250);
       --fg:      oklch(94% 0.005 250);
