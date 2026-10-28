@@ -89,6 +89,8 @@ fn menu_position(
 fn tray_tooltip(count: u32) -> String {
     if count == 0 {
         "UpBot".into()
+    } else if count == 1 {
+        "UpBot — 1 tarefa aguardando você".into()
     } else {
         format!("UpBot — {count} tarefas aguardando você")
     }
@@ -461,7 +463,9 @@ mod tests {
 
     #[test]
     fn pending_count_is_shown_without_truncation() {
-        for count in [1, 3, u32::MAX] {
+        assert_eq!(tray_tooltip(1), "UpBot — 1 tarefa aguardando você");
+        assert_eq!(tray_title(1), "1");
+        for count in [3, u32::MAX] {
             assert_eq!(tray_title(count), count.to_string());
             assert_eq!(
                 tray_tooltip(count),

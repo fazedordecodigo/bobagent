@@ -1,5 +1,6 @@
 import type { Agent } from "@upbot/protocol";
 import type { DaemonClient } from "../lib/daemon";
+import { moveControlFocus } from "../lib/keyboard";
 import { ApprovalsView } from "./ApprovalsView";
 import { AppsView } from "./AppsView";
 import { EmailView } from "./EmailView";
@@ -83,6 +84,8 @@ export function ToolsView({
       <div
         className="flex shrink-0 gap-1 overflow-x-auto border-b border-zinc-800 px-4 pt-3"
         role="tablist"
+        aria-label="Ferramentas"
+        onKeyDown={moveControlFocus}
       >
         {TABS.map((t) => (
           <button
@@ -90,6 +93,7 @@ export function ToolsView({
             type="button"
             role="tab"
             aria-selected={tab === t.id}
+            tabIndex={tab === t.id ? 0 : -1}
             title={t.hint}
             onClick={() => onTab(t.id)}
             className={`rounded-t-md px-3 py-2 text-sm whitespace-nowrap transition-colors ${

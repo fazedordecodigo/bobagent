@@ -25,11 +25,11 @@ export function PagesView({
     return client.on("pages.changed", load);
   }, [client, load]);
   const page = pages.find((p) => p.id === selected) ?? pages[0] ?? null;
-  const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? "deleted bot";
+  const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? "bot removido";
   return (
     <div className="flex h-full">
       <ul className="w-64 shrink-0 overflow-y-auto border-r border-zinc-800">
-        <li className="px-4 py-3 text-sm font-semibold">Pages</li>
+        <li className="px-4 py-3 text-sm font-semibold">Páginas</li>
         {pages.map((p) => (
           <li key={p.id}>
             <button
@@ -48,7 +48,8 @@ export function PagesView({
         ))}
         {pages.length === 0 && (
           <li className="px-4 py-2 text-xs text-zinc-500">
-            No pages yet. Ask a bot for a report, dashboard or tracker and it can publish it here.
+            Nenhuma página ainda. Peça a um bot um relatório, painel ou acompanhamento para publicar
+            aqui.
           </li>
         )}
       </ul>
@@ -66,14 +67,14 @@ export function PagesView({
               className={`${btnCls} ml-auto bg-zinc-700 hover:bg-zinc-600`}
               onClick={() => onOpenBot(page.agentId)}
             >
-              Ask {nameOf(page.agentId)}
+              Perguntar a {nameOf(page.agentId)}
             </button>
             <button
               type="button"
               className={`${btnCls} bg-zinc-800 hover:bg-red-900`}
               onClick={() => client.request("pages.delete", { id: page.id }).catch(() => {})}
             >
-              Delete
+              Excluir
             </button>
           </div>
           <iframe

@@ -13,8 +13,8 @@
 .button { display: inline-flex; align-items: center; justify-content: center; gap: var(--gap-xs); min-height: 44px; padding: 10px 18px; border: 1px solid transparent; border-radius: var(--radius); font-size: var(--fs-body); font-weight: 500; line-height: 1.2; white-space: nowrap; }
 .button svg, .iconButton svg { width: 18px; height: 18px; }
 .primary { background: var(--accent); color: var(--on-accent); }
-.primary:hover { background: color-mix(in oklch, var(--accent) 88%, black); }
-.primary:active { background: color-mix(in oklch, var(--accent) 80%, black); }
+.primary:hover { background: color-mix(in oklch, var(--accent) 88%, var(--ink)); }
+.primary:active { background: color-mix(in oklch, var(--accent) 80%, var(--ink)); }
 .secondary { background: var(--surface); border-color: var(--border); color: var(--fg); }
 .secondary:hover { border-color: var(--fg); background: color-mix(in oklch, var(--fg) 5%, var(--surface)); }
 .ghost { background: transparent; color: var(--fg); padding-inline: 12px; }
@@ -35,9 +35,10 @@
 .input:focus { border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in oklch, var(--focus) 18%, transparent); }
 .input[aria-invalid="true"] { border-style: dashed; border-color: var(--fg); }
 textarea.input { min-height: 120px; resize: vertical; line-height: 1.5; }
-.switch { width: 40px; height: 24px; border-radius: var(--radius-pill); border: 0; background: var(--border); flex: none; }
-.switch span { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); box-shadow: var(--shadow-icon); transition: transform var(--dur-fast) var(--ease); }
-.switch[aria-checked="true"] { background: var(--fg); }
+.switch { width: 44px; height: 44px; border-radius: var(--radius-pill); border: 0; background: transparent; flex: none; }
+.switch::before { min-width: 0; width: 40px; height: 24px; left: 2px; border-radius: var(--radius-pill); background: var(--border); }
+.switch span { position: absolute; top: calc(50% - 9px); left: 5px; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); box-shadow: var(--shadow-icon); transition: transform var(--dur-fast) var(--ease); }
+.switch[aria-checked="true"]::before { background: var(--fg); }
 .switch[aria-checked="true"] span { transform: translateX(16px); }
 .segmented { display: inline-flex; padding: 3px; gap: 2px; border: 1px solid var(--border); background: var(--surface); border-radius: 12px; }
 .segmented button { border: 0; background: transparent; padding: 6px 12px; border-radius: var(--radius-sm); font-size: var(--fs-meta); font-weight: 500; color: var(--muted); }
@@ -52,7 +53,7 @@ textarea.input { min-height: 120px; resize: vertical; line-height: 1.5; }
 .err { --st: var(--st-err); }
 .pill { display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 10px 0 9px; border-radius: var(--radius-pill); font-size: var(--fs-meta); font-weight: 500; white-space: nowrap; background: color-mix(in oklch, var(--st) var(--pill-mix), transparent); color: color-mix(in oklch, var(--st) var(--pill-ink), var(--fg)); }
 .pillDot { width: 7px; height: 7px; border-radius: 50%; background: var(--st); }
-.run .pillDot { animation: pulse 1.6s ease-in-out infinite; }
+.run .pillDot { animation: pulse var(--dur-status) ease-in-out infinite; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--st); }
 @keyframes pulse { 50% { opacity: .35; } }
 .counter { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: var(--radius-pill); font: var(--fs-label)/1 var(--font-mono); font-variant-numeric: tabular-nums; background: color-mix(in oklch, var(--st-wait) var(--pill-mix), transparent); color: color-mix(in oklch, var(--st-wait) var(--pill-ink), var(--fg)); }
@@ -63,4 +64,3 @@ textarea.input { min-height: 120px; resize: vertical; line-height: 1.5; }
 .chip svg { width: 15px; height: 15px; color: var(--muted); }
 .chip:hover { border-color: var(--fg); background: var(--fg-soft); }
 .kbd { font: var(--fs-label)/1.5 var(--font-mono); font-variant-numeric: tabular-nums; padding: 2px 6px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: var(--radius-xs); color: var(--muted); background: var(--surface); }
-@media (prefers-reduced-motion: reduce) { .run .pillDot { animation: none; } }

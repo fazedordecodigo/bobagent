@@ -12,6 +12,7 @@ import {
   startDaemon,
   stopTestChildren,
 } from "../../../packages/daemon/test/helpers";
+import { expectSwitchGeometry } from "./switch-geometry";
 
 let daemon: DaemonHandle;
 let rpc: DaemonClient;
@@ -21,7 +22,8 @@ let vite: ReturnType<typeof Bun.spawn> | undefined;
 let state: string;
 let bot: Agent;
 const token = `window-test-${crypto.randomUUID()}`;
-const out = process.env.PHASE3_SCREEN_DIR ?? process.env.PHASE2_SCREEN_DIR;
+const out =
+  process.env.PHASE6_SCREEN_DIR ?? process.env.PHASE3_SCREEN_DIR ?? process.env.PHASE2_SCREEN_DIR;
 const blueCounts: Record<string, number> = {};
 
 async function capture(name: string, target = page) {
@@ -298,15 +300,90 @@ test("real chat, approval once/always/undo, details, palette, settings and drawe
     await page.keyboard.press("Escape");
     expect(await page.locator("dialog[open]").count()).toBe(0);
     await page.keyboard.press("Meta+1");
-    await page.setViewportSize({ width: 740, height: 900 });
+    await page.setViewportSize({ width: 700, height: 900 });
     expect(await page.locator(".side").isVisible()).toBe(false);
     await page.getByRole("button", { name: "Abrir barra lateral", exact: true }).click();
     expect(await page.locator(".side").isVisible()).toBe(true);
+    expect(
+      await page.getByRole("dialog", { name: "Bots e tarefas" }).getAttribute("aria-modal"),
+    ).toBe("true");
+    expect(
+      await page.locator(".side").evaluate((element) => element.contains(document.activeElement)),
+    ).toBe(true);
+    await page.keyboard.press("Shift+Tab");
+    expect(
+      await page.locator(".side").evaluate((element) => element.contains(document.activeElement)),
+    ).toBe(true);
+    await capture(`drawer-700-${theme}`);
+    await page.locator(".side-scrim").click({ position: { x: 600, y: 150 } });
+    expect(await page.locator(".side").isVisible()).toBe(false);
+    expect(
+      await page
+        .getByRole("button", { name: "Abrir barra lateral", exact: true })
+        .evaluate((element) => element === document.activeElement),
+    ).toBe(true);
+    await page.getByRole("button", { name: "Abrir barra lateral", exact: true }).click();
     await page.keyboard.press("Escape");
     expect(await page.locator(".side").isVisible()).toBe(false);
+    await page.getByRole("button", { name: "Alternar painel de execução" }).click();
+    await page.getByRole("dialog", { name: "Execução", exact: true }).waitFor();
+    expect(
+      await page.locator(".panel").evaluate((element) => element.contains(document.activeElement)),
+    ).toBe(true);
+    await capture(`details-700-${theme}`);
+    await page.keyboard.press("Escape");
+    expect(await page.locator(".panel").isVisible()).toBe(false);
     await page.setViewportSize({ width: 1440, height: 1000 });
   }
 }, 90000);
+
+test("RunPanel switch tracks contain their knobs on and off in both themes", async () => {
+  const previous = (await rpc.request("approvals.rules", {})) as ApprovalRule[];
+  try {
+    for (const theme of ["light", "dark"]) {
+      await rpc.request("approvals.setRules", {
+        rules: [
+          ...previous.filter((rule) => rule.agentId !== bot.id),
+          {
+            id: crypto.randomUUID(),
+            agentId: bot.id,
+            pattern: "switch_geometry_check",
+            action: "ask",
+          },
+        ],
+      });
+      await page.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+      await page.evaluate((value) => localStorage.setItem("upbot.theme", value), theme);
+      await page.reload();
+      await page.locator(".side").waitFor();
+      await page.keyboard.press("Meta+1");
+      if (!(await page.locator(".panel").isVisible())) {
+        await page.getByRole("button", { name: "Alternar painel de execução" }).click();
+      }
+      const permissions = page.locator('[data-od-id="panel-perms"]');
+      for (const name of ["Agir sem perguntar", "switch_geometry_check"]) {
+        const control = permissions.getByRole("switch", { name, exact: true });
+        for (const checked of [false, true, false]) {
+          if ((await control.getAttribute("aria-checked")) !== String(checked)) {
+            await control.click();
+          }
+          await permissions.getByRole("switch", { name, exact: true, checked }).waitFor();
+          await expectSwitchGeometry(control);
+        }
+      }
+      await permissions.getByRole("switch", { name: "switch_geometry_check", exact: true }).click();
+      await permissions
+        .getByRole("switch", { name: "switch_geometry_check", checked: true })
+        .waitFor();
+      await expectSwitchGeometry(
+        permissions.getByRole("switch", { name: "switch_geometry_check" }),
+      );
+      if (out) await permissions.screenshot({ path: join(out, `switch-runpanel-${theme}.png`) });
+    }
+  } finally {
+    await rpc.request("approvals.setRules", { rules: previous });
+  }
+}, 30000);
 
 test("app requests, permissions dialog and sensitive conversation decisions stay synchronized", async () => {
   for (const theme of ["light", "dark"] as const) {
@@ -460,4 +537,38 @@ test("capture matching prototype states when visual verification is requested", 
     await capture(`prototype-permissions-dialog-${theme}`, prototype);
   }
   await prototype.close();
+}, 30000);
+
+test("Pages and group chat use the active theme; settings tabs support arrow navigation", async () => {
+  await rpc.request("channels.create", { name: "Revisão", memberIds: [bot.id] });
+  for (const theme of ["light", "dark"]) {
+    await page.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+    await page.evaluate((value) => localStorage.setItem("upbot.theme", value), theme);
+    await page.reload();
+    await page.locator(".side").waitFor();
+    await page.keyboard.press("Meta+p");
+    await page.getByText("Nenhuma página ainda.", { exact: false }).waitFor();
+    await capture(`pages-${theme}`);
+    expect(await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme)).toBe(
+      theme,
+    );
+    await page.keyboard.press("Meta+k");
+    const palette = page.getByRole("dialog", { name: "Buscar", exact: true });
+    await palette.getByRole("textbox").fill("Revisão");
+    await palette
+      .getByRole("option")
+      .filter({ has: page.getByText("# Revisão", { exact: true }) })
+      .click();
+    await page.getByRole("textbox", { name: "Mensagem para #Revisão", exact: true }).waitFor();
+    await capture(`group-chat-${theme}`);
+    await page.keyboard.press("Meta+,");
+    const general = page.getByRole("tab", { name: "Geral", exact: true });
+    await general.click();
+    await page.keyboard.press("ArrowRight");
+    expect(
+      await page.getByRole("tab", { name: "Apps", exact: true }).getAttribute("aria-selected"),
+    ).toBe("true");
+    await page.keyboard.press("Home");
+    expect(await general.getAttribute("aria-selected")).toBe("true");
+  }
 }, 30000);

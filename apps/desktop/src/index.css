@@ -7,6 +7,12 @@ dialog {
   margin: auto;
 }
 
+:is(button, input:not([type="checkbox"]):not([type="radio"]), select, summary, a[href]) {
+  min-height: 44px;
+}
+button { min-width: 44px; }
+:focus-visible { outline: 2px solid var(--focus) !important; outline-offset: 3px !important; }
+
 .hint.is-err {
   color: var(--fg);
 }
@@ -17,6 +23,9 @@ button.bg-sky-600, button.bg-sky-700 {
 }
 
 @media (max-width: 759px) {
+  .side-titlebar { display: none; }
+  .side > button[aria-label="Fechar barra lateral"] { position: absolute; top: 4px; right: 4px; }
+  .side-open .side-head { padding-right: 52px; }
   .app.side-open .side {
     position: fixed;
     top: 0;
@@ -24,7 +33,7 @@ button.bg-sky-600, button.bg-sky-700 {
     left: 0;
     z-index: 31;
     display: flex;
-    width: var(--sidebar-width);
+    width: 272px;
     background: var(--surface);
     box-shadow: 12px 0 40px -20px color-mix(in oklch, var(--shade) 40%, transparent);
   }
@@ -38,6 +47,8 @@ button.bg-sky-600, button.bg-sky-700 {
 }
 
 @theme {
+  --color-white: var(--surface);
+  --color-black: var(--fg);
   --color-zinc-50: var(--fg);
   --color-zinc-100: var(--fg);
   --color-zinc-200: var(--fg);

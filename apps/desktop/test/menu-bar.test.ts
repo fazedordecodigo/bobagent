@@ -27,7 +27,7 @@ const token = `menubar-test-${crypto.randomUUID()}`;
 const errors: string[] = [];
 const base = "http://localhost:1420/";
 const url = () => `${base}#/menubar?port=${daemon.port}&token=${token}`;
-const out = process.env.PHASE4_SCREEN_DIR;
+const out = process.env.PHASE6_SCREEN_DIR ?? process.env.PHASE4_SCREEN_DIR;
 
 beforeAll(async () => {
   state = mkdtempSync(join(homedir(), "upbot-menubar-test-"));
@@ -264,6 +264,11 @@ test("overflow keyboard menu pauses all real queues, syncs theme and confirms ex
   const more = page.getByRole("button", { name: "Mais opções", exact: true });
   await more.focus();
   await page.keyboard.press("Enter");
+  await page.keyboard.press("Shift+Tab");
+  expect(
+    await page.getByRole("menu").evaluate((element) => element.contains(document.activeElement)),
+  ).toBe(true);
+  await page.keyboard.press("Home");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
   await more.click();

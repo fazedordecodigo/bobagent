@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useChat } from "../hooks/useChat";
 import type { AgentOverview } from "../hooks/useOverview";
 import type { DaemonClient } from "../lib/daemon";
+import { moveControlFocus } from "../lib/keyboard";
 import { MonoAv, Pill, role } from "../lib/ui";
 import { PermissionNotice } from "./AgentSettings";
 import { ApprovalCards } from "./ApprovalsView";
@@ -154,10 +155,11 @@ export function ChatView({
         {supportsModes && (
           <>
             {/* biome-ignore lint/a11y/useSemanticElements: Required by the mockup's div role group. */}
-            <div className="seg" role="group" aria-label="Modo do bot">
+            <div className="seg" role="group" aria-label="Modo do bot" onKeyDown={moveControlFocus}>
               <button
                 type="button"
                 aria-pressed={isAsking}
+                tabIndex={isAsking ? 0 : -1}
                 onClick={() => void setMode(isClaude ? "plan" : "read-only")}
               >
                 Perguntar
@@ -165,6 +167,7 @@ export function ChatView({
               <button
                 type="button"
                 aria-pressed={!isAsking}
+                tabIndex={isAsking ? -1 : 0}
                 onClick={() => void setMode(isClaude ? "default" : "auto")}
               >
                 Agir
