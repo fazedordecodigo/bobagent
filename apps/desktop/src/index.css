@@ -8,20 +8,25 @@ dialog {
 }
 
 .hint.is-err {
-  color: var(--st-err);
+  color: var(--fg);
 }
 
-@media (max-width: 860px) {
+button.bg-sky-600, button.bg-sky-700 {
+  color: var(--bg);
+  min-height: 44px;
+}
+
+@media (max-width: 759px) {
   .app.side-open .side {
     position: fixed;
-    top: 0;
+    top: 52px;
     bottom: 60px;
     left: 0;
     z-index: 31;
     display: flex;
-    width: var(--side);
+    width: var(--sidebar-width);
     background: var(--surface);
-    box-shadow: 12px 0 40px -20px color-mix(in oklab, var(--shade) 40%, transparent);
+    box-shadow: 12px 0 40px -20px color-mix(in oklch, var(--shade) 40%, transparent);
   }
 
   .side-scrim {
@@ -40,63 +45,63 @@ dialog {
   --color-zinc-400: var(--muted);
   --color-zinc-500: var(--muted);
   --color-zinc-600: var(--muted);
-  --color-zinc-700: color-mix(in oklab, var(--fg) 18%, transparent);
+  --color-zinc-700: color-mix(in oklch, var(--fg) 18%, transparent);
   --color-zinc-800: var(--border);
   --color-zinc-900: var(--surface);
   --color-zinc-950: var(--bg);
-  --color-sky-50: var(--accent);
-  --color-sky-100: var(--accent);
-  --color-sky-200: var(--accent);
-  --color-sky-300: var(--accent);
-  --color-sky-400: var(--accent);
-  --color-sky-500: var(--accent);
-  --color-sky-600: var(--accent);
-  --color-sky-700: var(--accent);
-  --color-sky-800: var(--accent);
-  --color-sky-900: var(--accent);
-  --color-sky-950: var(--accent);
-  --color-violet-50: var(--accent);
-  --color-violet-100: var(--accent);
-  --color-violet-200: var(--accent);
-  --color-violet-300: var(--accent);
-  --color-violet-400: var(--accent);
-  --color-violet-500: var(--accent);
-  --color-violet-600: var(--accent);
-  --color-violet-700: var(--accent);
-  --color-violet-800: var(--accent);
-  --color-violet-900: var(--accent);
-  --color-violet-950: var(--accent);
-  --color-emerald-50: var(--st-ok);
-  --color-emerald-100: var(--st-ok);
-  --color-emerald-200: var(--st-ok);
-  --color-emerald-300: var(--st-ok);
-  --color-emerald-400: var(--st-ok);
-  --color-emerald-500: var(--st-ok);
-  --color-emerald-600: var(--st-ok);
-  --color-emerald-700: var(--st-ok);
-  --color-emerald-800: var(--st-ok);
-  --color-emerald-900: var(--st-ok);
-  --color-emerald-950: var(--st-ok);
-  --color-amber-50: var(--st-wait);
-  --color-amber-100: var(--st-wait);
-  --color-amber-200: var(--st-wait);
-  --color-amber-300: var(--st-wait);
-  --color-amber-400: var(--st-wait);
-  --color-amber-500: var(--st-wait);
-  --color-amber-600: var(--st-wait);
-  --color-amber-700: var(--st-wait);
-  --color-amber-800: var(--st-wait);
-  --color-amber-900: var(--st-wait);
-  --color-amber-950: var(--st-wait);
-  --color-red-50: var(--st-err);
-  --color-red-100: var(--st-err);
-  --color-red-200: var(--st-err);
-  --color-red-300: var(--st-err);
-  --color-red-400: var(--st-err);
-  --color-red-500: var(--st-err);
-  --color-red-600: var(--st-err);
-  --color-red-700: var(--st-err);
-  --color-red-800: var(--st-err);
-  --color-red-900: var(--st-err);
-  --color-red-950: var(--st-err);
+  --color-sky-50: var(--fg);
+  --color-sky-100: var(--fg);
+  --color-sky-200: var(--fg);
+  --color-sky-300: var(--fg);
+  --color-sky-400: var(--fg);
+  --color-sky-500: var(--fg);
+  --color-sky-600: var(--fg);
+  --color-sky-700: var(--fg);
+  --color-sky-800: var(--fg);
+  --color-sky-900: var(--fg);
+  --color-sky-950: var(--fg);
+  --color-violet-50: var(--fg);
+  --color-violet-100: var(--fg);
+  --color-violet-200: var(--fg);
+  --color-violet-300: var(--fg);
+  --color-violet-400: var(--fg);
+  --color-violet-500: var(--fg);
+  --color-violet-600: var(--fg);
+  --color-violet-700: var(--fg);
+  --color-violet-800: var(--fg);
+  --color-violet-900: var(--fg);
+  --color-violet-950: var(--fg);
+  --color-emerald-50: var(--fg);
+  --color-emerald-100: var(--fg);
+  --color-emerald-200: var(--fg);
+  --color-emerald-300: var(--fg);
+  --color-emerald-400: var(--fg);
+  --color-emerald-500: var(--fg);
+  --color-emerald-600: var(--fg);
+  --color-emerald-700: var(--fg);
+  --color-emerald-800: var(--fg);
+  --color-emerald-900: var(--fg);
+  --color-emerald-950: var(--fg);
+  --color-amber-50: var(--fg);
+  --color-amber-100: var(--fg);
+  --color-amber-200: var(--fg);
+  --color-amber-300: var(--fg);
+  --color-amber-400: var(--fg);
+  --color-amber-500: var(--fg);
+  --color-amber-600: var(--fg);
+  --color-amber-700: var(--fg);
+  --color-amber-800: var(--fg);
+  --color-amber-900: var(--fg);
+  --color-amber-950: var(--fg);
+  --color-red-50: var(--fg);
+  --color-red-100: var(--fg);
+  --color-red-200: var(--fg);
+  --color-red-300: var(--fg);
+  --color-red-400: var(--fg);
+  --color-red-500: var(--fg);
+  --color-red-600: var(--fg);
+  --color-red-700: var(--fg);
+  --color-red-800: var(--fg);
+  --color-red-900: var(--fg-soft);
+  --color-red-950: var(--fg-soft);
 }

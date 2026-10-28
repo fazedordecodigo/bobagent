@@ -2,6 +2,7 @@ import type { Agent, AppCatalogEntry, ConnectedApp } from "@upbot/protocol";
 import { useCallback, useEffect, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
 import { btnCls, inputCls } from "./AgentSettings";
+import { AppApprovalCards } from "./ApprovalsView";
 
 const dot = (s: ConnectedApp["status"]) =>
   s === "ready"
@@ -73,14 +74,15 @@ export function AppsView({ client, agents }: { client: DaemonClient; agents: Age
   };
   return (
     <div className="mx-auto max-w-2xl space-y-4 p-6">
-      <h2 className="text-lg font-semibold">Connected apps</h2>
+      <h2 className="text-lg font-semibold">Apps conectados</h2>
       <p className="text-xs text-zinc-500">
-        Connect an app once and your bots can use its tools. UpBot runs each app's MCP server
-        itself; tokens are encrypted in the vault and never shown to bots.
+        Conecte um app para seus bots usarem suas ferramentas. O UpBot executa o servidor MCP de
+        cada app. Os tokens ficam criptografados no cofre e não são mostrados aos bots.
       </p>
+      <AppApprovalCards client={client} slugs={apps.map((app) => app.slug)} agents={agents} />
       <ul className="space-y-2">
         {apps.map((a) => (
-          <li key={a.id} className="space-y-2 rounded border border-zinc-800 p-3 text-sm">
+          <li key={a.id} className="space-y-2 rounded-2xl border border-zinc-800 p-3 text-sm">
             <div className="flex items-center gap-2">
               <span className={`inline-block h-2 w-2 rounded-full ${dot(a.status)}`} />
               <span className="font-medium">{a.name}</span>
@@ -154,11 +156,12 @@ export function AppsView({ client, agents }: { client: DaemonClient; agents: Age
           <button
             key={e.id}
             type="button"
+            aria-pressed={picked === e.id}
             onClick={() => {
               reset();
               setPicked(e.id);
             }}
-            className={`rounded border p-2 text-left text-sm hover:bg-zinc-900 ${
+            className={`app-choice rounded border p-2 text-left text-sm hover:bg-zinc-900 ${
               picked === e.id ? "border-sky-500" : "border-zinc-800"
             }`}
           >

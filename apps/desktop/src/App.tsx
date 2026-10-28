@@ -11,6 +11,7 @@ import { AgentSettings, PROVIDERS } from "./components/AgentSettings";
 import { ChannelCreateForm, ChannelView } from "./components/ChannelView";
 import { ChatView } from "./components/ChatView";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
+import { IconButton } from "./components/ds/controls";
 import { Icon } from "./components/icons";
 import { AvatarEditor, ComputerUsePanel, MemoriesPanel, RoutinesPanel } from "./components/Library";
 import { PagesView } from "./components/PagesView";
@@ -219,13 +220,21 @@ export default function App() {
 
   const shortcutsRef = useRef<(e: KeyboardEvent) => void>(() => {});
   shortcutsRef.current = (e) => {
-    if (e.key === "Escape" && sideOpen) {
-      setSideOpen(false);
+    if (e.defaultPrevented) return;
+    if (e.key === "Escape") {
+      if (palette) setPalette(null);
+      else if (creating) setCreating(false);
+      else if (document.querySelector("dialog[open]")) return;
+      else if (sideOpen) setSideOpen(false);
+      else if (panelOpen) setPanelOpen(false);
+      else return;
+      e.preventDefault();
       return;
     }
     if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
     const key = e.key.toLowerCase();
-    if (key === "k") setPalette({});
+    if (key === "." && view === "chat" && selectedId) togglePanel();
+    else if (key === "k") setPalette({});
     else if (key === "f" && e.shiftKey) setPalette({ group: "Bots" });
     else if (key === "n" && !e.shiftKey) {
       navigate("chat");
@@ -424,354 +433,373 @@ export default function App() {
   );
 
   return (
-    <div className={appClass}>
-      <nav className="rail" aria-label="Navegação principal">
-        <div className="logo" role="img" aria-label="UpBot">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M12 19V6M6.5 11.5 12 6l5.5 5.5" />
-          </svg>
-        </div>
-        {(
-          [
-            ["chat", "Conversas"],
-            ["agents", "Bots"],
-            ["tasks", "Tarefas"],
-          ] as const
-        ).map(([railView, label]) => (
-          <button
-            key={railView}
-            type="button"
-            className="rail-btn"
-            data-view={railView}
-            aria-label={label}
-            aria-current={view === railView ? "page" : undefined}
-            onClick={() => {
-              if (
-                railView === "chat" &&
-                view === "chat" &&
-                window.matchMedia("(max-width: 860px)").matches
-              ) {
-                setSideOpen((open) => !open);
-              } else navigate(railView);
-            }}
-          >
-            <Icon name={railView} />
-            {railView === "chat" && pendingCount > 0 && (
-              <span className="badge">{pendingCount}</span>
-            )}
-          </button>
-        ))}
-        <div className="rail-spacer" />
-        <button
-          type="button"
-          className="rail-btn"
-          data-view="settings"
-          aria-label="Configurações"
-          aria-current={view === "settings" ? "page" : undefined}
-          onClick={() => {
-            setSettingsTab("general");
-            navigate("settings");
-          }}
+    <>
+      <header className="window-titlebar" data-tauri-drag-region>
+        <span className="window-name" data-tauri-drag-region>
+          UpBot
+        </span>
+        <IconButton
+          aria-label="Abrir barra lateral"
+          className="window-menu"
+          onClick={() => setSideOpen((open) => !open)}
         >
-          <Icon name="settings" />
-        </button>
-        <div className="avatar" title="Sua conta">
-          EU
-        </div>
-      </nav>
-
-      <aside className="side" aria-label="Bots e tarefas">
-        <div className="side-head">
-          <div className="row">
-            <span className="brand">UpBot</span>
+          <Icon name="panel" />
+        </IconButton>
+      </header>
+      <div className={appClass}>
+        <nav className="rail" aria-label="Navegação principal">
+          <div className="logo" role="img" aria-label="UpBot">
+            <svg
+              viewBox="0 0 48 48"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M9.2 24V29a10 10 0 0 0 20 0V14" />
+              <circle cx="38.2" cy="9.5" r="3.6" fill="currentColor" stroke="none" />
+            </svg>
+          </div>
+          {(
+            [
+              ["chat", "Conversas"],
+              ["agents", "Bots"],
+              ["tasks", "Tarefas"],
+            ] as const
+          ).map(([railView, label]) => (
             <button
+              key={railView}
               type="button"
-              className="icon-btn"
-              aria-label="Criar bot"
+              className="rail-btn"
+              data-view={railView}
+              aria-label={label}
+              aria-current={view === railView ? "page" : undefined}
               onClick={() => {
-                setSelectedId(null);
-                setCreating(true);
+                if (
+                  railView === "chat" &&
+                  view === "chat" &&
+                  window.matchMedia("(max-width: 759px)").matches
+                ) {
+                  setSideOpen((open) => !open);
+                } else navigate(railView);
               }}
             >
-              <Icon name="plus" />
+              <Icon name={railView} />
+              {railView === "chat" && pendingCount > 0 && (
+                <span className="badge">{pendingCount}</span>
+              )}
             </button>
+          ))}
+          <div className="rail-spacer" />
+          <button
+            type="button"
+            className="rail-btn"
+            data-view="settings"
+            aria-label="Configurações"
+            aria-current={view === "settings" ? "page" : undefined}
+            onClick={() => {
+              setSettingsTab("general");
+              navigate("settings");
+            }}
+          >
+            <Icon name="settings" />
+          </button>
+          <div className="avatar" title="Sua conta">
+            EU
           </div>
-          <label className="search">
-            <span className="sr">Buscar bots e tarefas</span>
-            <Icon name="search" />
-            <input
-              type="search"
-              placeholder="Buscar bots e tarefas"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-          </label>
-        </div>
-        <div className="side-scroll">
-          <p className="eyebrow side-label">Seus bots</p>
-          <div id="agentList">
-            {filteredAgents.map((agent) => {
-              const item = overview[agent.id];
-              const summary =
-                item?.status === "err"
-                  ? `Falhou: ${statuses[agent.id]?.error ?? "erro na última tarefa"}`
-                  : (item?.task ?? "Pronto para uma tarefa");
-              return (
+        </nav>
+
+        <aside className="side" aria-label="Bots e tarefas">
+          <div className="side-head">
+            <div className="row">
+              <span className="brand">UpBot</span>
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label="Criar bot"
+                onClick={() => {
+                  setSelectedId(null);
+                  setCreating(true);
+                }}
+              >
+                <Icon name="plus" />
+              </button>
+            </div>
+            <label className="search">
+              <span className="sr">Buscar bots e tarefas</span>
+              <Icon name="search" />
+              <input
+                type="search"
+                placeholder="Buscar bots e tarefas"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </label>
+          </div>
+          <div className="side-scroll">
+            <p className="eyebrow side-label">Seus bots</p>
+            <div id="agentList">
+              {filteredAgents.map((agent) => {
+                const item = overview[agent.id];
+                const summary =
+                  item?.status === "err"
+                    ? `Falhou: ${statuses[agent.id]?.error ?? "erro na última tarefa"}`
+                    : (item?.task ?? "Pronto para uma tarefa");
+                return (
+                  <button
+                    key={agent.id}
+                    type="button"
+                    className={`agent-item is-${item?.status ?? "idle"}`}
+                    aria-current={selectedId === agent.id && view === "chat" ? "true" : undefined}
+                    onClick={() => openAgent(agent.id)}
+                  >
+                    <MonoAv agent={agent} status={item?.status ?? "idle"} />
+                    <div>
+                      <div className="name">{agent.name}</div>
+                      <div className="sub">{summary}</div>
+                    </div>
+                    <span className="meta">{item?.updated ?? "—"}</span>
+                  </button>
+                );
+              })}
+              {filteredAgents.length === 0 && (
+                <p className="meta" style={{ padding: 8 }}>
+                  {agents.length === 0 ? "Nenhum bot ainda." : "Nada encontrado."}
+                </p>
+              )}
+            </div>
+            <p className="eyebrow side-label">Tarefas recentes</p>
+            <div id="recentTasks">
+              {filteredTasks.map((agent) => (
                 <button
                   key={agent.id}
                   type="button"
-                  className={`agent-item is-${item?.status ?? "idle"}`}
-                  aria-current={selectedId === agent.id && view === "chat" ? "true" : undefined}
+                  className="task-item"
                   onClick={() => openAgent(agent.id)}
                 >
-                  <MonoAv agent={agent} status={item?.status ?? "idle"} />
-                  <div>
-                    <div className="name">{agent.name}</div>
-                    <div className="sub">{summary}</div>
-                  </div>
-                  <span className="meta">{item?.updated ?? "—"}</span>
+                  <i className={`dot s-${overview[agent.id]?.status ?? "idle"}`} />
+                  <span>{overview[agent.id]?.task}</span>
+                  <span className="meta">{mono(agent.name)}</span>
                 </button>
-              );
-            })}
-            {filteredAgents.length === 0 && (
-              <p className="meta" style={{ padding: 8 }}>
-                {agents.length === 0 ? "Nenhum bot ainda." : "Nada encontrado."}
-              </p>
-            )}
-          </div>
-          <p className="eyebrow side-label">Tarefas recentes</p>
-          <div id="recentTasks">
-            {filteredTasks.map((agent) => (
+              ))}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <p className="eyebrow side-label">Conversas em grupo</p>
               <button
-                key={agent.id}
                 type="button"
-                className="task-item"
-                onClick={() => openAgent(agent.id)}
+                className="icon-btn"
+                aria-label="Criar conversa em grupo"
+                onClick={() => navigate("channel-new")}
               >
-                <i className={`dot s-${overview[agent.id]?.status ?? "idle"}`} />
-                <span>{overview[agent.id]?.task}</span>
-                <span className="meta">{mono(agent.name)}</span>
+                <Icon name="plus" />
               </button>
-            ))}
-          </div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <p className="eyebrow side-label">Conversas em grupo</p>
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label="Criar conversa em grupo"
-              onClick={() => navigate("channel-new")}
-            >
-              <Icon name="plus" />
+            </div>
+            <div>
+              {channels.map((channel) => (
+                <button
+                  key={channel.id}
+                  type="button"
+                  className="task-item"
+                  aria-current={channelId === channel.id && view === "channel" ? "true" : undefined}
+                  onClick={() => {
+                    setChannelId(channel.id);
+                    navigate("channel");
+                  }}
+                >
+                  <i className={`dot ${channel.status === "active" ? "s-run" : "s-idle"}`} />
+                  <span># {channel.name}</span>
+                  <span className="meta">
+                    {channel.status === "active"
+                      ? "ativo"
+                      : channel.status === "archived"
+                        ? "arquivado"
+                        : "parado"}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <p className="eyebrow side-label">Biblioteca</p>
+            <button type="button" className="task-item" onClick={() => navigate("pages")}>
+              <Icon name="page" />
+              <span>Páginas</span>
             </button>
           </div>
-          <div>
-            {channels.map((channel) => (
-              <button
-                key={channel.id}
-                type="button"
-                className="task-item"
-                aria-current={channelId === channel.id && view === "channel" ? "true" : undefined}
-                onClick={() => {
-                  setChannelId(channel.id);
-                  navigate("channel");
-                }}
-              >
-                <i className={`dot ${channel.status === "active" ? "s-run" : "s-idle"}`} />
-                <span># {channel.name}</span>
-                <span className="meta">
-                  {channel.status === "active"
-                    ? "ativo"
-                    : channel.status === "archived"
-                      ? "arquivado"
-                      : "parado"}
-                </span>
-              </button>
-            ))}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              borderTop: "1px solid var(--border)",
+              padding: "4px 8px 12px",
+            }}
+          >
+            <button type="button" className="task-item" onClick={() => setPalette({})}>
+              <Icon name="search" />
+              <span>Buscar…</span>
+              <span className="meta">⌘K</span>
+            </button>
+            <UpdateButton />
           </div>
-          <p className="eyebrow side-label">Biblioteca</p>
-          <button type="button" className="task-item" onClick={() => navigate("pages")}>
-            <Icon name="page" />
-            <span>Páginas</span>
-          </button>
-        </div>
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            borderTop: "1px solid var(--border)",
-            padding: "4px 8px 12px",
-          }}
-        >
-          <button type="button" className="task-item" onClick={() => setPalette({})}>
-            <Icon name="search" />
-            <span>Buscar…</span>
-            <span className="meta">⌘K</span>
-          </button>
-          <UpdateButton />
-        </div>
-      </aside>
+        </aside>
 
-      {sideOpen && (
-        <button
-          type="button"
-          className="side-scrim"
-          aria-label="Fechar painel de bots"
-          onClick={() => setSideOpen(false)}
-        />
-      )}
+        {sideOpen && (
+          <button
+            type="button"
+            className="side-scrim"
+            aria-label="Fechar painel de bots"
+            onClick={() => setSideOpen(false)}
+          />
+        )}
 
-      <main className="main">
-        {error ? (
-          <section className="view on">
-            <div className="empty">
-              <h2>Não foi possível conectar ao UpBot</h2>
-              <p className="meta">{error}</p>
-            </div>
-          </section>
-        ) : !clientReady ? (
-          <section className="view on">
-            <div className="empty">
-              <h2>Conectando ao UpBot…</h2>
-            </div>
-          </section>
-        ) : view === "chat" ? (
-          selected ? (
-            <ChatView
-              key={selected.id}
-              client={client}
-              agent={selected}
-              overview={selectedOverview}
-              onOpenSettings={() => navigate("agent-settings")}
-              onOpenApps={() => {
-                setSettingsTab("apps");
-                navigate("settings");
-              }}
-              notice={notice}
-              onNoticeDismiss={() => setNotice(null)}
-              onPanelToggle={togglePanel}
+        <main className="main">
+          {error ? (
+            <section className="view on">
+              <div className="empty">
+                <h2>Não foi possível conectar ao UpBot</h2>
+                <p className="meta">{error}</p>
+              </div>
+            </section>
+          ) : !clientReady ? (
+            <section className="view on">
+              <div className="empty">
+                <h2>Conectando ao UpBot…</h2>
+              </div>
+            </section>
+          ) : view === "chat" ? (
+            selected ? (
+              <ChatView
+                key={selected.id}
+                client={client}
+                agent={selected}
+                overview={selectedOverview}
+                onOpenSettings={() => navigate("agent-settings")}
+                onOpenApps={() => {
+                  setSettingsTab("apps");
+                  navigate("settings");
+                }}
+                notice={notice}
+                onNoticeDismiss={() => setNotice(null)}
+                onPanelToggle={togglePanel}
+              />
+            ) : (
+              <section className="view on">
+                <div className="empty">
+                  <h2>Escolha um bot ou crie um novo.</h2>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => setCreating(true)}
+                  >
+                    Criar bot
+                  </button>
+                </div>
+              </section>
+            )
+          ) : view === "agents" ? (
+            <AgentsView
+              agents={agents}
+              overview={overview}
+              onCreate={() => setCreating(true)}
+              onOpen={openAgent}
             />
+          ) : view === "tasks" ? (
+            <TasksView agents={agents} overview={overview} onOpen={openAgent} />
+          ) : view === "settings" ? (
+            <SettingsView
+              client={client}
+              agents={agents}
+              selected={settingsTab}
+              onSelect={setSettingsTab}
+            />
+          ) : view === "channel-new" ? (
+            <section className="view on">
+              <ChannelCreateForm
+                agents={agents}
+                onSubmit={createChannel}
+                onCancel={() => navigate("chat")}
+              />
+            </section>
+          ) : view === "channel" && selectedChannel ? (
+            <section className="view on">
+              <ChannelView client={client} channel={selectedChannel} agents={agents} />
+            </section>
+          ) : view === "pages" ? (
+            <section className="view on">
+              <PagesView client={client} agents={agents} onOpenBot={openAgent} />
+            </section>
+          ) : view === "agent-settings" && selected ? (
+            <section className="view on">
+              <div className="page agent-settings-page">
+                <div className="page-inner">
+                  <div className="page-top">
+                    <div>
+                      <h1>{selected.name}</h1>
+                      <p>Configurações do bot</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => navigate("chat")}
+                    >
+                      Voltar à conversa
+                    </button>
+                  </div>
+                  <AvatarEditor
+                    agent={selected}
+                    onSave={(avatar) => updateAgent(selected.id, { avatar })}
+                  />
+                  <AgentSettings
+                    key={selected.id}
+                    client={client}
+                    agent={selected}
+                    onUpdate={updateAgent}
+                    onDelete={deleteAgent}
+                  />
+                  <MemoriesPanel client={client} agentId={selected.id} />
+                  <RoutinesPanel client={client} agentId={selected.id} />
+                  <ComputerUsePanel client={client} agentId={selected.id} />
+                </div>
+              </div>
+            </section>
           ) : (
             <section className="view on">
               <div className="empty">
                 <h2>Escolha um bot ou crie um novo.</h2>
-                <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
-                  Criar bot
-                </button>
               </div>
             </section>
-          )
-        ) : view === "agents" ? (
-          <AgentsView
-            agents={agents}
-            overview={overview}
-            onCreate={() => setCreating(true)}
-            onOpen={openAgent}
-          />
-        ) : view === "tasks" ? (
-          <TasksView agents={agents} overview={overview} onOpen={openAgent} />
-        ) : view === "settings" ? (
-          <SettingsView
+          )}
+        </main>
+
+        {view === "chat" && selected && selectedOverview && (
+          <RunPanel
             client={client}
-            agents={agents}
-            selected={settingsTab}
-            onSelect={setSettingsTab}
+            agent={selected}
+            overview={selectedOverview}
+            onClose={togglePanel}
+            onOpenApps={() => {
+              setSettingsTab("apps");
+              navigate("settings");
+            }}
           />
-        ) : view === "channel-new" ? (
-          <section className="view on">
-            <ChannelCreateForm
-              agents={agents}
-              onSubmit={createChannel}
-              onCancel={() => navigate("chat")}
-            />
-          </section>
-        ) : view === "channel" && selectedChannel ? (
-          <section className="view on">
-            <ChannelView client={client} channel={selectedChannel} agents={agents} />
-          </section>
-        ) : view === "pages" ? (
-          <section className="view on">
-            <PagesView client={client} agents={agents} onOpenBot={openAgent} />
-          </section>
-        ) : view === "agent-settings" && selected ? (
-          <section className="view on">
-            <div className="page agent-settings-page">
-              <div className="page-inner">
-                <div className="page-top">
-                  <div>
-                    <h1>{selected.name}</h1>
-                    <p>Configurações do bot</p>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => navigate("chat")}
-                  >
-                    Voltar à conversa
-                  </button>
-                </div>
-                <AvatarEditor
-                  agent={selected}
-                  onSave={(avatar) => updateAgent(selected.id, { avatar })}
-                />
-                <AgentSettings
-                  key={selected.id}
-                  client={client}
-                  agent={selected}
-                  onUpdate={updateAgent}
-                  onDelete={deleteAgent}
-                />
-                <MemoriesPanel client={client} agentId={selected.id} />
-                <RoutinesPanel client={client} agentId={selected.id} />
-                <ComputerUsePanel client={client} agentId={selected.id} />
-              </div>
-            </div>
-          </section>
-        ) : (
-          <section className="view on">
-            <div className="empty">
-              <h2>Escolha um bot ou crie um novo.</h2>
-            </div>
-          </section>
         )}
-      </main>
 
-      {view === "chat" && selected && selectedOverview && (
-        <RunPanel
-          client={client}
-          agent={selected}
-          overview={selectedOverview}
-          onClose={togglePanel}
-          onOpenApps={() => {
-            setSettingsTab("apps");
-            navigate("settings");
-          }}
-        />
-      )}
-
-      {creating && (
-        <CreateAgentDialog
-          client={client}
-          onSubmit={createAgent}
-          onCancel={() => setCreating(false)}
-        />
-      )}
-      {palette && (
-        <CommandPalette
-          items={paletteItems}
-          {...(palette.group ? { initialGroup: palette.group } : {})}
-          onClose={() => setPalette(null)}
-        />
-      )}
-    </div>
+        {creating && (
+          <CreateAgentDialog
+            client={client}
+            onSubmit={createAgent}
+            onCancel={() => setCreating(false)}
+          />
+        )}
+        {palette && (
+          <CommandPalette
+            items={paletteItems}
+            {...(palette.group ? { initialGroup: palette.group } : {})}
+            onClose={() => setPalette(null)}
+          />
+        )}
+      </div>
+    </>
   );
 }
 

@@ -46,7 +46,10 @@ export function UsageBar({
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   };
   return (
-    <div className="flex items-center gap-2 text-xs text-zinc-500" title={error ?? undefined}>
+    <div
+      className="num flex flex-wrap items-center gap-2 text-xs text-zinc-500"
+      title={error ?? undefined}
+    >
       {pct !== null && (
         <span className="flex items-center gap-1">
           <span className="inline-block h-1.5 w-16 overflow-hidden rounded bg-zinc-800">
@@ -65,7 +68,7 @@ export function UsageBar({
       <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={compact}>
         Compactar
       </button>
-      {error && <span className="text-red-400">!</span>}
+      {error && <span role="alert">Erro ao compactar</span>}
     </div>
   );
 }
