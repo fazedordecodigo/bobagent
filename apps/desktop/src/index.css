@@ -38,6 +38,8 @@ button.bg-sky-600, button.bg-sky-700 {
 }
 
 @theme {
+  --color-white: var(--surface);
+  --color-black: var(--fg);
   --color-zinc-50: var(--fg);
   --color-zinc-100: var(--fg);
   --color-zinc-200: var(--fg);

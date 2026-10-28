@@ -24,6 +24,14 @@
   --accent:    #2a67bd;  /* Azul UpBot — símbolo + 1 ação principal por tela */
   --sky:       #e4f2ff;  /* Céu — SÓ peças de marca, nunca na UI do produto */
   --on-accent: #ffffff;
+  --ink: #000000;
+  --preview-light-bg: #ffffff;
+  --preview-light-fg: #0e1217;
+  --preview-light-border: #e2e5e8;
+  --preview-dark-bg: #0e1624;
+  --preview-dark-surface: #171f2e;
+  --preview-dark-fg: #eff2f6;
+  --preview-dark-border: #2b3341;
 
   /* ── Estado (cada cor presa a um estado, nunca decoração) ── */
   --st-run:  #0094a2;  /* Em execução */
