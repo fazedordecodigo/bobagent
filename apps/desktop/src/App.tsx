@@ -21,6 +21,7 @@ import { TABS, ToolBody, type ToolTab } from "./components/ToolsView";
 import { UpdateButton } from "./components/UpdateButton";
 import { useOverview } from "./hooks/useOverview";
 import { DaemonClient } from "./lib/daemon";
+import { nativeCommand } from "./lib/native";
 import { mod } from "./lib/platform";
 import { useThemePref } from "./lib/theme";
 import { MonoAv, mono, Pill, role, type UiStatus } from "./lib/ui";
@@ -195,7 +196,7 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (!("__TAURI_INTERNALS__" in window)) return;
+    if (!clientReady || !("__TAURI_INTERNALS__" in window)) return;
     let disposed = false;
     let unlisten: (() => void) | undefined;
     void listen<string>("upbot://navigate", ({ payload }) => {
@@ -211,14 +212,17 @@ export default function App() {
     })
       .then((off) => {
         if (disposed) off();
-        else unlisten = off;
+        else {
+          unlisten = off;
+          return nativeCommand("main_ready");
+        }
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
     return () => {
       disposed = true;
       unlisten?.();
     };
-  }, [navigate, openAgent]);
+  }, [clientReady, navigate, openAgent]);
 
   useEffect(() => {
     if (!clientReady || !agents.length) return;

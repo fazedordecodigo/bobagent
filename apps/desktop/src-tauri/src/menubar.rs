@@ -14,6 +14,43 @@ type TrayRect = (tauri::PhysicalPosition<f64>, tauri::PhysicalSize<f64>);
 struct MenubarState {
     blurred_at: Mutex<Option<Instant>>,
     tray_rect: Mutex<Option<TrayRect>>,
+    navigation: Mutex<MainNavigation>,
+}
+
+#[derive(Default)]
+struct MainNavigation {
+    ready: bool,
+    pending: Option<String>,
+}
+
+impl MainNavigation {
+    fn request(&mut self, view: String) -> Option<String> {
+        if self.ready {
+            Some(view)
+        } else {
+            self.pending = Some(view);
+            None
+        }
+    }
+
+    fn mounted(&mut self) -> Option<String> {
+        self.ready = true;
+        self.pending.take()
+    }
+}
+
+fn keep_main_window(window: &tauri::WebviewWindow) {
+    let handle = window.app_handle().clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            if let Some(window) = handle.get_webview_window("main") {
+                if let Err(error) = window.hide() {
+                    log::warn!("could not hide main window: {error}");
+                }
+            }
+        }
+    });
 }
 
 fn menu_position(
@@ -123,6 +160,9 @@ fn toggle(app: &AppHandle) -> tauri::Result<()> {
 
 pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(MenubarState::default());
+    if let Some(window) = app.get_webview_window("main") {
+        keep_main_window(&window);
+    }
     let window = WebviewWindowBuilder::new(
         app,
         WINDOW_LABEL,
@@ -233,14 +273,58 @@ pub fn menubar_hide(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn open_main(app: AppHandle, view: Option<String>) -> Result<(), String> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or("Main window not found")?;
+pub async fn open_main(app: AppHandle, view: Option<String>) -> Result<(), String> {
+    let existing = app.get_webview_window("main");
+    let navigation = {
+        let state = app.state::<MenubarState>();
+        let mut navigation = state.navigation.lock().unwrap();
+        if existing.is_none() {
+            navigation.ready = false;
+        }
+        view.and_then(|view| navigation.request(view))
+    };
+    let window = match existing {
+        Some(window) => window,
+        None => {
+            let config = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|window| window.label == "main")
+                .ok_or("Main window configuration not found")?;
+            let window = WebviewWindowBuilder::from_config(&app, config)
+                .map_err(|error| error.to_string())?
+                .visible(false)
+                .build()
+                .map_err(|error| error.to_string())?;
+            keep_main_window(&window);
+            window
+        }
+    };
     window.unminimize().map_err(|error| error.to_string())?;
     window.show().map_err(|error| error.to_string())?;
     menubar_hide(app)?;
     window.set_focus().map_err(|error| error.to_string())?;
+    if let Some(view) = navigation {
+        window
+            .emit("upbot://navigate", view)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn main_ready(app: AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("Only the main window can receive navigation".into());
+    }
+    let view = app
+        .state::<MenubarState>()
+        .navigation
+        .lock()
+        .unwrap()
+        .mounted();
     if let Some(view) = view {
         window
             .emit("upbot://navigate", view)
@@ -257,6 +341,19 @@ pub fn quit_app(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn navigation_waits_for_mount_and_delivers_the_latest_view_once() {
+        let mut navigation = MainNavigation::default();
+        assert_eq!(navigation.request("apps".into()), None);
+        assert_eq!(navigation.request("bot-id".into()), None);
+        assert_eq!(navigation.mounted(), Some("bot-id".into()));
+        assert_eq!(navigation.mounted(), None);
+        assert_eq!(navigation.request("apps".into()), Some("apps".into()));
+        navigation.ready = false;
+        assert_eq!(navigation.request("settings".into()), None);
+        assert_eq!(navigation.mounted(), Some("settings".into()));
+    }
 
     fn position(
         tray: Option<(f64, f64)>,

@@ -173,6 +173,7 @@ fn main() {
             menubar::set_tray_count,
             menubar::menubar_hide,
             menubar::open_main,
+            menubar::main_ready,
             menubar::quit_app
         ])
         .build(tauri::generate_context!())
