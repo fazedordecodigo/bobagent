@@ -31,6 +31,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           { name: "create_note", description: "Create a note", inputSchema: { type: "object" } },
           ...(process.env.FAKE_APP_PERMISSIONS
             ? [
+                { name: "get_note", description: "Read a note", inputSchema: { type: "object" } },
                 {
                   name: "send_message",
                   description: "Send a message",
@@ -46,7 +47,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   if (m.method === "tools/call") {
     const p = m.params as { name: string; arguments: { text?: string } };
     const text =
-      p.name === "echo"
+      p.name === "echo" || p.name === "get_note"
         ? `echo:${p.arguments.text}`
         : p.name === "create_note"
           ? "note-created"

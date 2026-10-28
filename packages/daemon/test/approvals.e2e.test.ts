@@ -102,7 +102,12 @@ describe("approvals e2e", () => {
   });
 
   test("reads run without asking; app writes ask first and can be approved or declined", async () => {
-    expect(await tool(a, "notes-echo", { text: "x" })).toBe("tool-ok:echo:x");
+    expect(await tool(a, "notes-get_note", { text: "x" })).toBe("tool-ok:echo:x");
+    const unknown = await withApproval("notes-echo", { text: "unknown" }, (ap) =>
+      c.request("approvals.respond", { id: ap.id, decision: "approve" }),
+    );
+    expect(unknown.approval.permission).toBe("write");
+    expect(unknown.text).toBe("tool-ok:echo:unknown");
     const ok = await withApproval("notes-create_note", { title: "t" }, (ap) =>
       c.request("approvals.respond", { id: ap.id, decision: "approve" }),
     );
@@ -164,7 +169,7 @@ describe("approvals e2e", () => {
     );
     expect(write.approval.tool).toBe("notes-create_note");
     expect(write.text).toBe("tool-ok:note-created");
-    expect(await tool(a, "notes-echo", { text: "read" })).toBe("tool-ok:echo:read");
+    expect(await tool(a, "notes-get_note", { text: "read" })).toBe("tool-ok:echo:read");
     expect(await tool(a, "list_agents")).toContain("A");
 
     await c.request("approvals.setRules", {

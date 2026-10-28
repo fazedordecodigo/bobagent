@@ -389,6 +389,35 @@ test("app requests, permissions dialog and sensitive conversation decisions stay
   }
 }, 60000);
 
+test("group header owner selection and nested actions remain clickable in its drag region", async () => {
+  const members = (await rpc.request("agents.list", {})) as Agent[];
+  const other = members.find((member) => member.id !== bot.id)!;
+  const channel = (await rpc.request("channels.create", {
+    name: "Revisão em grupo",
+    memberIds: [bot.id, other.id],
+    ownerId: bot.id,
+  })) as { id: string };
+  await page.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+  await page.getByRole("button", { name: "Revisão em grupo", exact: false }).click();
+  const header = page.locator(".channel-head");
+  const owner = header.getByRole("combobox", { name: "Dono" });
+  await owner.click();
+  await page.keyboard.press("Escape");
+  await owner.selectOption(other.id);
+  let ownerId: string | undefined;
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const channels = (await rpc.request("channels.list", {})) as { id: string; ownerId: string }[];
+    ownerId = channels.find((item) => item.id === channel.id)?.ownerId;
+    if (ownerId === other.id) break;
+    await Bun.sleep(20);
+  }
+  expect(ownerId).toBe(other.id);
+  await header.getByRole("button", { name: "Parar", exact: true }).click();
+  await header.getByRole("button", { name: "Retomar", exact: true }).waitFor();
+  const channels = (await rpc.request("channels.list", {})) as { id: string; status: string }[];
+  expect(channels.find((item) => item.id === channel.id)?.status).toBe("stopped");
+}, 15000);
+
 test("capture matching prototype states when visual verification is requested", async () => {
   if (!out || !process.env.PHASE2_PROTOTYPE) return;
   const prototype = await browser.newPage({ viewport: { width: 1440, height: 1000 } });

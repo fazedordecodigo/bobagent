@@ -45,7 +45,8 @@ Migration 19 adds `permissions_json`: `read | write | send | pay | book | del` m
 Sensitive kinds (send/pay/book/del) reject allow in both protocol schemas and AppsService.
 `apps.connect/update` accept partial permissions. `src/app-permissions.ts` classifies the
 operation after `<slug>-` by name, with delete/payment/booking/send verbs before other
-write verbs, otherwise read. This is a naming heuristic, not argument or semantic inspection.
+write verbs. Only explicit read verbs classify as read; unknown operations fail closed to write.
+This is a naming heuristic, not argument or semantic inspection.
 The Apps permissions dialog edits stored levels; disconnect confirms removal of saved
 secrets, while enable/disable remains reversible. No account or last-used data is invented.
 Grok rejects `__` in MCP tool names because it uses that separator to qualify server and tool names.
@@ -58,6 +59,7 @@ Grok rejects `__` in MCP tool names because it uses that separator to qualify se
 only for read/write, ask creates an approval. Explicit ask rules still require review;
 neither specific nor wildcard allow rules bypass app permissions. Sensitive app tools
 always ask unless off (then deny). App-tool approvals carry appId, appName and permission.
+Unknown operations use write (ask by default), never the default read allow.
 For app requests, `task` approves once and grants the same app+kind for the current turn
 only (non-sensitive kinds); turn end clears grants. `always` sets a non-sensitive app
 kind to allow and returns previousLevel for undo via apps.update. For sensitive kinds,
@@ -454,7 +456,7 @@ configs, so it does not reflect stock defaults. Gemini's config path is unverifi
 - `bun run dev` — build the sidecar, then `tauri dev` (Vite on :1420).
 - `bun run build:app` — `tauri build --debug --bundles app` ->
   `apps/desktop/src-tauri/target/debug/bundle/macos/UpBot.app`.
-- `bun run test` — `bun test packages/daemon packages/host` (daemon e2e: spawns the real daemon).
+- `bun run test` — `bun test packages/daemon packages/host apps/desktop/test` (daemon e2e and desktop browser tests).
 - `bun run lint` — `biome check .`
 - `bun run typecheck` — `tsc -p` for protocol, daemon, relay, host, desktop (sequential).
 - `cd apps/desktop/src-tauri && cargo check` — Rust side.

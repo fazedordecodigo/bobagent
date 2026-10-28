@@ -101,7 +101,7 @@
     .view { display: none; flex-direction: column; min-height: 0; flex: 1; }
     .view.on { display: flex; }
     .main-head { height: 52px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 20px; border-bottom: 1px solid var(--border); }
-    .main-head[data-tauri-drag-region] > :not(button):not(.seg) { pointer-events: none; }
+    .main-head[data-tauri-drag-region] > :is(.mono-av, .title, .status) { pointer-events: none; }
     .main-head .title { min-width: 0; flex: 1; }
     .main-head .title h2 { font-size: 16px; }
     .main-head .title p { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

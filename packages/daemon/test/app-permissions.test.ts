@@ -15,7 +15,29 @@ test("classifier recognizes sensitive verbs before general writes and ignores th
     del: ["delete", "remove", "destroy", "trash"],
     pay: ["pay", "charge", "refund", "transfer", "payout", "purchase"],
     book: ["book", "reserve"],
-    send: ["send", "post", "publish", "invite", "reply", "forward", "email", "message"],
+    send: [
+      "send",
+      "post",
+      "publish",
+      "invite",
+      "reply",
+      "forward",
+      "email",
+      "message",
+      "dispatch",
+      "deliver",
+      "notify",
+      "broadcast",
+      "sms",
+      "text",
+      "chat",
+      "push",
+      "share",
+      "comment",
+      "dm",
+      "mail",
+      "tweet",
+    ],
     write: [
       "create",
       "update",
@@ -40,16 +62,43 @@ test("classifier recognizes sensitive verbs before general writes and ignores th
       expect(classifyAppTool(`read_app-${verb}_item`)).toBe(kind as AppPermissionKind);
       expect(classifyAppTool(`read_app-${verb.toUpperCase()}Item`)).toBe(kind as AppPermissionKind);
     }
+  for (const tool of ["send_app-list", "pay_app-get", "write_app-search"])
+    expect(classifyAppTool(tool)).toBe("read");
+  for (const verb of [
+    "get",
+    "list",
+    "search",
+    "read",
+    "query",
+    "fetch",
+    "retrieve",
+    "find",
+    "describe",
+    "lookup",
+    "view",
+    "show",
+    "count",
+    "check",
+    "status",
+  ]) {
+    expect(classifyAppTool(`app-${verb}_items`)).toBe("read");
+    expect(classifyAppTool(`app-${verb}Items`)).toBe("read");
+  }
   for (const tool of [
-    "send_app-list",
-    "pay_app-get",
-    "write_app-search",
     "app-echo",
     "app-whoami",
+    "app-frobnicate",
+    "app-getaway",
+    "app-do_get",
     "app-",
     "",
   ])
-    expect(classifyAppTool(tool)).toBe("read");
+    expect(classifyAppTool(tool)).toBe("write");
+  expect(classifyAppTool("app-dispatch_message")).toBe("send");
+  expect(classifyAppTool("app-deliver_notification")).toBe("send");
+  expect(classifyAppTool("app-get_and_delete")).toBe("del");
+  expect(classifyAppTool("app-send_payment")).toBe("pay");
+  expect(classifyAppTool("app-send_booking")).toBe("book");
   expect(classifyAppTool("app-create_and_send")).toBe("send");
   expect(classifyAppTool("app-update_reserve")).toBe("book");
 });

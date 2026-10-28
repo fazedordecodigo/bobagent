@@ -127,6 +127,7 @@ export class ApprovalService {
   }
 
   private finish(id: string, status: Approval["status"], value?: string): Approval | null {
+    if (status === "expired" && this.responding.has(id)) return null;
     const a = this.pending.get(id);
     if (!a) return null;
     this.pending.delete(id);
@@ -147,7 +148,15 @@ export class ApprovalService {
     if (!a) throw new RpcError("not_found", "approval not found or no longer pending");
     if (this.responding.has(p.id))
       throw new RpcError("busy", "approval decision is already being saved");
+    if (a.expiresAt <= Date.now()) {
+      this.finish(a.id, "expired");
+      throw new RpcError("not_found", "approval not found or no longer pending");
+    }
+    if (a.kind === "secret" && p.decision !== "deny" && !p.value)
+      throw new RpcError("bad_request", "enter the secret value");
     this.responding.add(p.id);
+    const waiter = this.waiters.get(p.id);
+    if (waiter) clearTimeout(waiter.timer);
     try {
       if (a.kind === "secret") {
         if (p.decision === "deny") return this.finish(a.id, "denied")!;
@@ -169,7 +178,12 @@ export class ApprovalService {
         if (p.decision === "always" && !isSensitivePermission(a.permission)) {
           const app = this.apps.get(a.appId);
           a.previousLevel = app.permissions[a.permission];
-          await this.apps.update({ id: a.appId, permissions: { [a.permission]: "allow" } });
+          try {
+            await this.apps.update({ id: a.appId, permissions: { [a.permission]: "allow" } });
+          } catch (error) {
+            this.apps.restorePermission(a.appId, a.permission, a.previousLevel);
+            throw error;
+          }
         }
         if (p.decision === "task" && a.turnId && !isSensitivePermission(a.permission)) {
           const key = `${a.agentId}:${a.turnId}`;
@@ -184,6 +198,9 @@ export class ApprovalService {
         ]);
       }
       return this.finish(a.id, p.decision === "deny" ? "denied" : "approved")!;
+    } catch (error) {
+      this.finish(a.id, "denied");
+      throw error;
     } finally {
       this.responding.delete(p.id);
     }

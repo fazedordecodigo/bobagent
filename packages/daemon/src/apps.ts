@@ -7,7 +7,12 @@ import {
 } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import type { AppCatalogEntry, ConnectedApp } from "@upbot/protocol";
+import type {
+  AppCatalogEntry,
+  AppPermissionKind,
+  AppPermissionLevel,
+  ConnectedApp,
+} from "@upbot/protocol";
 import { AppPermissions, defaultAppPermissions } from "@upbot/protocol";
 import { RpcError } from "./runtime/agent-runtime";
 import type { Vault } from "./vault";
@@ -322,6 +327,16 @@ export class AppsService {
     this.changed();
     if (enabled) void this.ensure(p.id).catch(() => {});
     return this.get(p.id);
+  }
+
+  restorePermission(id: string, kind: AppPermissionKind, previousLevel: AppPermissionLevel): void {
+    const permissions = this.get(id).permissions;
+    if (permissions[kind] !== "allow" || previousLevel === "allow") return;
+    const restored = AppPermissions.parse({ ...permissions, [kind]: previousLevel });
+    this.db
+      .query("UPDATE connected_apps SET permissions_json = ? WHERE id = ?")
+      .run(JSON.stringify(restored), id);
+    this.changed();
   }
 
   async delete(id: string): Promise<void> {
