@@ -23,6 +23,7 @@ import { UpdateButton } from "./components/UpdateButton";
 import { useLayerFocus, useMediaQuery } from "./hooks/useLayerFocus";
 import { useOverview } from "./hooks/useOverview";
 import { DaemonClient } from "./lib/daemon";
+import { moveControlFocus } from "./lib/keyboard";
 import { nativeCommand } from "./lib/native";
 import { useNativeNotifications } from "./lib/native-notifications";
 import { mod } from "./lib/platform";
@@ -1069,12 +1070,18 @@ function SettingsView({
               <p>Preferências desta conta, aplicadas em todos os seus bots.</p>
             </div>
           </div>
-          <div className="filters" role="tablist" aria-label="Configurações">
+          <div
+            className="filters"
+            role="tablist"
+            aria-label="Configurações"
+            onKeyDown={moveControlFocus}
+          >
             <button
               type="button"
               className="chip"
               role="tab"
               aria-selected={selected === "general"}
+              tabIndex={selected === "general" ? 0 : -1}
               onClick={() => onSelect("general")}
             >
               Geral
@@ -1086,6 +1093,7 @@ function SettingsView({
                 className="chip"
                 role="tab"
                 aria-selected={selected === tab.id}
+                tabIndex={selected === tab.id ? 0 : -1}
                 title={tab.hint}
                 onClick={() => onSelect(tab.id)}
               >
@@ -1297,7 +1305,9 @@ function CreateAgentDialog({
 
   useEffect(() => {
     const dialog = dialogRef.current;
+    const previous = document.activeElement as HTMLElement | null;
     if (dialog && !dialog.open) dialog.showModal();
+    return () => previous?.focus();
   }, []);
 
   return (
