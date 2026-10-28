@@ -8,7 +8,11 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { permissionActions, permissionLabels } from "../lib/app-permissions";
 import { approvalAction, decideApproval } from "../lib/approval-decisions";
-import { describeApproval } from "../lib/approval-description";
+import {
+  describeApproval,
+  fullApprovalArguments,
+  requiresFullReview,
+} from "../lib/approval-description";
 import type { DaemonClient } from "../lib/daemon";
 import { btnCls, inputCls } from "./AgentSettings";
 import { useApprovalFeedback } from "./ApprovalFeedback";
@@ -118,7 +122,17 @@ export function ApprovalCard({
         )}
         <div className={s.title}>{copy ? copy.description : a.title}</div>
         {copy?.context && <div className={s.meta}>{copy.context}</div>}
-        {copy?.arguments && <div className={s.arguments}>{copy.arguments}</div>}
+        {requiresFullReview(a) ? (
+          <textarea
+            className={s.detail}
+            rows={8}
+            readOnly
+            aria-label="Parâmetros completos"
+            value={fullApprovalArguments(a.detail)}
+          />
+        ) : (
+          copy?.arguments && <div className={s.arguments}>{copy.arguments}</div>
+        )}
         {!copy && a.detail && <div>{a.detail}</div>}
         {a.kind === "takeover" && a.status === "pending" && (
           <div className={s.meta}>

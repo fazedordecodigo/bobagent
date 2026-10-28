@@ -221,7 +221,7 @@ export class ApprovalService {
     if (app?.permissions[permission] === "off")
       throw new Error(`${app.name} não permite ${permission}`);
     if (this.decide(agentId, tool, isAppTool) === "allow") return;
-    const detail = JSON.stringify(args ?? {}, null, 2).slice(0, 4000);
+    const detail = JSON.stringify(args ?? {}, null, 2);
     const { approval } = await this.open(agentId, {
       kind: "tool",
       title: `Run ${tool}`,

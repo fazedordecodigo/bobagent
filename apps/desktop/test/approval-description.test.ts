@@ -1,6 +1,32 @@
 import { expect, test } from "bun:test";
 import type { AppPermissionKind, Approval } from "@upbot/protocol";
-import { approvalArguments, describeApproval } from "../src/lib/approval-description";
+import {
+  approvalArguments,
+  describeApproval,
+  fullApprovalArguments,
+  requiresFullReview,
+} from "../src/lib/approval-description";
+
+test("full review preserves every parameter, list entry and long value, including malformed data", () => {
+  const args = {
+    to: ["Ana", "Bia", "Caio", "Dani"],
+    body: "Texto".repeat(1500),
+    total: 20,
+    currency: "BRL",
+    attachment: { names: ["a.pdf", "b.pdf"] },
+  };
+  expect(JSON.parse(fullApprovalArguments(JSON.stringify(args)))).toEqual(args);
+  for (const detail of ["", "{}", "  "])
+    expect(fullApprovalArguments(detail)).toBe("Sem parâmetros.");
+  expect(fullApprovalArguments('{"broken":')).toBe('{"broken":');
+  for (const permission of ["send", "pay", "book", "del"] as const)
+    expect(requiresFullReview({ ...approval, permission })).toBe(true);
+  expect(requiresFullReview(approval)).toBe(false);
+  for (const tool of ["send_email", "pay_invoice", "delete_file", "unknown"])
+    expect(requiresFullReview({ ...approval, appId: undefined, permission: undefined, tool })).toBe(
+      true,
+    );
+});
 
 const approval: Approval = {
   id: "approval",

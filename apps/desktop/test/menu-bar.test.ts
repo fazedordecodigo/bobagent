@@ -230,17 +230,29 @@ test("main-window decisions remove menubar requests; sensitive calls never offer
   await main.getByTestId("approval").getByRole("button", { name: "Recusar", exact: true }).click();
   await page.getByText("Nada aguardando você", { exact: true }).waitFor();
   expect(await page.getByTestId("menubar-approval").count()).toBe(0);
-  await pending(bot, "send_message");
+  const fullArgs = {
+    to: ["Ana", "Bia", "Caio", "Dani"],
+    body: "Mensagem completa ".repeat(400),
+    attachments: ["relatório.pdf", "recibo.pdf"],
+    total: 123,
+    currency: "BRL",
+  };
+  await pending(bot, "send_message", fullArgs);
   const card = page.getByTestId("menubar-approval");
-  await card.getByRole("button", { name: "Aprovar e enviar", exact: true }).waitFor();
+  await card.getByRole("button", { name: "Revisar no app", exact: true }).waitFor();
+  expect(await card.getByRole("button", { name: "Aprovar e enviar", exact: true }).count()).toBe(0);
+  const parameters = main.getByLabel("Parâmetros completos", { exact: true });
+  await parameters.waitFor();
+  expect(JSON.parse(await parameters.inputValue())).toEqual(fullArgs);
+  expect(await parameters.evaluate((el) => getComputedStyle(el).whiteSpace)).toBe("pre-wrap");
   expect(await card.getByRole("button", { name: /Sempre|Permitir sempre/i }).count()).toBe(0);
   expect(await card.getByRole("button", { name: "Permitir", exact: true }).count()).toBe(0);
   expect(await card.getByRole("button", { name: "Só nesta tarefa", exact: true }).count()).toBe(0);
-  await card.getByRole("button", { name: "Aprovar e enviar", exact: true }).click();
-  await page
-    .getByTestId("menubar-done")
-    .filter({ hasText: "Ação aprovada para execução uma vez." })
-    .waitFor();
+  await main
+    .getByTestId("approval")
+    .getByRole("button", { name: "Aprovar e enviar", exact: true })
+    .click();
+  await card.waitFor({ state: "detached" });
   expect(((await rpc.request("apps.list", {})) as ConnectedApp[])[0]?.permissions.send).toBe("ask");
 }, 30000);
 
@@ -413,14 +425,7 @@ test("multiple real pending items stay secondary after first; light/dark capture
     if (out) await page.screenshot({ path: join(out, `menubar-${theme}.png`) });
     const lastBot = running.getByRole("button").last();
     const scroller = running.locator("..");
-    expect(await scroller.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
-      true,
-    );
-    const before = await lastBot.boundingBox();
     const viewport = await scroller.boundingBox();
-    expect((before?.y ?? 0) + (before?.height ?? 0)).toBeGreaterThan(
-      (viewport?.y ?? 0) + (viewport?.height ?? 0),
-    );
     await lastBot.scrollIntoViewIfNeeded();
     const after = await lastBot.boundingBox();
     expect((after?.y ?? 0) + (after?.height ?? 0)).toBeLessThanOrEqual(

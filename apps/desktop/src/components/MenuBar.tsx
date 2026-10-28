@@ -1,15 +1,14 @@
-import {
-  type Agent,
-  type AgentStatusInfo,
-  type Approval,
-  type ApprovalDecision,
-  type EmailDraft,
-  isSensitivePermission,
+import type {
+  Agent,
+  AgentStatusInfo,
+  Approval,
+  ApprovalDecision,
+  EmailDraft,
 } from "@upbot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { permissionActions } from "../lib/app-permissions";
 import { type ApprovalResult, approvalAction, decideApproval } from "../lib/approval-decisions";
-import { describeApproval } from "../lib/approval-description";
+import { describeApproval, requiresFullReview } from "../lib/approval-description";
 import { DaemonClient } from "../lib/daemon";
 import { nativeCommand } from "../lib/native";
 import { useThemePref } from "../lib/theme";
@@ -302,7 +301,7 @@ export default function MenuBar() {
               );
             const a = row.approval;
             const copy = a.kind === "tool" ? describeApproval(a, nameOf(a.agentId)) : null;
-            const sensitive = a.permission && isSensitivePermission(a.permission);
+            const sensitive = requiresFullReview(a);
             const appTool = Boolean(a.appId && a.permission);
             const variant = a.id === firstPending ? "primary" : "secondary";
             const disabled = busy.includes(a.id);
@@ -327,7 +326,7 @@ export default function MenuBar() {
                   {!copy && a.detail && <p>{a.detail}</p>}
                   {sensitive && <p>Esta ação sempre pede aprovação.</p>}
                   <div className={s.actions}>
-                    {a.kind !== "tool" ? (
+                    {a.kind !== "tool" || sensitive ? (
                       <Button small variant={variant} onClick={() => open(a.agentId)}>
                         Revisar no app
                       </Button>
@@ -376,7 +375,7 @@ export default function MenuBar() {
                         )}
                       </>
                     )}
-                    {a.kind === "tool" && (
+                    {a.kind === "tool" && !sensitive && (
                       <Button small variant="ghost" onClick={() => open(a.agentId)}>
                         Revisar no app
                       </Button>
