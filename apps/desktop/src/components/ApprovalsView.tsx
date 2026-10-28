@@ -8,6 +8,11 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { permissionActions, permissionLabels } from "../lib/app-permissions";
 import { approvalAction, decideApproval } from "../lib/approval-decisions";
+import {
+  describeApproval,
+  fullApprovalArguments,
+  requiresFullReview,
+} from "../lib/approval-description";
 import type { DaemonClient } from "../lib/daemon";
 import { btnCls, inputCls } from "./AgentSettings";
 import { useApprovalFeedback } from "./ApprovalFeedback";
@@ -81,6 +86,7 @@ export function ApprovalCard({
   const appTool = Boolean(a.appId && a.permission);
   const sensitive = a.permission && isSensitivePermission(a.permission);
   const approveLabel = a.permission ? permissionActions[a.permission] : approvalAction(a.tool);
+  const copy = a.kind === "tool" ? describeApproval(a, botName) : null;
   return (
     <div className={s.card} data-testid="approval">
       <div className={s.head}>
@@ -114,12 +120,20 @@ export function ApprovalCard({
             Este tipo de ação sempre pede aprovação. Não é possível permitir sempre.
           </p>
         )}
-        <div className={s.title}>{a.kind === "tool" ? a.tool : a.title}</div>
-        {a.kind === "tool" ? (
-          <pre className={s.detail}>{a.detail}</pre>
+        <div className={s.title}>{copy ? copy.description : a.title}</div>
+        {copy?.context && <div className={s.meta}>{copy.context}</div>}
+        {requiresFullReview(a) ? (
+          <textarea
+            className={s.detail}
+            rows={8}
+            readOnly
+            aria-label="Parâmetros completos"
+            value={fullApprovalArguments(a.detail)}
+          />
         ) : (
-          a.detail && <div>{a.detail}</div>
+          copy?.arguments && <div className={s.arguments}>{copy.arguments}</div>
         )}
+        {!copy && a.detail && <div>{a.detail}</div>}
         {a.kind === "takeover" && a.status === "pending" && (
           <div className={s.meta}>
             Use a janela do navegador do UpBot para entrar na conta ou concluir a verificação.
@@ -208,13 +222,27 @@ export function ApprovalCard({
 }
 
 /** Pending approvals of one bot, shown above the composer. */
-export function ApprovalCards({ client, agentId }: { client: DaemonClient; agentId: string }) {
+export function ApprovalCards({
+  client,
+  agentId,
+  botName,
+}: {
+  client: DaemonClient;
+  agentId: string;
+  botName: string;
+}) {
   const pending = useApprovals(client, agentId).filter((a) => a.status === "pending");
   if (!pending.length) return null;
   return (
     <div className={s.cards}>
       {pending.map((a, index) => (
-        <ApprovalCard key={a.id} client={client} approval={a} primary={index === 0} />
+        <ApprovalCard
+          key={a.id}
+          client={client}
+          approval={a}
+          botName={botName}
+          primary={index === 0}
+        />
       ))}
     </div>
   );

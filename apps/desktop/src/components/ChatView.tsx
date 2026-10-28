@@ -269,7 +269,7 @@ export function ChatView({
             )}
           </div>
         )}
-        <ApprovalCards client={client} agentId={agent.id} />
+        <ApprovalCards client={client} agentId={agent.id} botName={agent.name} />
         <DraftCards client={client} agentId={agent.id} />
       </Composer>
     </div>

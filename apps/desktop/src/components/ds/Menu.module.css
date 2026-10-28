@@ -1,0 +1,6 @@
+.root { position: relative; }
+.menu { position: absolute; top: calc(100% + 4px); right: 0; width: 248px; padding: 5px; z-index: 10; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow-pop); }
+.menu button { width: 100%; min-height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 7px 9px; text-align: left; border-radius: var(--radius-sm); font-size: var(--fs-meta); }
+.menu button:hover { background: var(--fg-soft); }
+.menu button:focus-visible { outline: none; background: var(--fg); color: var(--bg); }
+.menu button:disabled { opacity: .45; cursor: not-allowed; }

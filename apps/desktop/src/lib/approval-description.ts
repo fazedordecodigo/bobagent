@@ -1,4 +1,23 @@
-import type { AppPermissionKind, Approval } from "@upbot/protocol";
+import { type AppPermissionKind, type Approval, isSensitivePermission } from "@upbot/protocol";
+
+export function requiresFullReview(approval: Approval) {
+  return (
+    approval.kind === "tool" &&
+    (!approval.appId || !approval.permission || isSensitivePermission(approval.permission))
+  );
+}
+
+export function fullApprovalArguments(detail: string) {
+  if (!detail.trim()) return "Sem parâmetros.";
+  try {
+    const value: unknown = JSON.parse(detail);
+    if (value && typeof value === "object" && !Array.isArray(value) && !Object.keys(value).length)
+      return "Sem parâmetros.";
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return detail;
+  }
+}
 
 const consequences: Record<AppPermissionKind, string> = {
   read: "ler informações",

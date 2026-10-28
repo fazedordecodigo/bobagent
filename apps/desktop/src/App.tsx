@@ -1,3 +1,4 @@
+import { listen } from "@tauri-apps/api/event";
 import type {
   Agent,
   AgentAvatar,
@@ -21,8 +22,10 @@ import { TABS, ToolBody, type ToolTab } from "./components/ToolsView";
 import { UpdateButton } from "./components/UpdateButton";
 import { useOverview } from "./hooks/useOverview";
 import { DaemonClient } from "./lib/daemon";
+import { nativeCommand } from "./lib/native";
 import { useNativeNotifications } from "./lib/native-notifications";
 import { mod } from "./lib/platform";
+import { useThemePref } from "./lib/theme";
 import { MonoAv, mono, Pill, role, type UiStatus } from "./lib/ui";
 
 type View =
@@ -91,22 +94,6 @@ function isAskMode(agent: Agent) {
     (agent.provider === "claude" && agent.config.mode === "plan") ||
     (agent.provider === "codex" && agent.config.mode === "read-only")
   );
-}
-
-function useThemePref() {
-  const [pref, setPref] = useState<ThemePreference>(() => {
-    const current = document.documentElement.dataset.themePref;
-    return current === "light" || current === "dark" ? current : "auto";
-  });
-  const setTheme = useCallback((next: ThemePreference) => {
-    const root = document.documentElement;
-    root.dataset.themePref = next;
-    const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    root.dataset.theme = next === "auto" ? (dark ? "dark" : "light") : next;
-    writeStorage("upbot.theme", next);
-    setPref(next);
-  }, []);
-  return [pref, setTheme] as const;
 }
 
 export default function App() {
@@ -221,6 +208,35 @@ export default function App() {
     [navigate, openAgent],
   );
   useNativeNotifications(client, clientReady, agents, reviewNotification, setError);
+
+  useEffect(() => {
+    if (!clientReady || !("__TAURI_INTERNALS__" in window)) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen<string>("upbot://navigate", ({ payload }) => {
+      const tab = TABS.find((item) => item.id === payload);
+      if (tab) {
+        setSettingsTab(tab.id);
+        navigate("settings");
+      } else if (RAIL_VIEWS.includes(payload as RailView) || payload === "pages") {
+        navigate(payload as View);
+      } else if (typeof payload === "string" && payload) {
+        openAgent(payload);
+      }
+    })
+      .then((off) => {
+        if (disposed) off();
+        else {
+          unlisten = off;
+          return nativeCommand("main_ready");
+        }
+      })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [clientReady, navigate, openAgent]);
 
   useEffect(() => {
     if (!clientReady || !agents.length) return;

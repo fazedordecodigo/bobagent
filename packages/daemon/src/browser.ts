@@ -37,6 +37,25 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
 
 type Json = Record<string, unknown>;
 
+export async function waitForBrowserPort(
+  read: () => string,
+  alive: () => boolean,
+  timeout = 20_000,
+) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline && alive()) {
+    try {
+      const contents = read();
+      if (contents.split("\n").length >= 2) return contents;
+    } catch (error) {
+      if (!["ENOENT", "EBUSY", "EPERM"].includes((error as NodeJS.ErrnoException).code ?? ""))
+        throw error;
+    }
+    await Bun.sleep(100);
+  }
+  throw new Error("the browser did not start");
+}
+
 function envValue(env: Record<string, string | undefined>, key: string): string | undefined {
   return Object.entries(env).find(([name]) => name.toLowerCase() === key.toLowerCase())?.[1];
 }
@@ -194,10 +213,10 @@ export class BrowserService {
       throw new Error(
         "no Chromium-based browser found (install Google Chrome or set UPBOT_BROWSER_PATH)",
       );
+    await this.close();
     mkdirSync(this.profileDir, { recursive: true });
     const portFile = join(this.profileDir, "DevToolsActivePort");
     rmSync(portFile, { force: true });
-    this.kill();
     const headless = process.env.UPBOT_BROWSER_HEADLESS === "1";
     this.proc = Bun.spawn(
       [
@@ -216,15 +235,17 @@ export class BrowserService {
         windowsHide: process.platform === "win32",
       },
     );
-    const deadline = Date.now() + 20_000;
-    while (!existsSync(portFile) || readFileSync(portFile, "utf8").split("\n").length < 2) {
-      if (Date.now() > deadline || this.proc.exitCode !== null) {
-        this.kill();
-        throw new Error("the browser did not start");
-      }
-      await Bun.sleep(100);
+    let contents: string;
+    try {
+      contents = await waitForBrowserPort(
+        () => readFileSync(portFile, "utf8"),
+        () => this.proc !== null && this.proc.exitCode === null,
+      );
+    } catch (error) {
+      await this.close();
+      throw error;
     }
-    const [port, path] = readFileSync(portFile, "utf8").split("\n");
+    const [port, path] = contents.split("\n");
     const cdp = await Cdp.connect(`ws://127.0.0.1:${port}${path}`);
     cdp.onClose = () => {
       this.cdp = null;
@@ -264,8 +285,11 @@ export class BrowserService {
     this.cdp = null;
     this.tabs.clear();
     if (proc) {
-      if ((await withTimeout(proc.exited, 5_000)) === null) this.kill(proc);
-      else if (this.proc === proc) this.proc = null;
+      if ((await withTimeout(proc.exited, 5_000)) === null) {
+        this.kill(proc);
+        if ((await withTimeout(proc.exited, 5_000)) === null)
+          throw new Error("the browser did not exit");
+      } else if (this.proc === proc) this.proc = null;
     }
     this.emit();
   }

@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod menubar;
 mod notifications;
 
 use rand::RngCore;
@@ -164,8 +165,11 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(shared)
         .setup(move |app| {
+            menubar::setup(app)?;
             notifications::setup(app.handle()).map_err(std::io::Error::other)?;
             if let Err(e) = spawn_daemon(app) {
                 let state = app.state::<SharedState>();
@@ -175,6 +179,11 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             daemon_connection,
+            menubar::set_tray_count,
+            menubar::menubar_hide,
+            menubar::open_main,
+            menubar::main_ready,
+            menubar::quit_app,
             notifications::notifications_initialize,
             notifications::notifications_post,
             notifications::notifications_remove,

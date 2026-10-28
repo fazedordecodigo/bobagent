@@ -3,26 +3,11 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { ApprovalFeedback } from "./components/ApprovalFeedback";
 import Kit from "./components/ds/Kit";
+import MenuBar from "./components/MenuBar";
+import { initializeTheme } from "./lib/theme";
 import "./index.css";
 
-(() => {
-  var p: string | null = null;
-  try {
-    p = localStorage.getItem("upbot.theme");
-  } catch {}
-  if (p !== "light" && p !== "dark") p = "auto";
-  document.documentElement.dataset.themePref = p;
-  const apply = () => {
-    const dark = matchMedia("(prefers-color-scheme: dark)").matches;
-    const preference = document.documentElement.dataset.themePref;
-    document.documentElement.dataset.theme =
-      preference === "auto" ? (dark ? "dark" : "light") : preference === "dark" ? "dark" : "light";
-  };
-  apply();
-  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-    if (document.documentElement.dataset.themePref === "auto") apply();
-  });
-})();
+initializeTheme();
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing application root");
@@ -34,9 +19,12 @@ function subscribeToHash(callback: () => void) {
 
 function Root() {
   const hash = useSyncExternalStore(subscribeToHash, () => window.location.hash);
-  const kit = hash === "#/kit";
+  const route = hash.split("?")[0];
+  const kit = route === "#/kit";
   document.documentElement.toggleAttribute("data-ds-kit", kit);
-  return kit ? (
+  return route === "#/menubar" ? (
+    <MenuBar />
+  ) : kit ? (
     <Kit />
   ) : (
     <ApprovalFeedback>
