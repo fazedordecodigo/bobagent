@@ -80,6 +80,21 @@ RPC `approvals.list/respond/rules/setRules` (also allowed for mobile), events
 servers so waits do not time out. UI: `ApprovalCards` above the composer, Settings →
 Approvals. Tests: `test/approvals.e2e.test.ts`.
 
+Desktop notifications: `apps/desktop/src/lib/notifications.ts` owns approval eligibility,
+bounded summaries, actions, persisted one-hour mute and daemon decisions. Only pending
+approvals notify; unknown/incomplete/oversized details, secrets, takeover, pay, book and del
+open the app. Notifications never offer always. Permission buttons are deny/task;
+sends require recipient and full content. Closing a notification does not decide it.
+Inline results replace the same identifier; only a real preference undo can offer
+Desfazer for six seconds. Current once/task/deny decisions have no undo.
+macOS uses objc2 UserNotifications categories/delegate only in a real .app bundle;
+unbundled development is a no-op. Muting skips macOS delivery (not replayed on unmute).
+Windows uses WinRT ToastNotification XML (reminder requests), the app's AUMID and
+per-user COM activation registration; mute uses SuppressPopup plus silent audio and
+is also in the toast context menu. General settings expose mute on every platform.
+Native callbacks queue actions until the main frontend can drain them; the daemon
+remains authoritative. Optional dock/taskbar badges are not implemented.
+
 ## Pages (UpBot)
 
 `src/pages.ts` (`PageLibrary`, migration 17 `pages`): bots publish self-contained HTML with

@@ -2502,7 +2502,10 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9df9128cbbfef73cda168416ccf7f837b62737d748333bfe9ab71c245d76613e"
 dependencies = [
+ "bitflags 2.13.2",
+ "block2",
  "objc2",
+ "objc2-core-location",
  "objc2-foundation",
 ]
 
@@ -4515,7 +4518,11 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 name = "upbot-desktop"
 version = "0.3.0"
 dependencies = [
+ "block2",
  "log",
+ "objc2",
+ "objc2-foundation",
+ "objc2-user-notifications",
  "rand",
  "serde",
  "serde_json",
@@ -4526,6 +4533,8 @@ dependencies = [
  "tauri-plugin-shell",
  "tauri-plugin-updater",
  "tokio",
+ "windows",
+ "windows-registry",
 ]
 
 [[package]]
