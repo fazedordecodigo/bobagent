@@ -137,6 +137,7 @@ export class AgentRuntime {
 
   private hooks(tag: object): ProviderHooks {
     return {
+      onResumeFailed: () => this.store.clearAgentSession(this.agent.id),
       onUpdate: (u) => this.onUpdate(u),
       requestPermission: (req) => this.onPermissionRequest(req),
       onExit: (err) => {
