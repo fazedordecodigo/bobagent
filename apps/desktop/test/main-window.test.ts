@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Agent, ApprovalRule, ConnectedApp } from "@upbot/protocol";
+import type { Agent, Approval, ApprovalRule, ConnectedApp, Routine } from "@upbot/protocol";
 import { type Browser, chromium, type Page } from "playwright-core";
 import {
   DaemonClient,
@@ -176,7 +176,7 @@ test("real chat, approval once/always/undo, details, palette, settings and drawe
         .waitFor();
     }
     expect(await page.locator(".window-titlebar").count()).toBe(0);
-    for (const selector of [".main-head", ".side-titlebar", ".rail-titlebar"]) {
+    for (const selector of [".main-head", ".side-titlebar"]) {
       expect(
         await page.locator(selector).evaluate((el) => {
           const rect = el.getBoundingClientRect();
@@ -188,7 +188,8 @@ test("real chat, approval once/always/undo, details, palette, settings and drawe
         }),
       ).toEqual({ top: 0, height: 52, drag: true });
     }
-    expect(await page.locator(".brand").allTextContents()).toEqual(["UpBot"]);
+    expect(await page.locator(".side-brand").allTextContents()).toEqual(["UpBot"]);
+    expect(await page.locator(".rail").count()).toBe(0);
     expect(
       await page
         .getByRole("button", { name: "Alternar painel de execução" })
@@ -199,7 +200,7 @@ test("real chat, approval once/always/undo, details, palette, settings and drawe
         ),
     ).toBe(true);
     expect(await page.locator(".side").evaluate((el) => el.getBoundingClientRect().width)).toBe(
-      248,
+      270,
     );
     expect(
       await page.locator(".thread-inner").evaluate((el) => el.getBoundingClientRect().width),
@@ -504,6 +505,260 @@ test("group header owner selection and nested actions remain clickable in its dr
   await header.getByRole("button", { name: "Retomar", exact: true }).waitFor();
   const channels = (await rpc.request("channels.list", {})) as { id: string; status: string }[];
   expect(channels.find((item) => item.id === channel.id)?.status).toBe("stopped");
+}, 15000);
+
+test("sidebar navigation, real approval counts, routines, groups, profile and theme", async () => {
+  await page.setViewportSize({ width: 1568, height: 1089 });
+  await page.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+  await page.addStyleTag({ content: "*{transition:none!important;animation:none!important}" });
+  const side = page.locator(".side");
+  await side.getByRole("button", { name: "Início", exact: true }).click();
+  await page.getByRole("heading", { name: "Escolha um bot ou crie um novo." }).waitFor();
+  await side.getByRole("button", { name: "Nova tarefa" }).click();
+  await page.locator("dialog[open]").waitFor();
+  await page.keyboard.press("Escape");
+  await side.getByRole("button", { name: "Agendadas", exact: true }).click();
+  await page.getByText("Nenhuma rotina ainda.", { exact: false }).waitFor();
+  const routine = (await rpc.request("routines.create", {
+    agentId: bot.id,
+    name: "Resumo diário",
+    prompt: "echo:resumo",
+    schedule: "daily 09:00",
+  })) as Routine;
+  await page.getByRole("button", { name: /Resumo diário/ }).waitFor();
+  await page.getByRole("button", { name: /Resumo diário/ }).click();
+  await page.locator(".main-head").getByRole("heading", { name: bot.name, exact: true }).waitFor();
+  await side.getByRole("button", { name: "Configurações", exact: true }).click();
+  await page.getByRole("heading", { name: "Configurações", exact: true }).waitFor();
+  await page.getByRole("textbox", { name: "Seu nome", exact: true }).fill("Marina");
+  expect(await side.locator(".side-who b").textContent()).toBe("Marina");
+  await side.getByRole("button", { name: "Buscar", exact: false }).click();
+  await page
+    .getByRole("option")
+    .filter({ has: page.getByText("Páginas", { exact: true }) })
+    .click();
+  await page.getByText("Nenhuma página ainda.", { exact: false }).waitFor();
+  await page.keyboard.press("Meta+k");
+  await page.getByRole("option", { name: /Nova conversa em grupo/ }).click();
+  await page.getByRole("heading", { name: "New group chat", exact: true }).waitFor();
+  const group = (await rpc.request("channels.create", {
+    name: "Planejamento",
+    memberIds: [bot.id],
+  })) as { id: string };
+  const groupRow = side.getByRole("button", { name: /# Planejamento/ });
+  await groupRow.click();
+  expect(await groupRow.getAttribute("aria-current")).toBe("true");
+
+  const make = async (name: string) =>
+    (await rpc.request("agents.create", {
+      name,
+      provider: "devin",
+      instructions: "Fixture de estado real.",
+    })) as Agent;
+  const waiting = await make("Despesas de outubro");
+  const running = await make("Caixa de entrada");
+  const failed = await make("Viagem a Recife");
+  const queued = await make("Revisão de notas");
+  await rpc.request("chat.send", { agentId: bot.id, text: "echo:Relatório concluído." });
+  await side.getByRole("button", { name: /Relatório semanal Concluído/ }).waitFor();
+  const apps = (await rpc.request("apps.list", {})) as ConnectedApp[];
+  const notes = apps.find((app) => app.name === "Notas");
+  if (!notes) throw new Error("Notas fixture missing");
+  await rpc.request("apps.update", { id: notes.id, permissions: { write: "ask" } });
+  await rpc.request("chat.send", { agentId: waiting.id, text: "mcp:notas-create_note {}" });
+  await rpc.request("chat.send", { agentId: running.id, text: "watchdog-idle" });
+  await rpc.request("chat.send", { agentId: failed.id, text: "crash" });
+  await rpc.request("queue.pause", { agentId: queued.id });
+  await rpc.request("chat.send", { agentId: queued.id, text: "echo:revisão" });
+  await side
+    .getByRole("button", { name: /Despesas de outubro Aguardando sua aprovação/ })
+    .waitFor();
+  await side.getByRole("button", { name: /Caixa de entrada Em execução/ }).waitFor();
+  await side.locator(".side-bot").filter({ hasText: failed.name }).locator(".s-err").waitFor();
+  await side.getByRole("button", { name: /Revisão de notas 1 na fila/ }).waitFor();
+  await side.getByRole("status", { name: "1 pedido pendente" }).waitFor();
+  await side.getByRole("button", { name: "Apps conectados", exact: false }).click();
+  await page.getByRole("heading", { name: "Apps conectados", exact: true }).waitFor();
+  await side.locator(".side-bot").filter({ hasText: failed.name }).click();
+  const selected = side.locator('.side-bot[aria-current="true"]');
+  expect(await selected.locator("b").textContent()).toBe(failed.name);
+  expect(
+    await selected.evaluate((element) => {
+      const probe = document.createElement("i");
+      probe.style.background = "var(--fg)";
+      document.body.append(probe);
+      const ink = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return getComputedStyle(element).backgroundColor === ink;
+    }),
+  ).toBe(true);
+  expect(await side.locator(".side-bot").last().locator("b").textContent()).toBe("# Planejamento");
+  expect(
+    await side
+      .getByRole("heading", { name: "SEUS AGENTES", exact: true })
+      .evaluate((element) => getComputedStyle(element).textTransform),
+  ).toBe("uppercase");
+  for (const theme of ["light", "dark"] as const) {
+    await side
+      .getByRole("button", { name: theme === "light" ? "Tema claro" : "Tema escuro", exact: true })
+      .click();
+    expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe(theme);
+    expect(await page.evaluate(() => localStorage.getItem("upbot.theme"))).toBe(theme);
+    for (const status of ["idle", "queue", "wait", "run", "err", "ok"]) {
+      const row = side
+        .locator(".side-bot")
+        .filter({ has: page.locator(`.dot.s-${status}`) })
+        .first();
+      await row.click();
+      expect(await row.getAttribute("aria-current")).toBe("true");
+      const result = await row.evaluate((element, status) => {
+        const dot = element.querySelector(".dot");
+        if (!dot) throw new Error("Missing status dot");
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 1;
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Missing canvas context");
+        const pixel = (color: string) => {
+          context.fillStyle = color;
+          context.fillRect(0, 0, 1, 1);
+          return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3);
+        };
+        const background = pixel(getComputedStyle(element).backgroundColor);
+        const foreground = pixel(getComputedStyle(dot).backgroundColor);
+        const luminance = (rgb: number[]) => {
+          const linear = rgb.map((value) => {
+            const channel = value / 255;
+            return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+          });
+          return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+        };
+        const a = luminance(background);
+        const b = luminance(foreground);
+        const neutral = status === "idle" || status === "queue";
+        const probe = document.createElement("i");
+        probe.style.background = neutral
+          ? "color-mix(in oklch, var(--bg) 70%, var(--fg))"
+          : `var(--st-${status})`;
+        element.append(probe);
+        const matchesToken =
+          getComputedStyle(probe).backgroundColor === getComputedStyle(dot).backgroundColor;
+        probe.remove();
+        return { contrast: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05), matchesToken };
+      }, status);
+      expect(result.matchesToken).toBe(true);
+      expect(result.contrast).toBeGreaterThanOrEqual(
+        status === "idle" || status === "queue" ? 3 : 1.4,
+      );
+    }
+    await side.locator(".side-bot").filter({ hasText: failed.name }).click();
+    const dir = process.env.SIDEBAR_SCREEN_DIR;
+    if (dir) {
+      mkdirSync(dir, { recursive: true });
+      await page.evaluate(() => document.fonts.ready);
+      await page.screenshot({ path: join(dir, `main-${theme}.png`) });
+    }
+  }
+  await side.getByRole("button", { name: "Tema escuro", exact: true }).focus();
+  await page.keyboard.press("ArrowLeft");
+  expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe("light");
+  const pending = (await rpc.request("approvals.list", {})) as Approval[];
+  const approval = pending.find((item) => item.agentId === waiting.id && item.status === "pending");
+  if (!approval) throw new Error("Expected pending fixture approval");
+  await rpc.request("approvals.respond", { id: approval.id, decision: "deny" });
+  await side.locator(".side-count").waitFor({ state: "detached" });
+  await rpc.request("chat.cancel", { agentId: running.id });
+  await rpc.request("routines.delete", { id: routine.id });
+  await rpc.request("channels.archive", { channelId: group.id });
+}, 30000);
+
+test("Buscar matches instructions without exposing them and shows live overview tasks", async () => {
+  const agent = (await rpc.request("agents.create", {
+    name: "Farol",
+    provider: "devin",
+    instructions:
+      "Especialista em logística reversa.\nPrioriza fornecedores regionais.\ntoken sk-test-123",
+  })) as Agent;
+  const target = await browser.newPage();
+  try {
+    await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+    await target.locator(".side-bot").filter({ hasText: agent.name }).waitFor();
+    await target.getByRole("button", { name: "Buscar", exact: false }).click();
+    const input = target.getByRole("textbox", { name: "Buscar comandos" });
+    const result = target
+      .getByRole("option")
+      .filter({ has: target.getByText(agent.name, { exact: true }) });
+    const palette = target.getByRole("dialog", { name: "Buscar", exact: true });
+    for (const phrase of [
+      "LOGÍSTICA REVERSA",
+      "fornecedores regionais",
+      "sk-test",
+      "Farol",
+      "Devin",
+    ]) {
+      await input.fill(phrase);
+      await result.waitFor();
+      expect(await result.textContent()).toContain("Farol");
+      expect(await result.textContent()).toContain("Devin");
+      const html = await palette.evaluate((element) => element.outerHTML);
+      expect(html).not.toContain("sk-test-123");
+      expect(html).not.toContain("Especialista em logística reversa.");
+      expect(html).not.toContain("Prioriza fornecedores regionais.");
+    }
+    await input.fill("nenhum bot corresponde a esta consulta");
+    await target.getByText("Nenhum resultado.", { exact: true }).waitFor();
+    await input.fill("");
+    await result.waitFor();
+    expect(await result.textContent()).toContain("Devin");
+    await input.fill("CONCILIAR FATURAS TRIMESTRAIS");
+    await target.getByText("Nenhum resultado.", { exact: true }).waitFor();
+    const { queueId } = (await rpc.request("chat.send", {
+      agentId: agent.id,
+      text: "echo:Conciliar faturas trimestrais",
+    })) as { queueId: string };
+    await rpc.waitForEventWhere("turn.ended", (event) => (event as Turn).queueId === queueId);
+    await result.waitFor();
+    expect(await result.textContent()).toContain("Conciliar faturas trimestrais");
+    await result.click();
+    await target
+      .locator(".main-head")
+      .getByRole("heading", { name: agent.name, exact: true })
+      .waitFor();
+  } finally {
+    await target.close();
+    await rpc.request("agents.delete", { id: agent.id });
+  }
+}, 15000);
+
+test("scheduled routines show recoverable RPC errors", async () => {
+  const target = await browser.newPage();
+  let fail = true;
+  await target.routeWebSocket(/\/ws\?/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      const request = JSON.parse(String(message));
+      if (fail && request.method === "routines.list")
+        socket.send(
+          JSON.stringify({
+            id: request.id,
+            error: { code: "internal", message: "Falha de teste" },
+          }),
+        );
+      else server.send(message);
+    });
+  });
+  try {
+    await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+    await target.getByRole("button", { name: "Agendadas", exact: true }).click();
+    await target
+      .getByRole("alert")
+      .getByText("Não foi possível carregar as rotinas: Falha de teste")
+      .waitFor();
+    fail = false;
+    await target.getByRole("button", { name: "Tentar novamente", exact: true }).click();
+    await target.getByText("Nenhuma rotina ainda.", { exact: false }).waitFor();
+  } finally {
+    await target.close();
+  }
 }, 15000);
 
 test("capture matching prototype states when visual verification is requested", async () => {
