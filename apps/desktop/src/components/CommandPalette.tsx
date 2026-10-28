@@ -7,6 +7,7 @@ export type PaletteItem = {
   group: string;
   label: string;
   hint?: string;
+  searchTerms?: string[];
   run: () => void;
 };
 
@@ -30,15 +31,15 @@ export function CommandPalette({
     return () => previous?.focus();
   }, []);
   const shown = useMemo(() => {
-    const needle = q.trim().toLowerCase();
+    const needle = q.trim().toLocaleLowerCase("pt-BR");
     return items
       .filter((i) => !initialGroup || i.group === initialGroup)
       .filter(
         (i) =>
           !needle ||
-          i.label.toLowerCase().includes(needle) ||
-          (i.hint ?? "").toLowerCase().includes(needle) ||
-          i.group.toLowerCase().includes(needle),
+          [i.label, i.hint ?? "", i.group, ...(i.searchTerms ?? [])].some((text) =>
+            text.toLocaleLowerCase("pt-BR").includes(needle),
+          ),
       )
       .slice(0, 50);
   }, [items, q, initialGroup]);
@@ -94,25 +95,36 @@ export function CommandPalette({
           }}
         />
         <div className={s.results} id={id} role="listbox" aria-label="Comandos">
-          {shown.map((i, k) => (
-            <div key={i.id} role="presentation">
-              <button
-                type="button"
-                role="option"
-                id={`${id}-${k}`}
-                aria-selected={k === index}
-                tabIndex={-1}
-                onMouseEnter={() => setIndex(k)}
-                onClick={() => pick(i)}
-                className={s.result}
-                aria-current={k === index ? "true" : undefined}
-              >
-                <span className={s.group}>{i.group}</span>
-                <span className="truncate">{i.label}</span>
-                {i.hint && <span className={s.hint}>{i.hint}</span>}
-              </button>
-            </div>
-          ))}
+          {shown.map((i, k) => {
+            const needle = q.trim().toLocaleLowerCase("pt-BR");
+            const hint =
+              (needle &&
+                i.searchTerms?.find((text) => text.toLocaleLowerCase("pt-BR").includes(needle))) ||
+              i.hint;
+            return (
+              <div key={i.id} role="presentation">
+                <button
+                  type="button"
+                  role="option"
+                  id={`${id}-${k}`}
+                  aria-selected={k === index}
+                  tabIndex={-1}
+                  onMouseEnter={() => setIndex(k)}
+                  onClick={() => pick(i)}
+                  className={s.result}
+                  aria-current={k === index ? "true" : undefined}
+                >
+                  <span className={s.group}>{i.group}</span>
+                  <span className="truncate">{i.label}</span>
+                  {hint && (
+                    <span className={s.hint} title={hint}>
+                      {hint}
+                    </span>
+                  )}
+                </button>
+              </div>
+            );
+          })}
           {shown.length === 0 && <p className={s.empty}>Nenhum resultado.</p>}
         </div>
         <div className={s.footer}>

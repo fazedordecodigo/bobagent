@@ -326,6 +326,7 @@ export default function App() {
         group: "Bots",
         label: agent.name,
         hint: statusProvider(agent.provider),
+        searchTerms: [role(agent), agent.instructions, overview[agent.id]?.task ?? ""],
         run: () => openAgent(agent.id),
       })),
       ...channels.map((channel) => ({
@@ -365,9 +366,11 @@ export default function App() {
       },
     ];
     setPaletteItems(base);
+    let active = true;
     void client
       .request("pages.list", {})
-      .then((pages) =>
+      .then((pages) => {
+        if (!active) return;
         setPaletteItems([
           ...base,
           ...pages.map((page) => ({
@@ -377,10 +380,13 @@ export default function App() {
             hint: page.description,
             run: () => navigate("pages"),
           })),
-        ]),
-      )
+        ]);
+      })
       .catch(() => {});
-  }, [agents, channels, client, navigate, openAgent, palette]);
+    return () => {
+      active = false;
+    };
+  }, [agents, channels, client, navigate, openAgent, overview, palette]);
 
   const createChannel = useCallback(
     async (form: { name: string; memberIds: string[]; ownerId: string | null }) => {

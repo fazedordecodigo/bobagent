@@ -671,6 +671,53 @@ test("sidebar navigation, real approval counts, routines, groups, profile and th
   await rpc.request("channels.archive", { channelId: group.id });
 }, 30000);
 
+test("Buscar matches bot roles, full instructions and live overview tasks", async () => {
+  const agent = (await rpc.request("agents.create", {
+    name: "Farol",
+    provider: "devin",
+    instructions: "Especialista em logística reversa.\nPrioriza fornecedores regionais.",
+  })) as Agent;
+  const target = await browser.newPage();
+  try {
+    await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+    await target.locator(".side-bot").filter({ hasText: agent.name }).waitFor();
+    await target.getByRole("button", { name: "Buscar", exact: false }).click();
+    const input = target.getByRole("textbox", { name: "Buscar comandos" });
+    const result = target
+      .getByRole("option")
+      .filter({ has: target.getByText(agent.name, { exact: true }) });
+    for (const phrase of ["LOGÍSTICA REVERSA", "fornecedores regionais", "Farol", "Devin"]) {
+      await input.fill(phrase);
+      await result.waitFor();
+      expect((await result.textContent())?.toLocaleLowerCase("pt-BR")).toContain(
+        phrase.toLocaleLowerCase("pt-BR"),
+      );
+    }
+    await input.fill("nenhum bot corresponde a esta consulta");
+    await target.getByText("Nenhum resultado.", { exact: true }).waitFor();
+    await input.fill("");
+    await result.waitFor();
+    expect(await result.textContent()).toContain("Devin");
+    await input.fill("CONCILIAR FATURAS TRIMESTRAIS");
+    await target.getByText("Nenhum resultado.", { exact: true }).waitFor();
+    const { queueId } = (await rpc.request("chat.send", {
+      agentId: agent.id,
+      text: "echo:Conciliar faturas trimestrais",
+    })) as { queueId: string };
+    await rpc.waitForEventWhere("turn.ended", (event) => (event as Turn).queueId === queueId);
+    await result.waitFor();
+    expect(await result.textContent()).toContain("Conciliar faturas trimestrais");
+    await result.click();
+    await target
+      .locator(".main-head")
+      .getByRole("heading", { name: agent.name, exact: true })
+      .waitFor();
+  } finally {
+    await target.close();
+    await rpc.request("agents.delete", { id: agent.id });
+  }
+}, 15000);
+
 test("scheduled routines show recoverable RPC errors", async () => {
   const target = await browser.newPage();
   let fail = true;
