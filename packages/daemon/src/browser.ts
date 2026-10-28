@@ -25,6 +25,16 @@ const LINUX_CANDIDATES = [
 const NAV_TIMEOUT = 20_000;
 const SNAPSHOT_CHARS = 15_000;
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 type Json = Record<string, unknown>;
 
 function envValue(env: Record<string, string | undefined>, key: string): string | undefined {
@@ -225,18 +235,38 @@ export class BrowserService {
     return cdp;
   }
 
-  private kill() {
+  private kill(proc = this.proc) {
+    if (!proc) return;
     try {
-      this.proc?.kill();
+      if (process.platform === "win32") {
+        Bun.spawnSync(["taskkill", "/pid", String(proc.pid), "/T", "/F"], {
+          stdout: "ignore",
+          stderr: "ignore",
+          windowsHide: true,
+        });
+      } else {
+        proc.kill();
+      }
     } catch {}
-    this.proc = null;
+    if (this.proc === proc) this.proc = null;
   }
 
   async close(): Promise<void> {
-    this.cdp?.close();
+    const cdp = this.cdp;
+    const proc = this.proc;
+    if (cdp && !cdp.closed) {
+      await withTimeout(
+        cdp.send("Browser.close").catch(() => null),
+        1_000,
+      );
+    }
+    cdp?.close();
     this.cdp = null;
     this.tabs.clear();
-    this.kill();
+    if (proc) {
+      if ((await withTimeout(proc.exited, 5_000)) === null) this.kill(proc);
+      else if (this.proc === proc) this.proc = null;
+    }
     this.emit();
   }
 
