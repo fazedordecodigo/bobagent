@@ -25,7 +25,9 @@ export function AppPermissionsDialog({
   const [busy, setBusy] = useState(false);
   const [disconnect, setDisconnect] = useState(false);
   useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
     dialog.current?.showModal();
+    return () => previous?.focus();
   }, []);
   async function change(permissions: Partial<AppPermissions>) {
     setBusy(true);

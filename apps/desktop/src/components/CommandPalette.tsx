@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { isMac, mod } from "../lib/platform";
 import s from "./CommandPalette.module.css";
 
@@ -23,6 +23,7 @@ export function CommandPalette({
   const [q, setQ] = useState("");
   const [index, setIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const id = useId();
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     inputRef.current?.focus();
@@ -58,6 +59,10 @@ export function CommandPalette({
       >
         <input
           ref={inputRef}
+          aria-label="Buscar comandos"
+          aria-controls={id}
+          aria-activedescendant={shown[index] ? `${id}-${index}` : undefined}
+          aria-autocomplete="list"
           className={s.search}
           placeholder={
             initialGroup
@@ -88,11 +93,14 @@ export function CommandPalette({
             }
           }}
         />
-        <ul className={s.results}>
+        <div className={s.results} id={id} role="listbox" aria-label="Comandos">
           {shown.map((i, k) => (
-            <li key={i.id}>
+            <div key={i.id} role="presentation">
               <button
                 type="button"
+                role="option"
+                id={`${id}-${k}`}
+                aria-selected={k === index}
                 tabIndex={-1}
                 onMouseEnter={() => setIndex(k)}
                 onClick={() => pick(i)}
@@ -103,10 +111,10 @@ export function CommandPalette({
                 <span className="truncate">{i.label}</span>
                 {i.hint && <span className={s.hint}>{i.hint}</span>}
               </button>
-            </li>
+            </div>
           ))}
-          {shown.length === 0 && <li className={s.empty}>Nenhum resultado.</li>}
-        </ul>
+          {shown.length === 0 && <p className={s.empty}>Nenhum resultado.</p>}
+        </div>
         <div className={s.footer}>
           {mod}K buscar · {mod}
           {isMac ? "⇧" : "Shift+"}F bots · {mod}N novo bot · {mod}1–9 trocar de bot · {mod},

@@ -16,7 +16,9 @@ export function ConfirmDialog({
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
     dialog.current?.showModal();
+    return () => previous?.focus();
   }, []);
   return (
     <dialog

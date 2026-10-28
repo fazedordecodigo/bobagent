@@ -114,12 +114,43 @@ export function SegmentedControl({
   icons?: boolean;
 }) {
   return (
-    <fieldset className={`${s.segmented} ${icons ? s.iconSegments : ""}`} aria-label={label}>
+    <fieldset
+      className={`${s.segmented} ${icons ? s.iconSegments : ""}`}
+      aria-label={label}
+      onKeyDown={(event) => {
+        const buttons = [
+          ...event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"),
+        ];
+        const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+        const index =
+          event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? buttons.length - 1
+              : ["ArrowRight", "ArrowDown"].includes(event.key)
+                ? (current + 1) % buttons.length
+                : ["ArrowLeft", "ArrowUp"].includes(event.key)
+                  ? (current + buttons.length - 1) % buttons.length
+                  : -1;
+        if (index >= 0) {
+          event.preventDefault();
+          buttons[index]?.focus();
+          buttons[index]?.click();
+        }
+      }}
+    >
       {options.map((option) => (
         <button
           type="button"
           key={option.value}
           disabled={option.disabled}
+          tabIndex={
+            value === option.value ||
+            (!options.some((item) => item.value === value && !item.disabled) &&
+              option === options.find((item) => !item.disabled))
+              ? 0
+              : -1
+          }
           aria-label={icons ? option.label : undefined}
           aria-pressed={value === option.value}
           onClick={() => onValueChange(option.value)}

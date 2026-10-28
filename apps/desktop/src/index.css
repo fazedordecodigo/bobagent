@@ -7,6 +7,12 @@ dialog {
   margin: auto;
 }
 
+:is(button, input:not([type="checkbox"]):not([type="radio"]), select, summary, a[href]) {
+  min-height: 44px;
+}
+button { min-width: 44px; }
+:focus-visible { outline: 2px solid var(--focus) !important; outline-offset: 3px !important; }
+
 .hint.is-err {
   color: var(--fg);
 }

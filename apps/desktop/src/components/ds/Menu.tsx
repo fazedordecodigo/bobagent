@@ -58,10 +58,6 @@ export function Menu({
               event.stopPropagation();
               close();
             }
-            if (event.key === "Tab") {
-              setOpen(false);
-              return;
-            }
             const buttons = [
               ...(root.current?.querySelectorAll<HTMLButtonElement>(
                 '[role^="menuitem"]:not(:disabled)',
@@ -73,9 +69,9 @@ export function Menu({
                 ? 0
                 : event.key === "End"
                   ? buttons.length - 1
-                  : event.key === "ArrowDown"
+                  : event.key === "ArrowDown" || (event.key === "Tab" && !event.shiftKey)
                     ? (current + 1) % buttons.length
-                    : event.key === "ArrowUp"
+                    : event.key === "ArrowUp" || (event.key === "Tab" && event.shiftKey)
                       ? (current + buttons.length - 1) % buttons.length
                       : -1;
             if (index >= 0) {
@@ -88,6 +84,7 @@ export function Menu({
             const props = {
               type: "button" as const,
               disabled: item.disabled,
+              tabIndex: -1,
               onClick: () => {
                 close();
                 item.onSelect();
