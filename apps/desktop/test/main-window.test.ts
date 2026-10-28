@@ -167,7 +167,7 @@ test("real chat, approval once/always/undo, details, palette, settings and drawe
       await page.getByRole("button", { name: "Enviar", exact: true }).click();
     };
     if (theme === "light") {
-      expect(await page.getByText("Diga o que precisa", { exact: false }).isVisible()).toBe(true);
+      await page.getByText("Diga o que precisa", { exact: false }).waitFor();
       await send("echo:As entregas da semana estão organizadas para revisão.");
       await page
         .getByText("As entregas da semana estão organizadas para revisão.", { exact: true })
