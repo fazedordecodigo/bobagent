@@ -54,6 +54,11 @@ describe("zipEntries", () => {
     expect(zipEntries(zip)).toBeNull();
   });
 
+  test("rejects a local compression method that differs from the central directory", () => {
+    const zip = storedZip([{ name: "file.txt", method: 8, localMethod: 0 }]);
+    expect(zipEntries(zip)).toBeNull();
+  });
+
   test("does not extract symlink or traversal ZIPs", () => {
     const workspace = mkdtempSync(join(tmpdir(), "upbot-attachments-"));
     try {
@@ -77,6 +82,32 @@ describe("zipEntries", () => {
       const zip = storedZip([
         { name: "ok.txt", localName: "../evil.txt", contents: Buffer.from("evil") },
       ]);
+      const attachment = saveAttachments(workspace, [
+        { name: "bundle.zip", mime: "application/zip", dataBase64: zip.toString("base64") },
+      ])[0];
+      if (!attachment) throw new Error("attachment was not saved");
+      expect(attachment.extractedTo).toBeUndefined();
+      expect(existsSync(join(dirname(attachment.path), "evil.txt"))).toBe(false);
+      expect(existsSync(join(workspace, "evil.txt"))).toBe(false);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+
+  test("does not extract embedded local headers after a truncated local size", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "upbot-attachments-"));
+    try {
+      const evilName = "../evil.txt";
+      const evilContents = Buffer.from("evil");
+      const nestedLocalRecord = storedZip([{ name: evilName, contents: evilContents }]).subarray(
+        0,
+        30 + Buffer.byteLength(evilName) + evilContents.length,
+      );
+      const contents = Buffer.concat([Buffer.from("safe"), nestedLocalRecord]);
+      const zip = storedZip([
+        { name: "ok.txt", contents, localCompressedSize: Buffer.byteLength("safe") },
+      ]);
+      expect(zipEntries(zip)).toBeNull();
       const attachment = saveAttachments(workspace, [
         { name: "bundle.zip", mime: "application/zip", dataBase64: zip.toString("base64") },
       ])[0];

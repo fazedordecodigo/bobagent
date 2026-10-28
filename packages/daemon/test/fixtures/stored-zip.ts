@@ -6,6 +6,9 @@ type ZipEntry = {
   dataDescriptor?: boolean;
   localFlags?: number;
   localExtra?: Buffer;
+  method?: number;
+  localMethod?: number;
+  localCompressedSize?: number;
 };
 
 function crc32(data: Buffer): number {
@@ -29,13 +32,18 @@ export function storedZip(entries: ZipEntry[], hiddenLocalEntries: ZipEntry[] = 
     const crc = crc32(contents);
     const dosDate = 0x0021;
     const flags = entry.dataDescriptor ? 0x0008 : 0;
+    const method = entry.method ?? 0;
     const localHeader = Buffer.alloc(30);
     localHeader.writeUInt32LE(0x04034b50, 0);
     localHeader.writeUInt16LE(20, 4);
     localHeader.writeUInt16LE(entry.localFlags ?? flags, 6);
+    localHeader.writeUInt16LE(entry.localMethod ?? method, 8);
     localHeader.writeUInt16LE(dosDate, 12);
     localHeader.writeUInt32LE(entry.dataDescriptor ? 0 : crc, 14);
-    localHeader.writeUInt32LE(entry.dataDescriptor ? 0 : contents.length, 18);
+    localHeader.writeUInt32LE(
+      entry.dataDescriptor ? 0 : (entry.localCompressedSize ?? contents.length),
+      18,
+    );
     localHeader.writeUInt32LE(entry.dataDescriptor ? 0 : contents.length, 22);
     localHeader.writeUInt16LE(localName.length, 26);
     localHeader.writeUInt16LE(localExtra.length, 28);
@@ -55,6 +63,7 @@ export function storedZip(entries: ZipEntry[], hiddenLocalEntries: ZipEntry[] = 
       centralHeader.writeUInt16LE((3 << 8) | 20, 4);
       centralHeader.writeUInt16LE(20, 6);
       centralHeader.writeUInt16LE(flags, 8);
+      centralHeader.writeUInt16LE(method, 10);
       centralHeader.writeUInt16LE(dosDate, 14);
       centralHeader.writeUInt32LE(crc, 16);
       centralHeader.writeUInt32LE(contents.length, 20);

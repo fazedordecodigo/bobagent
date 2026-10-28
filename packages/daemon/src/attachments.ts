@@ -85,6 +85,8 @@ export function zipEntries(data: Buffer): { name: string; symlink: boolean }[] |
     for (let i = 0; i < totalEntries; i++) {
       if (offset + 46 > directoryEnd || data.readUInt32LE(offset) !== 0x02014b50) return null;
       const generalFlags = data.readUInt16LE(offset + 8);
+      const compressionMethod = data.readUInt16LE(offset + 10);
+      const crc32 = data.readUInt32LE(offset + 16);
       const compressedSize = data.readUInt32LE(offset + 20);
       const uncompressedSize = data.readUInt32LE(offset + 24);
       const nameLength = data.readUInt16LE(offset + 28);
@@ -118,6 +120,7 @@ export function zipEntries(data: Buffer): { name: string; symlink: boolean }[] |
         return null;
       }
       const localFlags = data.readUInt16LE(localOffset + 6);
+      const localMethod = data.readUInt16LE(localOffset + 8);
       const localNameLength = data.readUInt16LE(localOffset + 26);
       const localExtraLength = data.readUInt16LE(localOffset + 28);
       const localNameStart = localHeaderEnd;
@@ -126,6 +129,11 @@ export function zipEntries(data: Buffer): { name: string; symlink: boolean }[] |
       if (
         localExtraStart + localExtraLength > directoryOffset ||
         ((localFlags ^ generalFlags) & 0x0008) !== 0 ||
+        localMethod !== compressionMethod ||
+        ((localFlags & 0x0008) === 0 &&
+          (data.readUInt32LE(localOffset + 14) !== crc32 ||
+            data.readUInt32LE(localOffset + 18) !== compressedSize ||
+            data.readUInt32LE(localOffset + 22) !== uncompressedSize)) ||
         !data.subarray(localNameStart, localNameEnd).equals(nameBytes) ||
         !validExtraFields(data, localExtraStart, localExtraLength)
       ) {
