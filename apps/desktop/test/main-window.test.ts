@@ -166,9 +166,29 @@ test("real chat, approval once/always/undo, details, palette, settings and drawe
         .getByText("As entregas da semana estão organizadas para revisão.", { exact: true })
         .waitFor();
     }
+    expect(await page.locator(".window-titlebar").count()).toBe(0);
+    for (const selector of [".main-head", ".side-titlebar", ".rail-titlebar"]) {
+      expect(
+        await page.locator(selector).evaluate((el) => {
+          const rect = el.getBoundingClientRect();
+          return {
+            top: rect.top,
+            height: rect.height,
+            drag: el.hasAttribute("data-tauri-drag-region"),
+          };
+        }),
+      ).toEqual({ top: 0, height: 52, drag: true });
+    }
+    expect(await page.locator(".brand").allTextContents()).toEqual(["UpBot"]);
     expect(
-      await page.locator(".window-titlebar").evaluate((el) => el.getBoundingClientRect().height),
-    ).toBe(52);
+      await page
+        .getByRole("button", { name: "Alternar painel de execução" })
+        .evaluate(
+          (el) =>
+            !el.hasAttribute("data-tauri-drag-region") &&
+            getComputedStyle(el).pointerEvents === "auto",
+        ),
+    ).toBe(true);
     expect(await page.locator(".side").evaluate((el) => el.getBoundingClientRect().width)).toBe(
       248,
     );

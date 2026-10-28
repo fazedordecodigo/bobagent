@@ -19,7 +19,7 @@ button.bg-sky-600, button.bg-sky-700 {
 @media (max-width: 759px) {
   .app.side-open .side {
     position: fixed;
-    top: 52px;
+    top: 0;
     bottom: 60px;
     left: 0;
     z-index: 31;
