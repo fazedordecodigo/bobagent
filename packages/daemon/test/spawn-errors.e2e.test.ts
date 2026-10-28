@@ -35,7 +35,8 @@ describe("asynchronous child spawn errors", () => {
     } catch {}
     await daemon.proc.exited;
     for (const directory of [dataDir, agentsRoot]) {
-      if (directory) rmSync(directory, { recursive: true, force: true });
+      if (directory)
+        rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 
@@ -54,18 +55,14 @@ describe("asynchronous child spawn errors", () => {
   });
 
   test("provider startup exposes asynchronous spawn failures", async () => {
-    const proc = spawnProvider(`${process.execPath}-missing-upbot.exe`, [], process.cwd());
-    try {
-      if (process.platform === "win32") {
-        const unexpectedExit = new Promise<string>((resolve) => proc.onUnexpectedExit(resolve));
-        await proc.waitForSpawn();
-        await expect(unexpectedExit).resolves.toMatch(/^process (?:error|exited):/);
-      } else {
-        await expect(proc.waitForSpawn()).rejects.toThrow();
-      }
-    } finally {
-      proc.markClosed();
-      proc.kill();
+    if (process.platform === "win32") {
+      expect(() =>
+        spawnProvider(`${process.execPath}-missing-upbot.exe`, [], process.cwd()),
+      ).toThrow(/failed to start: spawn .* ENOENT/);
+      return;
     }
+    const proc = spawnProvider(`${process.execPath}-missing-upbot.exe`, [], process.cwd());
+    await expect(proc.waitForSpawn()).rejects.toThrow();
+    proc.markClosed();
   });
 });

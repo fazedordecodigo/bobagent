@@ -2,7 +2,14 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
 import type { Agent, BrowserState, ChatItem, Turn } from "@upbot/protocol";
 import { findBrowser } from "../src/browser";
-import { DaemonClient, type DaemonHandle, FAKE_AGENT, readPids, startDaemon, tmp } from "./helpers";
+import {
+  DaemonClient,
+  type DaemonHandle,
+  FAKE_AGENT,
+  startDaemon,
+  stopTestChildren,
+  tmp,
+} from "./helpers";
 
 const TOKEN = `br-test-${crypto.randomUUID()}`;
 const hasBrowser = findBrowser() !== null;
@@ -69,13 +76,10 @@ describe.skipIf(!hasBrowser)("agent browser e2e (headless Chromium over CDP)", (
     try {
       daemon.proc.kill("SIGTERM");
     } catch {}
-    await Bun.sleep(300);
-    for (const pid of readPids(stateDir)) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {}
-    }
-    for (const d of [dataDir, agentsRoot, stateDir]) rmSync(d, { recursive: true, force: true });
+    await daemon.proc.exited;
+    await stopTestChildren(stateDir);
+    for (const d of [dataDir, agentsRoot, stateDir])
+      rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   test("open, snapshot, type+submit, click, back, screenshot, close", async () => {

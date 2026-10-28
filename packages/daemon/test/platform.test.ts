@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { browserCandidates } from "../src/browser";
 import { resolveCommandIn, spawnEnv } from "../src/env/login-path";
+import { resolveWindowsCommandInEnv } from "../src/env/spawn";
 import { daemonTarget, daemonTargetForTriple } from "../src/target";
 
 describe("resolveCommandIn on Windows", () => {
@@ -49,6 +50,47 @@ describe("resolveCommandIn on Windows", () => {
         exists,
       }),
     ).toBe("C:\\tools\\Agent.cMd");
+  });
+});
+
+describe("Windows spawn command resolution", () => {
+  test("reads PATH and PATHEXT case-insensitively from the supplied environment", () => {
+    const files = new Set(["C:\\first\\claude.CMD", "C:\\second\\claude.EXE"]);
+    const exists = (path: string) =>
+      [...files].some((file) => file.toLowerCase() === path.toLowerCase());
+    expect(
+      resolveWindowsCommandInEnv(
+        "claude",
+        { pAtH: "C:\\first;C:\\second", PaThExT: ".EXE;.CMD" },
+        "C:\\work",
+        exists,
+      ),
+    ).toBe("C:\\first\\claude.CMD");
+  });
+
+  test("requires explicit paths to exist and resolves relative paths from cwd", () => {
+    const files = new Set(["C:\\work\\tools\\agent.CMD"]);
+    const exists = (path: string) =>
+      [...files].some((file) => file.toLowerCase() === path.toLowerCase());
+    expect(
+      resolveWindowsCommandInEnv(
+        ".\\tools\\agent",
+        { PATH: "C:\\tools", PATHEXT: ".EXE;.CMD" },
+        "C:\\work",
+        exists,
+      ),
+    ).toBe("C:\\work\\tools\\agent.CMD");
+    expect(
+      resolveWindowsCommandInEnv(
+        "C:\\missing\\agent.exe",
+        { PATH: "C:\\tools", PATHEXT: ".EXE;.CMD" },
+        "C:\\work",
+        exists,
+      ),
+    ).toBeNull();
+    expect(
+      resolveWindowsCommandInEnv("agent", { PATHEXT: ".EXE;.CMD" }, "C:\\work", exists),
+    ).toBeNull();
   });
 });
 

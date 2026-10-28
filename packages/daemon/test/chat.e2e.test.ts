@@ -11,6 +11,7 @@ import {
   readLog,
   readPids,
   startDaemon,
+  stopTestChildren,
   tmp,
   waitForExit,
   waitForPidDead,
@@ -74,9 +75,10 @@ describe("chat e2e (fake acp agent)", () => {
       daemon.proc.kill("SIGKILL");
     } catch {}
     await daemon.proc.exited;
-    rmSync(dataDir, { recursive: true, force: true });
-    rmSync(agentsRoot, { recursive: true, force: true });
-    rmSync(stateDir, { recursive: true, force: true });
+    await stopTestChildren(stateDir);
+    rmSync(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    rmSync(agentsRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    rmSync(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   test("echo: streams chunks, ends completed, history + idle status", async () => {
@@ -535,8 +537,8 @@ describe("chat e2e (fake acp agent)", () => {
       (db2.query("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number }).n,
     ).toBe(18);
     db2.close();
-    rmSync(dir, { recursive: true, force: true });
-    rmSync(root, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   test("crash: turn fails with error item + error status; next send resumes via session/load", async () => {
@@ -713,7 +715,7 @@ describe("chat e2e (fake acp agent)", () => {
     const n = (db2.query("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number }).n;
     expect(n).toBe(18);
     db2.close();
-    rmSync(dir, { recursive: true, force: true });
-    rmSync(root, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 });

@@ -486,13 +486,21 @@ export class AcpDriver implements ProviderDriver {
 
     const stderrLines: string[] = [];
     const credential = Object.values(opts.remote?.credentials ?? {})[0] ?? null;
-    const child = opts.remote
-      ? opts.remote.spawn([bin, ...cmd.slice(1)], { NO_COLOR: "1", ...opts.remote.credentials })
-      : spawnChild(bin, cmd.slice(1), {
-          cwd,
-          stdio: ["pipe", "pipe", "pipe"],
-          env: spawnEnv({ NO_COLOR: "1" }),
-        });
+    let child: ChildProcess;
+    try {
+      child = opts.remote
+        ? opts.remote.spawn([bin, ...cmd.slice(1)], { NO_COLOR: "1", ...opts.remote.credentials })
+        : spawnChild(bin, cmd.slice(1), {
+            cwd,
+            stdio: ["pipe", "pipe", "pipe"],
+            env: spawnEnv({ NO_COLOR: "1" }),
+          });
+    } catch (error) {
+      throw new ProviderError(
+        "provider_unavailable",
+        `${this.provider} failed to start: ${redactCredential(errorDetail(error), credential)}`,
+      );
+    }
     child.stdin?.on("error", () => {});
     let rejectChildError!: (error: Error) => void;
     const childError = new Promise<never>((_, reject) => {

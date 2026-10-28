@@ -34,7 +34,7 @@ describe("zipEntries", () => {
         expect(attachment?.extractedTo).toBeUndefined();
       }
     } finally {
-      rmSync(workspace, { recursive: true, force: true });
+      rmSync(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 });

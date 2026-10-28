@@ -8,8 +8,8 @@ import {
   type DaemonHandle,
   FAKE_AGENT,
   readLog,
-  readPids,
   startDaemon,
+  stopTestChildren,
   tmp,
 } from "./helpers";
 
@@ -76,13 +76,9 @@ describe("agent-to-agent bridge e2e", () => {
       daemon.proc.kill("SIGKILL");
     } catch {}
     await daemon.proc.exited;
-    for (const pid of readPids(stateDir)) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {}
-    }
+    await stopTestChildren(stateDir);
     for (const d of [dataDir, agentsRoot, stateDir, sharedRoot]) {
-      rmSync(d, { recursive: true, force: true });
+      rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 

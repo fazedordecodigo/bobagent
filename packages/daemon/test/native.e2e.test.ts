@@ -8,6 +8,7 @@ import {
   readLog,
   readPids,
   startDaemon,
+  stopTestChildren,
   tmp,
   waitForPidDead,
 } from "./helpers";
@@ -98,12 +99,9 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
       daemon.proc.kill("SIGKILL");
     } catch {}
     await daemon.proc.exited;
-    for (const pid of readPids(stateDir)) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {}
-    }
-    for (const d of [dataDir, agentsRoot, stateDir]) rmSync(d, { recursive: true, force: true });
+    await stopTestChildren(stateDir);
+    for (const d of [dataDir, agentsRoot, stateDir])
+      rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   test("echo + thinking stream into items without duplication", async () => {
@@ -288,7 +286,9 @@ describe("codex signed out", () => {
       c.close();
       d.proc.kill("SIGKILL");
       await d.proc.exited;
-      for (const p of [dataDir, agentsRoot, stateDir]) rmSync(p, { recursive: true, force: true });
+      await stopTestChildren(stateDir);
+      for (const p of [dataDir, agentsRoot, stateDir])
+        rmSync(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 });

@@ -3,7 +3,14 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Agent, ChatItem, Turn, VaultEntry } from "@upbot/protocol";
-import { DaemonClient, type DaemonHandle, FAKE_AGENT, readPids, startDaemon, tmp } from "./helpers";
+import {
+  DaemonClient,
+  type DaemonHandle,
+  FAKE_AGENT,
+  startDaemon,
+  stopTestChildren,
+  tmp,
+} from "./helpers";
 
 const TOKEN = `p11-test-${crypto.randomUUID()}`;
 
@@ -103,13 +110,9 @@ describe("vault, connectors, computer use, voice e2e", () => {
       daemon.proc.kill("SIGKILL");
     } catch {}
     await daemon.proc.exited;
-    for (const pid of readPids(stateDir)) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {}
-    }
+    await stopTestChildren(stateDir);
     for (const d of [dataDir, agentsRoot, stateDir, work])
-      rmSync(d, { recursive: true, force: true });
+      rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   test("vault encrypts secrets and enforces the per-agent allowlist", async () => {

@@ -1,7 +1,14 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { rmSync } from "node:fs";
 import type { Agent, MobileStatus } from "@upbot/protocol";
-import { DaemonClient, type DaemonHandle, FAKE_AGENT, readPids, startDaemon, tmp } from "./helpers";
+import {
+  DaemonClient,
+  type DaemonHandle,
+  FAKE_AGENT,
+  startDaemon,
+  stopTestChildren,
+  tmp,
+} from "./helpers";
 
 setDefaultTimeout(30000);
 const TOKEN = `mob-test-${crypto.randomUUID()}`;
@@ -56,12 +63,9 @@ describe("mobile companion e2e", () => {
       daemon.proc.kill("SIGKILL");
     } catch {}
     await daemon.proc.exited;
-    for (const pid of readPids(stateDir)) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {}
-    }
-    for (const d of [dataDir, agentsRoot, stateDir]) rmSync(d, { recursive: true, force: true });
+    await stopTestChildren(stateDir);
+    for (const d of [dataDir, agentsRoot, stateDir])
+      rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   test("disabled by default; pairing needs it enabled", async () => {

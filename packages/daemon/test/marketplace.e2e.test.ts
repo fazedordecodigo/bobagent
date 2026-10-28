@@ -59,7 +59,7 @@ describe("marketplace e2e", () => {
     } catch {}
     await daemon.proc.exited;
     for (const d of [dataDir, agentsRoot, sharedRoot, market])
-      rmSync(d, { recursive: true, force: true });
+      rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   const list = () =>

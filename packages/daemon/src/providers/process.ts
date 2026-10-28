@@ -133,13 +133,19 @@ export function spawnProvider(
   remote?: RemoteLaunch,
 ): ProviderProcess {
   const stderrLines: string[] = [];
-  const child = remote
-    ? remote.spawn([bin, ...args], { NO_COLOR: "1", ...extraEnv })
-    : spawnChild(bin, args, {
-        cwd,
-        stdio: ["pipe", "pipe", "pipe"],
-        env: spawnEnv({ NO_COLOR: "1", ...extraEnv }),
-      });
+  let child: ChildProcess;
+  try {
+    child = remote
+      ? remote.spawn([bin, ...args], { NO_COLOR: "1", ...extraEnv })
+      : spawnChild(bin, args, {
+          cwd,
+          stdio: ["pipe", "pipe", "pipe"],
+          env: spawnEnv({ NO_COLOR: "1", ...extraEnv }),
+        });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new ProviderError("provider_unavailable", `${bin} failed to start: ${detail}`);
+  }
   const spawnReady = waitForChildSpawn(child);
   void spawnReady.catch(() => {});
   let hasSpawned = false;

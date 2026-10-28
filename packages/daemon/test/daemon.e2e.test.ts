@@ -169,12 +169,13 @@ describe("daemon e2e", () => {
     daemon = await startDaemon(dataDir, agentsRoot);
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     try {
       daemon.proc.kill("SIGKILL");
     } catch {}
-    rmSync(dataDir, { recursive: true, force: true });
-    rmSync(agentsRoot, { recursive: true, force: true });
+    await daemon.proc.exited;
+    rmSync(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    rmSync(agentsRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   test("health: token -> 200, no token -> 401, bad origin -> 403", async () => {

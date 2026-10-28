@@ -63,7 +63,7 @@ afterEach(() => {
   }
   originals.clear();
   resetPathCache();
-  if (root) rmSync(root, { recursive: true, force: true });
+  if (root) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 describe("Linux Secret Service vault key", () => {
