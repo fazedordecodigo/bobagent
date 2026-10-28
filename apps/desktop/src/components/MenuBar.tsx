@@ -10,6 +10,7 @@ import { permissionActions } from "../lib/app-permissions";
 import { type ApprovalResult, approvalAction, decideApproval } from "../lib/approval-decisions";
 import { describeApproval, requiresFullReview } from "../lib/approval-description";
 import { DaemonClient } from "../lib/daemon";
+import { GLOBAL_PAUSE_KEY, globallyPaused, toggleGlobalPause } from "../lib/global-pause";
 import { nativeCommand } from "../lib/native";
 import { useThemePref } from "../lib/theme";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -76,15 +77,12 @@ export default function MenuBar() {
       client.request("approvals.list", {}),
       client.request("email.drafts.list", { pendingOnly: true }),
     ]);
-    const queues = await Promise.all(
-      list.map((agent) => client.request("queue.get", { agentId: agent.id })),
-    );
     if (version !== generation.current) return;
     setAgents(list);
     setStatuses(status);
     setApprovals(pending.filter((item) => item.status === "pending"));
     setDrafts(mail.filter((item) => item.status === "pending" || item.status === "failed"));
-    setPaused(queues.length > 0 && queues.every((queue) => queue.paused));
+    setPaused(globallyPaused(localStorage).length > 0);
     setReady(true);
   }, [client]);
   useEffect(() => {
@@ -116,6 +114,14 @@ export default function MenuBar() {
       client.close();
     };
   }, [client, load]);
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === GLOBAL_PAUSE_KEY)
+        void load().catch((e: unknown) => setError(errorMessage(e)));
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [load]);
   const perform = useCallback(async (id: string, action: () => Promise<unknown>) => {
     if (working.current.has(id)) return;
     working.current.add(id);
@@ -193,17 +199,14 @@ export default function MenuBar() {
               { label: "Abrir o UpBot", onSelect: () => open() },
               {
                 label: paused ? "Retomar bots" : "Pausar bots",
-                disabled: !ready || agents.length === 0 || busy.includes("queues"),
+                disabled: !ready || (!paused && agents.length === 0) || busy.includes("queues"),
                 onSelect: () =>
                   void perform("queues", async () => {
-                    await Promise.all(
-                      agents.map((agent) =>
-                        client.request(paused ? "queue.resume" : "queue.pause", {
-                          agentId: agent.id,
-                        }),
-                      ),
-                    );
-                    await load();
+                    try {
+                      await toggleGlobalPause(client, localStorage);
+                    } finally {
+                      await load();
+                    }
                   }),
               },
               {

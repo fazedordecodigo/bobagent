@@ -257,23 +257,42 @@ test("main-window decisions remove menubar requests; sensitive calls never offer
 }, 30000);
 
 test("overflow keyboard menu pauses all real queues, syncs theme and confirms exit", async () => {
+  await rpc.request("queue.pause", { agentId: second.id });
   const more = page.getByRole("button", { name: "Mais opções", exact: true });
   await more.focus();
   await page.keyboard.press("Enter");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
+  await more.click();
+  await page
+    .getByRole("menuitem", { name: "Retomar bots", exact: true, disabled: false })
+    .waitFor();
   for (const agent of [bot, second])
     expect(((await rpc.request("queue.get", { agentId: agent.id })) as QueueState).paused).toBe(
       true,
     );
+  await page.keyboard.press("Escape");
+  await page.reload();
+  await page.getByText("Nada aguardando você", { exact: true }).waitFor();
+  const created = (await rpc.request("agents.create", {
+    name: "Novo bot",
+    provider: "devin",
+  })) as Agent;
+  await rpc.request("queue.pause", { agentId: created.id });
   await more.click();
   await page.getByRole("menuitem", { name: "Retomar bots", exact: true }).waitFor();
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
-  for (const agent of [bot, second])
+  await more.click();
+  await page.getByRole("menuitem", { name: "Pausar bots", exact: true, disabled: false }).waitFor();
+  await page.keyboard.press("Escape");
+  expect(((await rpc.request("queue.get", { agentId: bot.id })) as QueueState).paused).toBe(false);
+  for (const agent of [second, created])
     expect(((await rpc.request("queue.get", { agentId: agent.id })) as QueueState).paused).toBe(
-      false,
+      true,
     );
+  await rpc.request("queue.resume", { agentId: second.id });
+  await rpc.request("agents.delete", { id: created.id });
   await main.evaluate(() => {
     localStorage.setItem("upbot.theme", "light");
   });
