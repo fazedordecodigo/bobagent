@@ -8,8 +8,8 @@ import {
   type DaemonHandle,
   FAKE_AGENT,
   ROOT,
-  readPids,
   startDaemon,
+  stopTestChildren,
   tmp,
 } from "./helpers";
 
@@ -66,17 +66,15 @@ describe("connected apps (MCP) e2e", () => {
     })) as Agent;
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     c?.close();
     try {
       daemon.proc.kill("SIGKILL");
     } catch {}
-    for (const pid of readPids(stateDir)) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {}
-    }
-    for (const d of [dataDir, agentsRoot, stateDir]) rmSync(d, { recursive: true, force: true });
+    await daemon.proc.exited;
+    await stopTestChildren(stateDir);
+    for (const d of [dataDir, agentsRoot, stateDir])
+      rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   test("catalog lists built-in apps; catalog apps require their secret", async () => {

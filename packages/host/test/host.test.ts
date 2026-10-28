@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -97,7 +97,7 @@ describe("upbot-host", () => {
         /^\d{4}-\d\d-\d\dT[\d:.]+Z api\.example\.com:443 allowed 203\.0\.113\.1$/,
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 
@@ -129,7 +129,7 @@ describe("upbot-host", () => {
     } finally {
       await new Promise<void>((resolve) => proxy.close(() => resolve()));
       await new Promise<void>((resolve) => target.close(() => resolve()));
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 
@@ -216,12 +216,21 @@ describe("upbot-host", () => {
   test("local run executes the command in the agent workspace", () => {
     const root = mkdtempSync(join(tmpdir(), "host-root-"));
     const r = spawnSync("bun", [MAIN, "run"], {
-      input: `${JSON.stringify({ agentId: "ag1", isolation: "none", cmd: ["sh", "-c", "pwd; cat"] })}\nhello`,
+      input: `${JSON.stringify({
+        agentId: "ag1",
+        isolation: "none",
+        cmd: [
+          process.execPath,
+          "-e",
+          "console.log(process.cwd()); process.stdin.pipe(process.stdout)",
+        ],
+      })}\nhello`,
       env: { ...process.env, UPBOT_HOST_ROOT: root },
       encoding: "utf8",
     });
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain(join(root, "agents", "ag1"));
+    const actual = r.stdout.split(/\r?\n/, 1)[0]!;
+    expect(realpathSync(actual)).toBe(realpathSync(join(root, "agents", "ag1")));
     expect(r.stdout).toContain("hello");
   });
 });

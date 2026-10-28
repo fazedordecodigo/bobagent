@@ -4,13 +4,14 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Agent, ChatItem, Routine, RoutineRun, Turn } from "@upbot/protocol";
 import { parseSchedule } from "../src/routines";
+import { storedZip } from "./fixtures/stored-zip";
 import {
   DaemonClient,
   type DaemonHandle,
   FAKE_AGENT,
   readLog,
-  readPids,
   startDaemon,
+  stopTestChildren,
   tmp,
 } from "./helpers";
 
@@ -73,17 +74,15 @@ describe("routines + attachments e2e", () => {
     })) as Agent;
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     c?.close();
     try {
       daemon.proc.kill("SIGKILL");
     } catch {}
-    for (const pid of readPids(stateDir)) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {}
-    }
-    for (const d of [dataDir, agentsRoot, stateDir]) rmSync(d, { recursive: true, force: true });
+    await daemon.proc.exited;
+    await stopTestChildren(stateDir);
+    for (const d of [dataDir, agentsRoot, stateDir])
+      rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   test("create validates the schedule", async () => {
@@ -164,10 +163,9 @@ describe("routines + attachments e2e", () => {
   });
 
   test("attachments are saved in the workspace, zips extracted, paths given to the agent", async () => {
-    const work = tmp("p9-zip-");
-    writeFileSync(join(work, "notes.txt"), "zipped content");
-    expect(Bun.spawnSync(["zip", "-q", "bundle.zip", "notes.txt"], { cwd: work }).exitCode).toBe(0);
-    const zip = readFileSync(join(work, "bundle.zip")).toString("base64");
+    const zip = storedZip([
+      { name: "notes.txt", contents: Buffer.from("zipped content") },
+    ]).toString("base64");
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64");
     const { queueId } = (await c.request("chat.send", {
       agentId: a.id,
@@ -195,6 +193,5 @@ describe("routines + attachments e2e", () => {
     expect(p).toContain("<attachments>");
     expect(p).toContain("shot.png (image, image/png, 4 bytes)");
     expect(p).toContain("extracted to");
-    rmSync(work, { recursive: true, force: true });
   });
 });

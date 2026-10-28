@@ -3,7 +3,14 @@ import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Agent, ChatItem, EmailAccount, EmailDraft, Turn } from "@upbot/protocol";
 import { SMTPServer } from "smtp-server";
-import { DaemonClient, type DaemonHandle, FAKE_AGENT, readPids, startDaemon, tmp } from "./helpers";
+import {
+  DaemonClient,
+  type DaemonHandle,
+  FAKE_AGENT,
+  startDaemon,
+  stopTestChildren,
+  tmp,
+} from "./helpers";
 
 const TOKEN = `email-test-${crypto.randomUUID()}`;
 const APP_PASSWORD = "app-pass-secret-123";
@@ -120,19 +127,16 @@ describe("email connector e2e", () => {
     })) as Agent;
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     c?.close();
     smtp?.close();
     try {
       daemon.proc.kill("SIGKILL");
     } catch {}
-    for (const pid of readPids(stateDir)) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {}
-    }
+    await daemon.proc.exited;
+    await stopTestChildren(stateDir);
     for (const d of [dataDir, agentsRoot, stateDir, work])
-      rmSync(d, { recursive: true, force: true });
+      rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   let account: EmailAccount;

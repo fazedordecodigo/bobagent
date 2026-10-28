@@ -7,6 +7,7 @@ import {
   FAKE_AGENT,
   readPids,
   startDaemon,
+  stopTestChildren,
   tmp,
   waitForPidDead,
 } from "./helpers";
@@ -93,9 +94,12 @@ describe("ACP prompt first-activity watchdog", () => {
         await daemon.proc.exited;
       } catch {}
     }
-    if (dataDir) rmSync(dataDir, { recursive: true, force: true });
-    if (agentsRoot) rmSync(agentsRoot, { recursive: true, force: true });
-    if (stateDir) rmSync(stateDir, { recursive: true, force: true });
+    await stopTestChildren(stateDir);
+    if (dataDir) rmSync(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    if (agentsRoot)
+      rmSync(agentsRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    if (stateDir)
+      rmSync(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   test("non-OpenCode prompts can exceed the OpenCode watchdog threshold", async () => {

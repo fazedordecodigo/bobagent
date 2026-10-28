@@ -1,3 +1,6 @@
+import type { ChildProcess } from "node:child_process";
+import { resolveCommand, spawnEnv } from "./env/login-path";
+import { spawnChild } from "./env/spawn";
 import type { Vault } from "./vault";
 
 // Connectors use vault secrets the agent was granted, without returning the secret itself:
@@ -19,26 +22,39 @@ function command(envName: string, fallback: string[]): string[] {
 }
 
 async function run(cmd: string[], env: Record<string, string>): Promise<string> {
-  let proc: ReturnType<typeof Bun.spawn>;
+  let proc: ChildProcess;
   try {
-    proc = Bun.spawn(cmd, {
-      env: { ...process.env, ...env },
-      stdout: "pipe",
-      stderr: "pipe",
-      stdin: "ignore",
+    proc = spawnChild(resolveCommand(cmd[0]!) ?? cmd[0]!, cmd.slice(1), {
+      env: spawnEnv(env),
+      stdio: ["ignore", "pipe", "pipe"],
     });
   } catch {
     throw new Error(`${cmd[0]} is not installed`);
   }
+  const outPromise = new Promise<string>((resolve) => {
+    const chunks: Buffer[] = [];
+    proc.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
+    proc.stdout?.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    if (!proc.stdout) resolve("");
+  });
+  const errPromise = new Promise<string>((resolve) => {
+    const chunks: Buffer[] = [];
+    proc.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk));
+    proc.stderr?.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    if (!proc.stderr) resolve("");
+  });
+  const codePromise = new Promise<number>((resolve, reject) => {
+    proc.once("error", reject);
+    proc.once("close", (exitCode) => resolve(exitCode ?? 1));
+  });
   const timer = setTimeout(() => proc.kill(), 30_000);
-  const [out, err, code] = await Promise.all([
-    new Response(proc.stdout as ReadableStream).text(),
-    new Response(proc.stderr as ReadableStream).text(),
-    proc.exited,
-  ]);
-  clearTimeout(timer);
-  if (code !== 0) throw new Error(`${cmd[0]} failed: ${(err || out).trim().slice(0, 500)}`);
-  return out.trimEnd();
+  try {
+    const [out, err, code] = await Promise.all([outPromise, errPromise, codePromise]);
+    if (code !== 0) throw new Error(`${cmd[0]} failed: ${(err || out).trim().slice(0, 500)}`);
+    return out.trimEnd();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export class Connectors {

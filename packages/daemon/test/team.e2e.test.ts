@@ -2,7 +2,14 @@ import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Agent, TeamMessage, TeamStatus, VaultEntry } from "@upbot/protocol";
-import { DaemonClient, type DaemonHandle, FAKE_AGENT, readPids, startDaemon, tmp } from "./helpers";
+import {
+  DaemonClient,
+  type DaemonHandle,
+  FAKE_AGENT,
+  startDaemon,
+  stopTestChildren,
+  tmp,
+} from "./helpers";
 
 setDefaultTimeout(30000);
 
@@ -94,22 +101,19 @@ describe("teams via relay e2e", () => {
     })) as Agent;
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     for (const c of clients) c.close();
     relay?.proc.kill();
+    if (relay) await relay.proc.exited;
     for (const h of daemons) {
       try {
         h.proc.kill("SIGKILL");
       } catch {}
     }
-    for (const d of dirs) {
-      for (const pid of readPids(d)) {
-        try {
-          process.kill(pid, "SIGKILL");
-        } catch {}
-      }
-      rmSync(d, { recursive: true, force: true });
-    }
+    await Promise.all(daemons.map((h) => h.proc.exited));
+    await stopTestChildren(dirs);
+    for (const d of dirs)
+      rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   test("relay admin API requires the admin token", async () => {

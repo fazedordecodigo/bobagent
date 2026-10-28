@@ -2,12 +2,19 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Agent, AgentPlacement, ChatItem, RemoteHost, Subagent, Turn } from "@upbot/protocol";
-import { DaemonClient, type DaemonHandle, FAKE_AGENT, readPids, startDaemon, tmp } from "./helpers";
+import {
+  DaemonClient,
+  type DaemonHandle,
+  FAKE_AGENT,
+  startDaemon,
+  stopTestChildren,
+  tmp,
+} from "./helpers";
 
 const TOKEN = `remote-test-${crypto.randomUUID()}`;
 const FAKE_SSH = join(import.meta.dir, "fixtures/fake-ssh.ts");
 
-describe("remote hosts + subagents e2e", () => {
+describe.skipIf(process.platform === "win32")("remote hosts + subagents e2e", () => {
   let dataDir: string;
   let stateDir: string;
   let sshHome: string;
@@ -66,17 +73,14 @@ describe("remote hosts + subagents e2e", () => {
     })) as Agent;
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     c?.close();
     try {
       daemon.proc.kill("SIGKILL");
     } catch {}
-    for (const pid of readPids(stateDir)) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {}
-    }
-    rmSync(sshHome, { recursive: true, force: true });
+    await daemon.proc.exited;
+    await stopTestChildren(stateDir);
+    rmSync(sshHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   test("rejects ssh targets that look like options", async () => {

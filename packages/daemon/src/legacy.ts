@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { existsSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 
 // BobAgent -> UpBot: move ~/BobAgent to ~/UpBot (only for the default root) and
 // repoint stored workspace paths.
@@ -25,10 +25,11 @@ export function migrateLegacyHome(
     }
   }
   if (existsSync(legacy)) return;
+  const legacyPrefix = `${legacy}${sep}`;
   const res = db
     .query(
       "UPDATE agents SET workspace_path = ?1 || substr(workspace_path, ?2) WHERE substr(workspace_path, 1, ?3) = ?4",
     )
-    .run(root, legacy.length + 1, legacy.length + 1, `${legacy}/`);
+    .run(root, legacyPrefix.length, legacyPrefix.length, legacyPrefix);
   if (res.changes) log(`repointed ${res.changes} workspace path(s) to ${root}`);
 }

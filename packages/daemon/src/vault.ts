@@ -1,11 +1,20 @@
 import type { Database } from "bun:sqlite";
+import { spawnSync } from "node:child_process";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import type { VaultEntry } from "@upbot/protocol";
+import { resolveCommand } from "./env/login-path";
 
-// Encrypted secret store (AES-256-GCM). The key lives in the macOS Keychain (service
-// "UpBot", account "vault-key"), or <data-dir>/vault.key (0600) elsewhere;
+// Encrypted secret store (AES-256-GCM). The key uses the macOS Keychain, Windows DPAPI,
+// or Linux Secret Service where available, with a warned plaintext-file fallback.
 // UPBOT_VAULT_KEY (64 hex chars) overrides it for tests. Each secret has an agent
 // allowlist; agents read allowed secrets with the vault_get bridge tool.
 
@@ -34,6 +43,175 @@ function keychainKey(): Buffer | null {
   return add.exitCode === 0 ? Buffer.from(hex, "hex") : null;
 }
 
+function keyFromHex(value: string): Buffer | null {
+  return /^[0-9a-f]{64}$/i.test(value) ? Buffer.from(value, "hex") : null;
+}
+
+function runSecretTool(command: string, args: string[], input?: string) {
+  return spawnSync(command, args, {
+    input,
+    encoding: "utf8",
+    timeout: 10_000,
+    windowsHide: process.platform === "win32",
+    maxBuffer: 1024 * 1024,
+  });
+}
+
+function secretServiceKey(dataDir: string): Buffer | null {
+  const tool = resolveCommand("secret-tool");
+  const marker = join(dataDir, "vault.key.location");
+  if (!tool) {
+    if (existsSync(marker)) {
+      throw new Error(
+        "The UpBot vault key is stored in Secret Service, but secret-tool is unavailable.",
+      );
+    }
+    return null;
+  }
+
+  const lookup = () => {
+    const result = runSecretTool(tool, ["lookup", "service", "UpBot", "account", "vault-key"]);
+    return result.status === 0 ? keyFromHex(result.stdout.trim()) : null;
+  };
+  const existing = lookup();
+  if (existing) {
+    writeFileSync(marker, "secret-service\n", { mode: 0o600 });
+    return existing;
+  }
+  if (existsSync(marker)) {
+    throw new Error(
+      "The UpBot vault key could not be read from Secret Service. Unlock or restore the keyring before starting UpBot.",
+    );
+  }
+
+  const hex = randomBytes(32).toString("hex");
+  const stored = runSecretTool(
+    tool,
+    ["store", "--label=UpBot vault key", "service", "UpBot", "account", "vault-key"],
+    `${hex}\n`,
+  );
+  if (stored.status !== 0) return null;
+  if (lookup()?.toString("hex") !== hex) return null;
+  writeFileSync(marker, "secret-service\n", { mode: 0o600 });
+  return Buffer.from(hex, "hex");
+}
+
+function protectWithDpapi(hex: string): string {
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "Add-Type -AssemblyName System.Security",
+    "$hex = [Console]::In.ReadToEnd().Trim()",
+    "$bytes = [byte[]]::new([int]($hex.Length / 2))",
+    "for ($i = 0; $i -lt $bytes.Length; $i++) { $bytes[$i] = [Convert]::ToByte($hex.Substring($i * 2, 2), 16) }",
+    "[Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Protect($bytes, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser))",
+  ].join("; ");
+  const result = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", script],
+    {
+      input: hex,
+      encoding: "utf8",
+      timeout: 30_000,
+      windowsHide: true,
+      maxBuffer: 1024 * 1024,
+    },
+  );
+  if (result.error || result.status !== 0 || !result.stdout.trim()) {
+    throw result.error ?? new Error(result.stderr.trim() || "Windows DPAPI encryption failed");
+  }
+  return result.stdout.trim();
+}
+
+function unprotectWithDpapi(value: string): Buffer {
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "Add-Type -AssemblyName System.Security",
+    "$base64 = [Console]::In.ReadToEnd().Trim()",
+    "$bytes = [Convert]::FromBase64String($base64)",
+    "$plain = [Security.Cryptography.ProtectedData]::Unprotect($bytes, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)",
+    "-join ($plain | ForEach-Object { $_.ToString('x2') })",
+  ].join("; ");
+  const result = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", script],
+    {
+      input: value,
+      encoding: "utf8",
+      timeout: 30_000,
+      windowsHide: true,
+      maxBuffer: 1024 * 1024,
+    },
+  );
+  if (result.error || result.status !== 0) {
+    throw result.error ?? new Error(result.stderr.trim() || "Windows DPAPI decryption failed");
+  }
+  const key = keyFromHex(result.stdout.trim());
+  if (!key) throw new Error("Windows DPAPI returned an invalid UpBot vault key.");
+  return key;
+}
+
+export function loadVaultKey(
+  dataDir: string,
+  platform: NodeJS.Platform = process.platform,
+): Buffer {
+  const env = process.env.UPBOT_VAULT_KEY;
+  if (env && /^[0-9a-fA-F]{64}$/.test(env)) return Buffer.from(env, "hex");
+
+  if (platform === "darwin") {
+    const key = keychainKey();
+    if (key) return key;
+  }
+
+  const file = join(dataDir, "vault.key");
+  if (existsSync(file)) {
+    const key = keyFromHex(readFileSync(file, "utf8").trim());
+    if (!key) throw new Error("The UpBot vault key file is invalid.");
+    return key;
+  }
+
+  mkdirSync(dataDir, { recursive: true });
+  if (platform === "win32") {
+    const protectedFile = join(dataDir, "vault.key.dpapi");
+    const tempFile = `${protectedFile}.tmp`;
+    if (existsSync(protectedFile)) {
+      try {
+        return unprotectWithDpapi(readFileSync(protectedFile, "utf8").trim());
+      } catch (error) {
+        throw new Error("The UpBot vault key could not be decrypted with Windows DPAPI.", {
+          cause: error,
+        });
+      }
+    }
+    const key = randomBytes(32);
+    try {
+      writeFileSync(tempFile, protectWithDpapi(key.toString("hex")), { mode: 0o600 });
+      renameSync(tempFile, protectedFile);
+      return key;
+    } catch {
+      try {
+        unlinkSync(tempFile);
+      } catch {}
+      console.error(
+        "UpBot could not use Windows DPAPI; storing the vault key in a plaintext file.",
+      );
+      writeFileSync(file, key.toString("hex"), { mode: 0o600 });
+      return key;
+    }
+  }
+
+  if (platform === "linux") {
+    const key = secretServiceKey(dataDir);
+    if (key) return key;
+  }
+
+  console.error(
+    "UpBot could not use the platform secure store; storing the vault key in a plaintext file.",
+  );
+  const key = randomBytes(32);
+  writeFileSync(file, key.toString("hex"), { mode: 0o600 });
+  return key;
+}
+
 export class Vault {
   private cachedKey: Buffer | null = null;
 
@@ -44,19 +222,7 @@ export class Vault {
 
   private key(): Buffer {
     if (this.cachedKey) return this.cachedKey;
-    const env = process.env.UPBOT_VAULT_KEY;
-    if (env && /^[0-9a-fA-F]{64}$/.test(env)) {
-      this.cachedKey = Buffer.from(env, "hex");
-      return this.cachedKey;
-    }
-    const kc = keychainKey();
-    if (kc) {
-      this.cachedKey = kc;
-      return kc;
-    }
-    const file = join(this.dataDir, "vault.key");
-    if (!existsSync(file)) writeFileSync(file, randomBytes(32).toString("hex"), { mode: 0o600 });
-    this.cachedKey = Buffer.from(readFileSync(file, "utf8").trim(), "hex");
+    this.cachedKey = loadVaultKey(this.dataDir);
     return this.cachedKey;
   }
 

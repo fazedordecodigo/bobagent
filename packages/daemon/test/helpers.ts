@@ -198,6 +198,17 @@ export function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
+export async function stopTestChildren(stateDirs: string | string[] | undefined): Promise<void> {
+  const states = Array.isArray(stateDirs) ? stateDirs : stateDirs ? [stateDirs] : [];
+  const pids = [...new Set(states.flatMap((stateDir) => readPids(stateDir)))];
+  for (const pid of pids) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {}
+  }
+  await Promise.all(pids.map((pid) => waitForPidDead(pid).catch(() => {})));
+}
+
 export function pidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);

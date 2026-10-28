@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { isMac, mod } from "../lib/platform";
 import s from "./CommandPalette.module.css";
 
 export type PaletteItem = {
@@ -107,7 +108,9 @@ export function CommandPalette({
           {shown.length === 0 && <li className={s.empty}>Nenhum resultado.</li>}
         </ul>
         <div className={s.footer}>
-          ⌘K buscar · ⌘⇧F bots · ⌘N novo bot · ⌘1–9 trocar de bot · ⌘, configurações · ⌘P páginas
+          {mod}K buscar · {mod}
+          {isMac ? "⇧" : "Shift+"}F bots · {mod}N novo bot · {mod}1–9 trocar de bot · {mod},
+          configurações · {mod}P páginas
         </div>
       </div>
     </div>

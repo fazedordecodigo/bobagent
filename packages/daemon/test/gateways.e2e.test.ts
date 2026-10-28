@@ -5,7 +5,14 @@ setDefaultTimeout(30000);
 import { rmSync } from "node:fs";
 import type { Agent, ChatItem, Gateway, VaultEntry } from "@upbot/protocol";
 import { splitText } from "../src/gateways/common";
-import { DaemonClient, type DaemonHandle, FAKE_AGENT, readPids, startDaemon, tmp } from "./helpers";
+import {
+  DaemonClient,
+  type DaemonHandle,
+  FAKE_AGENT,
+  startDaemon,
+  stopTestChildren,
+  tmp,
+} from "./helpers";
 
 const TOKEN = `gw-test-${crypto.randomUUID()}`;
 type Json = Record<string, unknown>;
@@ -163,18 +170,16 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
     })) as Agent;
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     c?.close();
     fake?.stop(true);
     try {
       daemon.proc.kill("SIGKILL");
     } catch {}
-    for (const pid of readPids(stateDir)) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {}
-    }
-    for (const d of [dataDir, agentsRoot, stateDir]) rmSync(d, { recursive: true, force: true });
+    await daemon.proc.exited;
+    await stopTestChildren(stateDir);
+    for (const d of [dataDir, agentsRoot, stateDir])
+      rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   const tgMsg = (userId: number, text: string) => ({

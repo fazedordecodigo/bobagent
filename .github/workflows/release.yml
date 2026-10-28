@@ -1,24 +1,87 @@
 name: Release
 
-# Push a tag like v0.2.0 (matching apps/desktop/src-tauri/tauri.conf.json "version") to build
-# UpBot.app + .dmg, sign the updater artifacts and publish a GitHub release with latest.json.
-# macOS code signing + notarization run when the APPLE_* secrets are set; otherwise the build
-# is unsigned (Gatekeeper will ask users to right-click > Open).
+# Push a v* tag (matching apps/desktop/src-tauri/tauri.conf.json "version") to build the
+# macOS app/dmg, Linux AppImage/deb, and unsigned Windows NSIS installer. The release remains
+# a draft until updater metadata has been composed from every platform's assets.
+# Dispatch requires a tag.
+# macOS signing/notarization run when the APPLE_* secrets are configured.
 
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v* tag to release
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: macos-14
-    timeout-minutes: 60
+  create-release:
+    runs-on: ubuntu-22.04
+    outputs:
+      id: ${{ steps.release.outputs.id }}
+      tag: ${{ steps.release.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - name: Create or reuse draft release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          DISPATCH_TAG: ${{ inputs.tag }}
+          REF_TAG: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          tag="$REF_TAG"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$DISPATCH_TAG"
+          fi
+          if [[ ! "$tag" =~ ^v[0-9] ]]; then
+            echo "Expected a version tag such as v0.3.0; got '$tag'." >&2
+            exit 1
+          fi
+          if release="$(gh release view "$tag" --json databaseId,isDraft 2>/dev/null)"; then
+            if [ "$(jq -r .isDraft <<< "$release")" != "true" ]; then
+              echo "Release $tag already exists and is not a draft." >&2
+              exit 1
+            fi
+            id="$(jq -r .databaseId <<< "$release")"
+          else
+            gh release create "$tag" --draft --title "UpBot $tag" \
+              --notes "See the commits since the previous release."
+            release="$(gh release view "$tag" --json databaseId,isDraft)"
+            id="$(jq -r .databaseId <<< "$release")"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            bundles: app,dmg
+          - os: ubuntu-22.04
+            bundles: appimage,deb
+          - os: windows-latest
+            bundles: nsis
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-release.outputs.tag }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
@@ -26,9 +89,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri
+      - name: Install Linux Tauri dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
+            libssl-dev build-essential zip unzip
       - run: bun install --frozen-lockfile
       - run: bun run test
       - name: Enable Apple signing when configured
+        if: runner.os == 'macOS'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -59,9 +130,43 @@ jobs:
         with:
           projectPath: apps/desktop
           tauriScript: bunx tauri
-          args: --bundles app,dmg --config {"bundle":{"createUpdaterArtifacts":true}}
-          tagName: ${{ github.ref_name }}
-          releaseName: UpBot ${{ github.ref_name }}
-          releaseBody: See the commits since the previous release.
-          releaseDraft: false
-          includeUpdaterJson: true
+          args: --bundles ${{ matrix.bundles }} --config src-tauri/tauri.updater.conf.json
+          releaseId: ${{ needs.create-release.outputs.id }}
+          tagName: ${{ needs.create-release.outputs.tag }}
+          includeUpdaterJson: false
+
+  publish:
+    needs: [create-release, build]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-release.outputs.tag }}
+      - name: Compose and upload updater metadata
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.create-release.outputs.tag }}
+        run: |
+          dir="$RUNNER_TEMP/upbot-release"
+          mkdir -p "$dir"
+          gh release view "$TAG" --json assets > "$dir/assets.json"
+          gh release view "$TAG" --json body --jq .body > "$dir/notes.md"
+          gh release download "$TAG" --pattern '*.sig' --dir "$dir"
+          version="$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)"
+          python3 scripts/compose-latest.py \
+            --assets-json "$dir/assets.json" \
+            --signatures-dir "$dir" \
+            --repository "$GH_REPO" \
+            --tag "$TAG" \
+            --expected-version "$version" \
+            --notes-file "$dir/notes.md" \
+            --output "$dir/latest.json"
+          gh release upload "$TAG" "$dir/latest.json" --clobber
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.create-release.outputs.tag }}
+        run: |
+          gh release edit "$TAG" --draft=false --latest

@@ -419,7 +419,7 @@ export class Rpc {
         return this.extras.voice.status();
       case "voice.speak":
         try {
-          this.extras.voice.speak((params as { text: string }).text);
+          await this.extras.voice.speak((params as { text: string }).text);
         } catch (e) {
           throw new RpcError("bad_request", (e as Error).message);
         }

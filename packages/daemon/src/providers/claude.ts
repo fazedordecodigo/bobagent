@@ -498,6 +498,7 @@ export class ClaudeDriver implements ProviderDriver {
     );
     let init: Json;
     try {
+      await proc.waitForSpawn();
       init = await withTimeout(
         session.request("initialize", { hooks: null }),
         INIT_TIMEOUT_MS,

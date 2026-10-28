@@ -512,6 +512,7 @@ export class CodexDriver implements ProviderDriver {
     );
     const session = new CodexSession(proc, hooks, [cwd, ...(opts.extraDirs ?? [])], vmKey);
     try {
+      await proc.waitForSpawn();
       await session.request("initialize", {
         clientInfo: { name: "upbot", title: "UpBot", version: "0.3.0" },
         capabilities: null,
