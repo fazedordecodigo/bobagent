@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright-core";
 import { chromium } from "playwright-core";
+import { expectSwitchGeometry } from "./switch-geometry";
 
 let browser: Browser;
 let page: Page;
@@ -81,6 +82,30 @@ test("switches, segments and buttons work with keyboard and preserve disabled st
   expect(await page.getByRole("status").textContent()).toBe(
     "Exemplo demonstrado. Nenhum relatório foi enviado.",
   );
+});
+
+test("kit switch tracks contain knobs on and off in both themes", async () => {
+  for (const theme of ["light", "dark"]) {
+    await page
+      .getByRole("button", { name: theme === "light" ? "Tema claro" : "Tema escuro", exact: true })
+      .click();
+    const daily = page.getByRole("switch", { name: "Resumo diário às 8h" });
+    for (const checked of [false, true]) {
+      if ((await daily.getAttribute("aria-checked")) !== String(checked)) await daily.click();
+      expect(await daily.getAttribute("aria-checked")).toBe(String(checked));
+      for (const control of await page.getByRole("switch").all()) {
+        await expectSwitchGeometry(control, "span");
+      }
+    }
+    const directory = process.env.PHASE6_SCREEN_DIR;
+    if (directory) {
+      mkdirSync(directory, { recursive: true });
+      await page
+        .getByRole("heading", { name: "Ajustes · switch" })
+        .locator("..")
+        .screenshot({ path: join(directory, `switch-kit-${theme}.png`) });
+    }
+  }
 });
 
 test("theme persists, focus is visible, colors invert, reduced motion stops pulse", async () => {

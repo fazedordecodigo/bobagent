@@ -494,7 +494,6 @@
     .brand { font-weight: 800; }
     .mono-av { color: var(--fg); }
     .panel-head { height: 52px; }
-    .switch::before { content: ''; position: absolute; inset: -11px -4px; }
     .switch::after { box-shadow: none; }
     .meta { font-variant-numeric: tabular-nums; }
     .seg button { min-height: 44px; min-width: 44px; }

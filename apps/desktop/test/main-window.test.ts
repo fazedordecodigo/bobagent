@@ -12,6 +12,7 @@ import {
   startDaemon,
   stopTestChildren,
 } from "../../../packages/daemon/test/helpers";
+import { expectSwitchGeometry } from "./switch-geometry";
 
 let daemon: DaemonHandle;
 let rpc: DaemonClient;
@@ -335,6 +336,54 @@ test("real chat, approval once/always/undo, details, palette, settings and drawe
     await page.setViewportSize({ width: 1440, height: 1000 });
   }
 }, 90000);
+
+test("RunPanel switch tracks contain their knobs on and off in both themes", async () => {
+  const previous = (await rpc.request("approvals.rules", {})) as ApprovalRule[];
+  try {
+    for (const theme of ["light", "dark"]) {
+      await rpc.request("approvals.setRules", {
+        rules: [
+          ...previous.filter((rule) => rule.agentId !== bot.id),
+          {
+            id: crypto.randomUUID(),
+            agentId: bot.id,
+            pattern: "switch_geometry_check",
+            action: "ask",
+          },
+        ],
+      });
+      await page.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+      await page.evaluate((value) => localStorage.setItem("upbot.theme", value), theme);
+      await page.reload();
+      await page.locator(".side").waitFor();
+      await page.keyboard.press("Meta+1");
+      if (!(await page.locator(".panel").isVisible())) {
+        await page.getByRole("button", { name: "Alternar painel de execução" }).click();
+      }
+      const permissions = page.locator('[data-od-id="panel-perms"]');
+      for (const name of ["Agir sem perguntar", "switch_geometry_check"]) {
+        const control = permissions.getByRole("switch", { name, exact: true });
+        for (const checked of [false, true, false]) {
+          if ((await control.getAttribute("aria-checked")) !== String(checked)) {
+            await control.click();
+          }
+          await permissions.getByRole("switch", { name, exact: true, checked }).waitFor();
+          await expectSwitchGeometry(control);
+        }
+      }
+      await permissions.getByRole("switch", { name: "switch_geometry_check", exact: true }).click();
+      await permissions
+        .getByRole("switch", { name: "switch_geometry_check", checked: true })
+        .waitFor();
+      await expectSwitchGeometry(
+        permissions.getByRole("switch", { name: "switch_geometry_check" }),
+      );
+      if (out) await permissions.screenshot({ path: join(out, `switch-runpanel-${theme}.png`) });
+    }
+  } finally {
+    await rpc.request("approvals.setRules", { rules: previous });
+  }
+}, 30000);
 
 test("app requests, permissions dialog and sensitive conversation decisions stay synchronized", async () => {
   for (const theme of ["light", "dark"] as const) {
