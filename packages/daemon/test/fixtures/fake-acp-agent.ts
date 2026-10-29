@@ -12,6 +12,7 @@
 //   tools          -> tool_call tc-a + tc-b, interleaved tool_call_updates (incl. an
 //                     orphan update for tc-orphan) -> message "tools:done"
 //   slow           -> a chunk every 100ms; responds to session/cancel
+//   slowseq        -> sequenced chunks every 100ms; responds to session/cancel
 //   ignorecancel   -> streams forever, ignores session/cancel
 //   crash          -> one chunk then process.exit(1)
 
@@ -372,6 +373,16 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
   if (text === "slow") {
     while (!cancelledSessions.has(sessionId)) {
       await say("agent_message_chunk", ".");
+      await sleep(100);
+    }
+    return { stopReason: "cancelled" };
+  }
+
+  if (text === "slowseq") {
+    let i = 0;
+    while (!cancelledSessions.has(sessionId)) {
+      await say("agent_message_chunk", `${i}|`);
+      i += 1;
       await sleep(100);
     }
     return { stopReason: "cancelled" };
