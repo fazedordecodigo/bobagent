@@ -413,6 +413,18 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
       .grantPermissions(["clipboard-read", "clipboard-write"], { origin: "http://localhost:1420" });
     const name = page.getByLabel("Nome do agente");
     await name.waitFor();
+    const waitForRestoredConfig = () =>
+      page.waitForFunction(
+        ({ expectedName, expectedInstructions }) =>
+          (document.querySelector("#agent-name") as HTMLInputElement | null)?.value ===
+            expectedName &&
+          (
+            document.querySelector(
+              'textarea[aria-label="Instruções"]',
+            ) as HTMLTextAreaElement | null
+          )?.value === expectedInstructions,
+        { expectedName: currentAgent.name, expectedInstructions: currentAgent.instructions },
+      );
     await page.waitForFunction(
       (expected) =>
         (document.querySelector("#agent-name") as HTMLInputElement | null)?.value === expected,
@@ -519,6 +531,7 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
     await deletedToast.getByRole("button", { name: "Desfazer", exact: true }).waitFor();
     await deletedToast.getByRole("button", { name: "Desfazer", exact: true }).click();
     await page.getByLabel("Instruções").waitFor();
+    await waitForRestoredConfig();
     expect(
       ((await rpc.request("agents.list", {})) as Agent[]).some(
         (item) => item.id === currentAgent.id,
@@ -539,13 +552,8 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
       await failureToast.getByRole("button", { name: "Desfazer", exact: true }).waitFor();
       await rpc.request("agents.delete", { id: currentAgent.id });
       await failureToast.getByRole("button", { name: "Desfazer", exact: true }).click();
-      await page.getByLabel("Instruções").waitFor();
+      await waitForRestoredConfig();
       await failureToast.waitFor({ state: "detached" });
-      await page.waitForFunction(
-        (expected) =>
-          (document.querySelector("#agent-name") as HTMLInputElement | null)?.value === expected,
-        currentAgent.name,
-      );
       expect(
         ((await rpc.request("agents.list", {})) as Agent[]).some(
           (item) => item.id === currentAgent.id,
