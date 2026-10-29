@@ -159,7 +159,9 @@ fn main() {
         ))
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             notifications::forward_launch(app, &args);
-            let _ = notifications::notifications_open(app.clone());
+            if let Err(e) = notifications::notifications_open(app.clone()) {
+                log::warn!("could not focus main window: {e}");
+            }
         }))
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
@@ -197,7 +199,9 @@ fn main() {
                 let state = app_handle.state::<SharedState>();
                 let mut inner = state.inner.lock().unwrap();
                 if let Some(child) = inner.child.take() {
-                    let _ = child.kill();
+                    if let Err(e) = child.kill() {
+                        log::warn!("could not kill upbotd: {e}");
+                    }
                 }
             }
         });
