@@ -27,6 +27,18 @@ type MsgRow = {
   created_at: number;
 };
 
+// Relay-provided ids are untrusted: log them only when they look like ids.
+const logId = (v: unknown) =>
+  typeof v === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(v) ? v : "invalid";
+
+// The relay has no delivery ack, so an `out` request whose reply never comes (e.g. the relay
+// dropped it because we were offline) fails after this TTL; a late reply still overwrites it.
+const REPLY_TTL_MS = (() => {
+  const v = Number(process.env.UPBOT_TEAM_REPLY_TTL_MS);
+  return Number.isFinite(v) && v > 0 ? v : 30 * 60_000;
+})();
+const EXPIRED_REPLY = "No reply from the teammate in time; the relay may have dropped it.";
+
 const toMessage = (r: MsgRow): TeamMessage => ({
   id: r.id,
   requestId: r.request_id,
@@ -48,6 +60,7 @@ export class TeamClient {
   private me: { id: string; name: string } | null = null;
   private roster: TeamMember[] = [];
   private retry: ReturnType<typeof setTimeout> | null = null;
+  private expiry: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private db: Database,
@@ -85,7 +98,29 @@ export class TeamClient {
   }
 
   start() {
+    this.expirePending();
+    this.expiry ??= setInterval(
+      () => this.expirePending(),
+      Math.max(100, Math.min(REPLY_TTL_MS / 2, 60_000)),
+    );
+    this.expiry.unref?.();
     if (this.config()) this.open(1000);
+  }
+
+  private expirePending() {
+    const rows = this.db
+      .query(
+        "SELECT id FROM team_messages WHERE direction = 'out' AND status = 'pending' AND created_at <= ?",
+      )
+      .all(Date.now() - REPLY_TTL_MS) as { id: string }[];
+    for (const { id } of rows) {
+      this.db
+        .query(
+          "UPDATE team_messages SET reply = ?, status = 'failed' WHERE id = ? AND status = 'pending'",
+        )
+        .run(EXPIRED_REPLY, id);
+      this.emitRow(id);
+    }
   }
 
   connect(url: string, token: string): TeamStatus {
@@ -193,6 +228,11 @@ export class TeamClient {
     return msg;
   }
 
+  private emitRow(id: string) {
+    const r = this.db.query("SELECT * FROM team_messages WHERE id = ?").get(id) as MsgRow | null;
+    if (r) this.broadcast("team.message", toMessage(r));
+  }
+
   private sendShare() {
     if (!this.connected || !this.ws) return;
     const ids = this.config()?.sharedAgentIds ?? [];
@@ -242,7 +282,11 @@ export class TeamClient {
       this.roster = [];
       if (ev.code === 4001) this.error = "you were removed from the team";
       this.emit();
-      if (ev.code === 4001) return;
+      if (ev.code === 4001) {
+        console.error(`[upbotd] team relay closed code=${ev.code}`);
+        return;
+      }
+      console.error(`[upbotd] team relay closed code=${ev.code} retryInMs=${backoff}`);
       this.retry = setTimeout(() => this.open(Math.min(backoff * 2, 30_000)), backoff);
     };
   }
@@ -288,7 +332,10 @@ export class TeamClient {
   }) {
     const shared = this.config()?.sharedAgentIds ?? [];
     const agent = this.agents.get(m.agentId);
-    const fail = (text: string) =>
+    const fail = (text: string, reason: string) => {
+      console.error(
+        `[upbotd] team request rejected requestId=${logId(m.requestId)} agentId=${logId(m.agentId)} reason=${reason}`,
+      );
       this.ws?.send(
         JSON.stringify({
           type: "reply",
@@ -298,11 +345,12 @@ export class TeamClient {
           text,
         }),
       );
+    };
     if (!agent || !shared.includes(agent.id)) {
-      fail("that agent is not shared");
+      fail("that agent is not shared", "not_shared");
       return;
     }
-    this.record({
+    const row = this.record({
       requestId: m.requestId,
       direction: "in",
       memberId: m.from.memberId,
@@ -318,18 +366,29 @@ export class TeamClient {
         hops: 0,
         prompt,
         meta: {
-          team: { requestId: m.requestId, memberId: m.from.memberId, memberName: m.from.name },
+          team: {
+            requestId: m.requestId,
+            memberId: m.from.memberId,
+            memberName: m.from.name,
+            agentId: agent.id,
+          },
         },
       });
     } catch (e) {
-      fail((e as Error).message);
+      const text = (e as Error).message;
+      const code = (e as { code?: unknown }).code;
+      fail(text, typeof code === "string" && /^[a-z_]{1,40}$/.test(code) ? code : "error");
+      this.db
+        .query("UPDATE team_messages SET reply = ?, status = 'failed' WHERE id = ?")
+        .run(text, row.id);
+      this.emitRow(row.id);
     }
   }
 
   onTurnEnded(turn: Turn, queueRow: { meta_json: string | null } | null) {
     if (!queueRow?.meta_json) return;
     const meta = JSON.parse(queueRow.meta_json) as {
-      team?: { requestId: string; memberId: string };
+      team?: { requestId: string; memberId: string; agentId?: string };
     };
     if (!meta.team) return;
     const text =
@@ -344,20 +403,29 @@ export class TeamClient {
           ? `The agent failed: ${turn.error ?? "unknown error"}`
           : "The agent stopped before replying.";
     const status = turn.status === "completed" ? "completed" : "failed";
-    this.ws?.send(
-      JSON.stringify({
-        type: "reply",
-        requestId: meta.team.requestId,
-        toMemberId: meta.team.memberId,
-        status,
-        text,
-      }),
-    );
+    // Only means the reply was handed to an open relay socket: the relay has no delivery
+    // ack and drops replies to members that are offline, so the teammate may never get it.
+    const handedToRelay = this.connected && this.ws?.readyState === WebSocket.OPEN;
+    if (handedToRelay) {
+      this.ws?.send(
+        JSON.stringify({
+          type: "reply",
+          requestId: meta.team.requestId,
+          toMemberId: meta.team.memberId,
+          status,
+          text,
+        }),
+      );
+    } else {
+      console.error(
+        `[upbotd] team reply not delivered requestId=${logId(meta.team.requestId)} agentId=${meta.team.agentId ? logId(meta.team.agentId) : "unknown"} memberId=${logId(meta.team.memberId)} status=${status}`,
+      );
+    }
     this.db
       .query(
         "UPDATE team_messages SET reply = ?, status = ? WHERE request_id = ? AND direction = 'in'",
       )
-      .run(text, status, meta.team.requestId);
+      .run(text, handedToRelay ? status : "failed", meta.team.requestId);
     this.emitMessage(meta.team.requestId, "in");
   }
 }
