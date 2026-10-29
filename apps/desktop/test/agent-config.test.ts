@@ -66,6 +66,38 @@ async function newMacAppPage() {
   return target;
 }
 
+async function desktopServerReady() {
+  try {
+    const response = await fetch("http://localhost:1420");
+    return response.ok && (await response.text()).includes('id="root"');
+  } catch {
+    return false;
+  }
+}
+
+async function ensureDesktopServer() {
+  if (await desktopServerReady()) return;
+  if (!vite || vite.exitCode !== null) {
+    vite = Bun.spawn(["bun", "run", "dev", "--port", "1420"], {
+      cwd: join(ROOT, "apps/desktop"),
+      stdout: "ignore",
+      stderr: "inherit",
+    });
+  }
+  for (let i = 0; i < 300; i++) {
+    if (await desktopServerReady()) return;
+    if (vite.exitCode !== null)
+      throw new Error(`Vite exited before becoming ready (code ${vite.exitCode})`);
+    await Bun.sleep(100);
+  }
+  throw new Error("Vite did not serve the desktop app on http://localhost:1420 within 30 seconds");
+}
+
+async function gotoApp(target: Page) {
+  await ensureDesktopServer();
+  await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+}
+
 async function capturePrototype(name: string, fullPage = false) {
   if (!shots) return;
   const theme = name.endsWith("-escuro.png") ? "escuro" : "claro";
@@ -272,21 +304,7 @@ beforeAll(async () => {
     UPBOT_COMPUTER_DRYRUN: join(state, "computer.log"),
   });
   rpc = await DaemonClient.connect(daemon.port, token);
-  try {
-    await fetch("http://localhost:1420");
-  } catch {
-    vite = Bun.spawn(["bun", "run", "dev", "--port", "1420"], {
-      cwd: join(ROOT, "apps/desktop"),
-      stdout: "ignore",
-      stderr: "inherit",
-    });
-    for (let i = 0; i < 100; i++) {
-      try {
-        if ((await fetch("http://localhost:1420")).ok) break;
-      } catch {}
-      await Bun.sleep(100);
-    }
-  }
+  await ensureDesktopServer();
   browser = await chromium.launch({
     ...(process.env.CHROME_PATH
       ? { executablePath: process.env.CHROME_PATH }
@@ -380,7 +398,7 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
       },
       { id: currentAgent.id, color: theme },
     );
-    await page.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+    await gotoApp(page);
     expect(await page.evaluate(() => navigator.userAgent)).toBe(macUserAgent);
     expect(await page.evaluate(() => navigator.platform)).toBe("MacIntel");
     await page.addStyleTag({
@@ -449,7 +467,7 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
         },
         { id: currentAgent.id, color: theme },
       );
-      await windowsCapture.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+      await gotoApp(windowsCapture);
       await windowsCapture.addStyleTag({
         content:
           "*{transition:none!important;animation:none!important;scroll-behavior:auto!important}",
@@ -680,7 +698,7 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
       },
       { id: agent.id },
     );
-    await windows.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+    await gotoApp(windows);
     await openSettings(windows);
     await windows.getByLabel("Nome do agente").fill("Rascunho Windows");
     expect(await windows.getByRole("button", { name: /Salvar/ }).textContent()).toContain("Ctrl+S");
