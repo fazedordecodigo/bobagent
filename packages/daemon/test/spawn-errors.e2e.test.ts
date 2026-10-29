@@ -1,29 +1,51 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import type { Agent } from "@upbot/protocol";
+import type { Agent, Turn } from "@upbot/protocol";
 import { spawnProvider } from "../src/providers/process";
-import { DaemonClient, type DaemonHandle, startDaemon, tmp } from "./helpers";
+import { ProviderError } from "../src/providers/types";
+import {
+  DaemonClient,
+  type DaemonHandle,
+  FAKE_AGENT,
+  startDaemon,
+  stopTestChildren,
+  tmp,
+} from "./helpers";
 
 const TOKEN = `spawn-errors-${crypto.randomUUID()}`;
+// matches the AIza pattern in redactSecrets; only ever a fake test value
+const FAKE_GEMINI_KEY = `AIzaSyFakeGemini${crypto.randomUUID().replaceAll("-", "")}`;
 
 describe("asynchronous child spawn errors", () => {
   let dataDir: string;
   let agentsRoot: string;
+  let stateDir: string;
   let daemon: DaemonHandle;
   let client: DaemonClient;
   let agent: Agent;
+  let acpAgent: Agent;
 
   beforeAll(async () => {
     dataDir = tmp("spawn-errors-data-");
     agentsRoot = tmp("spawn-errors-agents-");
+    stateDir = tmp("spawn-errors-fake-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
       UPBOT_TTS_COMMAND: JSON.stringify(["definitely-missing-upbot-cmd"]),
       UPBOT_PROVIDER_COMMAND_CLAUDE: JSON.stringify(["definitely-missing-upbot-cmd"]),
+      UPBOT_PROVIDER_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      FAKE_ACP_STATE_DIR: stateDir,
+      FAKE_ACP_STDERR: `fatal: API key ${FAKE_GEMINI_KEY}`,
+      FAKE_ACP_NEW_ERROR: "session new unavailable",
     });
     client = await DaemonClient.connect(daemon.port, TOKEN);
     agent = (await client.request("agents.create", {
       name: "Missing provider",
       provider: "claude",
+      instructions: "",
+    })) as Agent;
+    acpAgent = (await client.request("agents.create", {
+      name: "Failing ACP provider",
+      provider: "devin",
       instructions: "",
     })) as Agent;
   });
@@ -34,7 +56,8 @@ describe("asynchronous child spawn errors", () => {
       daemon.proc.kill("SIGKILL");
     } catch {}
     await daemon.proc.exited;
-    for (const directory of [dataDir, agentsRoot]) {
+    await stopTestChildren(stateDir);
+    for (const directory of [dataDir, agentsRoot, stateDir]) {
       if (directory)
         rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
@@ -64,5 +87,38 @@ describe("asynchronous child spawn errors", () => {
     const proc = spawnProvider(`${process.execPath}-missing-upbot.exe`, [], process.cwd());
     await expect(proc.waitForSpawn()).rejects.toThrow();
     proc.markClosed();
+  });
+
+  test("synchronous spawn errors never expose injected env values", () => {
+    // not matched by redactSecrets' patterns, and NUL-terminated so the
+    // runtime's env validation would quote it verbatim in an escaped form
+    const secret = `plain-secret-${crypto.randomUUID()}`;
+    let thrown: unknown;
+    try {
+      spawnProvider("bun", ["-e", "1"], process.cwd(), {
+        OPENAI_API_KEY: `${secret}\u0000`,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ProviderError);
+    const message = (thrown as Error).message;
+    expect(message).not.toContain(secret);
+    expect(message).toContain("NUL");
+  });
+
+  test("ACP provider startup failure surfaces a sanitized stderr tail", async () => {
+    const { queueId } = (await client.request("chat.send", {
+      agentId: acpAgent.id,
+      text: "hello",
+    })) as { queueId: string };
+    const turn = (await client.waitForEventWhere(
+      "turn.ended",
+      (event) => (event as Turn).queueId === queueId,
+    )) as Turn;
+    expect(turn.status).toBe("failed");
+    expect(turn.error).toContain("devin failed to start");
+    expect(turn.error).toContain("fatal: API key <redacted>");
+    expect(turn.error ?? "").not.toContain(FAKE_GEMINI_KEY);
   });
 });
