@@ -27,7 +27,10 @@ export function AvatarBadge({
   agent: Pick<Agent, "name" | "avatar">;
   size?: number;
 }) {
-  const emoji = agent.avatar?.emoji ?? agent.name.slice(0, 1).toUpperCase();
+  const emoji =
+    agent.avatar && "emoji" in agent.avatar
+      ? agent.avatar.emoji
+      : agent.name.slice(0, 1).toUpperCase();
   return (
     <span
       className="inline-flex shrink-0 items-center justify-center rounded-full"
@@ -35,7 +38,7 @@ export function AvatarBadge({
         width: size,
         height: size,
         fontSize: size * 0.6,
-        background: agent.avatar?.color ?? "var(--fg-soft)",
+        background: agent.avatar && "color" in agent.avatar ? agent.avatar.color : "var(--fg-soft)",
       }}
     >
       {emoji}
@@ -50,9 +53,11 @@ export function AvatarEditor({
   agent: Agent;
   onSave: (avatar: AgentAvatar | null) => Promise<void>;
 }) {
-  const [emoji, setEmoji] = useState(agent.avatar?.emoji ?? agent.name.slice(0, 1));
+  const [emoji, setEmoji] = useState(
+    agent.avatar && "emoji" in agent.avatar ? agent.avatar.emoji : agent.name.slice(0, 1),
+  );
   const [color, setColor] = useState(() => {
-    if (agent.avatar?.color) return agent.avatar.color;
+    if (agent.avatar && "color" in agent.avatar) return agent.avatar.color;
     const probe = document.createElement("span");
     probe.style.color = "var(--fg)";
     document.body.append(probe);
