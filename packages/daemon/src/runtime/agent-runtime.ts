@@ -14,13 +14,13 @@ import type { ChatStore, QueueSource, QueueStore } from "../chat-store";
 import { envPositiveNumber } from "../env/vars";
 import { checkProviderAvailable, DEFAULT_MODE, getDriver } from "../providers";
 import { withTimeout } from "../providers/process";
-import { ProviderError } from "../providers/types";
 import type {
   McpServerSpec,
   ProviderHooks,
   ProviderSession,
   RemoteLaunch,
 } from "../providers/types";
+import { ProviderError } from "../providers/types";
 import { buildHandoff } from "./handoff";
 
 const COMPACT_PROMPT = `<compaction_request>
