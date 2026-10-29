@@ -1,5 +1,5 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Agent, Approval, ChatItem, ConnectedApp, Turn, VaultEntry } from "@upbot/protocol";
@@ -376,8 +376,7 @@ describe("approvals e2e", () => {
         data: JSON.parse(row.data_json) as Record<string, unknown>,
       }));
       const decided = entries.find(
-        (row) =>
-          row.event === "approval.decided" && row.data.approvalId === approved.approval.id,
+        (row) => row.event === "approval.decided" && row.data.approvalId === approved.approval.id,
       )!;
       expect(decided.data).toMatchObject({
         kind: "tool",

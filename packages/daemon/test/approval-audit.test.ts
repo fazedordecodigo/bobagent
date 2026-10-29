@@ -3,8 +3,8 @@ import { expect, spyOn, test } from "bun:test";
 import { ApprovalService } from "../src/approvals";
 import { AppsService } from "../src/apps";
 import { migrations } from "../src/db/migrations";
-import type { RuntimeManager } from "../src/runtime/runtime-manager";
 import { RpcError } from "../src/runtime/agent-runtime";
+import type { RuntimeManager } from "../src/runtime/runtime-manager";
 import { Vault } from "../src/vault";
 
 type AuditRow = {
@@ -207,7 +207,9 @@ test("failed always decisions record a safe failure outcome without escalation",
     expect(await gate).toBeInstanceOf(Error);
     expect(apps.get("notes").permissions.write).toBe("ask");
 
-    const decided = rows(db, "approval.decided").map(json).find((r) => r.approvalId === pending.id);
+    const decided = rows(db, "approval.decided")
+      .map(json)
+      .find((r) => r.approvalId === pending.id);
     expect(decided).toMatchObject({
       status: "denied",
       decision: null,

@@ -321,12 +321,9 @@ export class ApprovalService {
           a,
         );
       }
-      return this.finish(
-        a.id,
-        p.decision === "deny" ? "denied" : "approved",
-        undefined,
-        { decision: p.decision },
-      )!;
+      return this.finish(a.id, p.decision === "deny" ? "denied" : "approved", undefined, {
+        decision: p.decision,
+      })!;
     } catch (error) {
       this.finish(a.id, "denied", undefined, {
         requestedDecision: p.decision,
