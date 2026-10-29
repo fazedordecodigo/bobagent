@@ -78,7 +78,12 @@ beforeAll(async () => {
     } catch {}
     await Bun.sleep(100);
   }
-  browser = await chromium.launch({ channel: "chrome", headless: true });
+  browser = await chromium.launch({
+    ...(process.env.CHROME_PATH
+      ? { executablePath: process.env.CHROME_PATH }
+      : { channel: "chrome" }),
+    headless: true,
+  });
   const context = await browser.newContext({ viewport: { width: 384, height: 600 } });
   page = await context.newPage();
   main = await context.newPage();

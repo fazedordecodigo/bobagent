@@ -51,14 +51,14 @@ export class DaemonClient {
     return () => this.reconnectCbs.delete(cb);
   }
 
-  private openSocket(): Promise<void> {
+  private openSocket(retry = false): Promise<void> {
     const { port, token } = this.connection!;
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${encodeURIComponent(token)}`);
       this.ws = ws;
       ws.onopen = () => {
         this.reconnectDelay = 500;
-        if (this.everConnected) {
+        if (this.everConnected || retry) {
           for (const cb of this.reconnectCbs) cb();
         }
         this.everConnected = true;
@@ -90,7 +90,7 @@ export class DaemonClient {
         this.pending.clear();
         if (!this.closed) {
           setTimeout(() => {
-            if (!this.closed) this.openSocket().catch(() => {});
+            if (!this.closed) this.openSocket(true).catch(() => {});
           }, this.reconnectDelay);
           this.reconnectDelay = Math.min(this.reconnectDelay * 2, 5000);
         }
