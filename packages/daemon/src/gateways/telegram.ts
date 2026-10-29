@@ -1,3 +1,4 @@
+import { envNumber } from "../env/config";
 import { splitText, type Transport, type TransportHooks } from "./common";
 
 type Update = {
@@ -14,6 +15,9 @@ export class TelegramTransport implements Transport {
   private running = false;
   private offset = 0;
   private abort: AbortController | null = null;
+  // 0 keeps the short-poll behavior for whoever disables long-polling on purpose;
+  // an invalid value falls back to 25 instead of serializing as `timeout: null`.
+  private readonly pollSeconds = envNumber("UPBOT_TELEGRAM_POLL_SECONDS", 25, { min: 0 });
 
   constructor(
     private token: string,
@@ -57,10 +61,9 @@ export class TelegramTransport implements Transport {
           first = false;
         }
         this.abort = new AbortController();
-        const timeout = Number(process.env.UPBOT_TELEGRAM_POLL_SECONDS ?? 25);
         const updates = await this.call<Update[]>(
           "getUpdates",
-          { offset: this.offset, timeout, allowed_updates: ["message"] },
+          { offset: this.offset, timeout: this.pollSeconds, allowed_updates: ["message"] },
           this.abort.signal,
         );
         backoff = 1000;

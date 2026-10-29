@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { networkInterfaces } from "node:os";
 import type { MobileDevice, MobileStatus } from "@upbot/protocol";
+import { envNumber } from "./env/config";
 import { MOBILE_HTML } from "./mobile-app";
 import { RpcError } from "./runtime/agent-runtime";
 
@@ -180,7 +181,11 @@ export class MobileServer {
 
   private listen() {
     if (this.server) return;
-    const port = Number(process.env.UPBOT_MOBILE_PORT ?? this.setting().port ?? 0) || 0;
+    const port = envNumber("UPBOT_MOBILE_PORT", this.setting().port ?? 0, {
+      min: 0,
+      max: 65_535,
+      integer: true,
+    });
     const opts = {
       hostname: process.env.UPBOT_MOBILE_HOST ?? "0.0.0.0",
       idleTimeout: 0,

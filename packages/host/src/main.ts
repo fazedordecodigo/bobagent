@@ -517,6 +517,9 @@ function ensureWorkspaceDisk(path: string): void {
 async function runFirecracker(spec: RunSpec, rest: Buffer) {
   const id = safeId(spec.agentId);
   const fc = firecrackerBin() ?? die("firecracker binary not found (run `upbot-host preflight`)");
+  const bootTimeoutMs = Number(process.env.UPBOT_VM_BOOT_TIMEOUT_MS || 60000);
+  if (!Number.isFinite(bootTimeoutMs) || bootTimeoutMs <= 0)
+    die("UPBOT_VM_BOOT_TIMEOUT_MS must be a positive number");
   const base = join(ROOT, "firecracker", "rootfs.ext4");
   if (!existsSync(base)) die(`missing ${base}`);
   if (!existsSync(join(ROOT, "firecracker", "vmlinux"))) die("missing firecracker/vmlinux");
@@ -626,11 +629,7 @@ async function runFirecracker(spec: RunSpec, rest: Buffer) {
   process.stdout.once("error", onHostDisconnect);
   let guest: Socket;
   try {
-    guest = await connectGuest(
-      uds,
-      Number(process.env.UPBOT_VM_BOOT_TIMEOUT_MS || 60000),
-      () => vmAlive,
-    );
+    guest = await connectGuest(uds, bootTimeoutMs, () => vmAlive);
   } catch (e) {
     cleanup();
     return die(`cannot reach the guest: ${(e as Error).message}`);

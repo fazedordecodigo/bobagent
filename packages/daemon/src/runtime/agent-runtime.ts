@@ -11,6 +11,7 @@ import type {
 } from "@upbot/protocol";
 import type { AgentStore } from "../agents";
 import type { ChatStore, QueueSource, QueueStore } from "../chat-store";
+import { envNumber } from "../env/config";
 import { checkProviderAvailable, DEFAULT_MODE, getDriver } from "../providers";
 import { withTimeout } from "../providers/process";
 import {
@@ -32,13 +33,11 @@ do not use any tools.
 function compactThreshold(): number | null {
   const raw = process.env.UPBOT_COMPACT_THRESHOLD;
   if (raw === "off" || raw === "0") return null;
-  const n = raw ? Number(raw) : 0.85;
-  return Number.isFinite(n) && n > 0 && n <= 1 ? n : 0.85;
+  return envNumber("UPBOT_COMPACT_THRESHOLD", 0.85, { max: 1 });
 }
 
 function compactTimeoutMs(): number {
-  const n = Number(process.env.UPBOT_COMPACT_TIMEOUT_MS);
-  return Number.isFinite(n) && n > 0 ? n : 180_000;
+  return envNumber("UPBOT_COMPACT_TIMEOUT_MS", 180_000);
 }
 
 function xmlAttr(s: string): string {
@@ -75,8 +74,9 @@ type PendingEntry = {
   resolve: (r: { optionId: string | null }) => void;
 };
 
-const cancelGraceMs = () =>
-  Math.max(0, Number.parseInt(process.env.UPBOT_CANCEL_GRACE_MS ?? "", 10) || 10_000);
+// min: 0 honors UPBOT_CANCEL_GRACE_MS=0 as an immediate kill, which the old
+// Math.max(0, …) clamp suggested but the `|| 10_000` fallback silently ignored.
+const cancelGraceMs = () => envNumber("UPBOT_CANCEL_GRACE_MS", 10_000, { min: 0 });
 
 export class AgentRuntime {
   status: AgentStatus = "idle";

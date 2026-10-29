@@ -2,6 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import type { ConfigOption, ProviderId } from "@upbot/protocol";
+import { envNumber } from "../env/config";
 import { resolveCommand, spawnEnv } from "../env/login-path";
 import { spawnChild, waitForChildSpawn } from "../env/spawn";
 import {
@@ -54,10 +55,7 @@ async function boundedRequest<T>(
 }
 
 function opencodeFirstActivityTimeoutMs(): number {
-  const configured = Number(process.env.UPBOT_ACP_FIRST_ACTIVITY_MS);
-  return Number.isFinite(configured) && configured > 0
-    ? configured
-    : DEFAULT_OPENCODE_FIRST_ACTIVITY_MS;
+  return envNumber("UPBOT_ACP_FIRST_ACTIVITY_MS", DEFAULT_OPENCODE_FIRST_ACTIVITY_MS);
 }
 
 type AcpActivityMonitor = {
