@@ -35,6 +35,18 @@ type Row = {
   updated_at: number;
 };
 
+function defaultTransport(
+  kind: GatewayKind,
+  tokens: Record<string, string>,
+  hooks: TransportHooks,
+): Transport {
+  return kind === "telegram"
+    ? new TelegramTransport(tokens.botToken!, hooks)
+    : kind === "slack"
+      ? new SlackTransport(tokens.botToken!, tokens.appToken!, hooks)
+      : new DiscordTransport(tokens.botToken!, hooks);
+}
+
 export class GatewayService {
   private transports = new Map<string, Transport>();
   private transportInfo = new WeakMap<Transport, { kind: GatewayKind; secrets: string[] }>();
@@ -50,6 +62,11 @@ export class GatewayService {
     private runtimes: () => RuntimeManager,
     private vault: Vault,
     private broadcast: Broadcast,
+    private createTransport: (
+      kind: GatewayKind,
+      tokens: Record<string, string>,
+      hooks: TransportHooks,
+    ) => Transport = defaultTransport,
   ) {}
 
   private row(id: string): Row | null {
@@ -194,7 +211,7 @@ export class GatewayService {
     const r = this.row(id);
     if (!r || r.enabled !== 1) return;
     const hooks: TransportHooks = {
-      onMessage: (m) => this.onInbound(id, m),
+      onMessage: (m) => this.onInbound(id, t, m),
       onStatus: (status, error = null) => {
         if (this.transports.get(id) !== t) return;
         this.status.set(id, { status, error, sendError: this.status.get(id)?.sendError ?? null });
@@ -202,12 +219,7 @@ export class GatewayService {
       },
     };
     const tokens = this.tokens(id, r.kind);
-    const t: Transport =
-      r.kind === "telegram"
-        ? new TelegramTransport(tokens.botToken!, hooks)
-        : r.kind === "slack"
-          ? new SlackTransport(tokens.botToken!, tokens.appToken!, hooks)
-          : new DiscordTransport(tokens.botToken!, hooks);
+    const t = this.createTransport(r.kind, tokens, hooks);
     this.transports.set(id, t);
     this.transportInfo.set(t, {
       kind: r.kind,
@@ -220,8 +232,13 @@ export class GatewayService {
   /**
    * Posts through the gateway transport and reports redacted send errors separately.
    */
-  private async deliver(id: string, chatId: string, text: string, replyTo?: string) {
-    const t = this.transports.get(id);
+  private async deliver(
+    id: string,
+    t: Transport | undefined,
+    chatId: string,
+    text: string,
+    replyTo?: string,
+  ) {
     if (!t) return;
     try {
       await t.send(chatId, text, replyTo);
@@ -249,13 +266,14 @@ export class GatewayService {
     }
   }
 
-  private onInbound(id: string, m: Inbound) {
+  private onInbound(id: string, source: Transport, m: Inbound) {
     const r = this.row(id);
     if (!r || !this.transports.has(id) || r.enabled !== 1) return;
     const allowed = JSON.parse(r.allowed_users) as string[];
     if (!allowed.includes(m.userId)) {
       void this.deliver(
         id,
+        source,
         m.chatId,
         `This UpBot gateway doesn't know you yet. Ask its owner to allow user id ${m.userId}.`,
         m.replyTo,
@@ -295,6 +313,7 @@ export class GatewayService {
     } catch (e) {
       void this.deliver(
         id,
+        source,
         m.chatId,
         `UpBot could not deliver this: ${(e as Error).message}`,
         m.replyTo,
@@ -325,6 +344,7 @@ export class GatewayService {
     }
     void this.deliver(
       meta.gateway.id,
+      this.transports.get(meta.gateway.id),
       meta.gateway.chatId,
       reply.slice(0, MAX_REPLY),
       meta.gateway.replyTo,
