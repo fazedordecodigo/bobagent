@@ -34,6 +34,8 @@ writeFileSync(
   join(STATE_DIR, "env.json"),
   JSON.stringify({ keys: Object.keys(process.env), env: process.env }),
 );
+// optional startup stderr line so tests can assert the daemon sanitizes tails
+if (process.env.FAKE_ACP_STDERR) process.stderr.write(`${process.env.FAKE_ACP_STDERR}\n`);
 
 function logRequest(method: string, params: unknown) {
   try {
