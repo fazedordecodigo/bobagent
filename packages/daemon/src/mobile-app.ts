@@ -32,7 +32,7 @@ export const MOBILE_HTML = `<!doctype html>
 </style>
 </head>
 <body>
-<header><button id="back" hidden>‹ Agents</button><strong id="title">UpBot</strong></header>
+<header><button id="back" hidden>‹ Bots</button><strong id="title">UpBot</strong></header>
 <main id="main"></main>
 <form id="composer" hidden><textarea id="text" placeholder="Message"></textarea><button>Send</button></form>
 <script>
@@ -97,7 +97,7 @@ async function loadAgents() {
 }
 
 function renderAgents() {
-  $("back").hidden = true; $("composer").hidden = true; $("title").textContent = "Agents";
+  $("back").hidden = true; $("composer").hidden = true; $("title").textContent = "Bots";
   const list = agents.map((a) => {
     const row = el("div", "agent");
     const av = el("span", "avatar", a.avatar ? a.avatar.emoji : a.name.slice(0, 1));
@@ -107,7 +107,7 @@ function renderAgents() {
     row.onclick = () => openAgent(a);
     return row;
   });
-  $("main").replaceChildren(...(list.length ? list : [el("p", "meta", "No agents yet.")]));
+  $("main").replaceChildren(...(list.length ? list : [el("p", "meta", "No bots yet.")]));
 }
 
 async function openAgent(a) {
