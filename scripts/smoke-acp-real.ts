@@ -190,11 +190,17 @@ async function main() {
         )
         .then(async (p) => {
           const perm = p as PendingPermission;
-          rec.permissionRequest = { title: perm.title, answered: "reject_once" };
-          await c.request("permissions.respond", {
-            requestId: perm.requestId,
-            optionId: "reject_once",
-          });
+          const pr: Record<string, unknown> = { title: perm.title };
+          rec.permissionRequest = pr;
+          try {
+            await c.request("permissions.respond", {
+              requestId: perm.requestId,
+              optionId: "reject_once",
+            });
+            pr.answered = "reject_once";
+          } catch (e) {
+            rec.permissionRespondError = String(e);
+          }
         })
         .catch(() => {});
       void permWatch;
