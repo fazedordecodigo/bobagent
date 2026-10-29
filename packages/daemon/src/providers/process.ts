@@ -82,6 +82,60 @@ export function vmCredentialRejectedMessage(
   return `${provider}: the saved microVM credential was rejected${safeDetail ? ` (${safeDetail})` : ""}. Update it in Settings → Hosts.`;
 }
 
+/** Lines of the stderr tail kept in a startup failure message. */
+const STARTUP_ERROR_TAIL_LINES = 5;
+
+/** Maps one startup evidence source (the error detail or the stderr tail) to an
+ * auth ProviderError, or null when it shows neither a rejected microVM
+ * credential nor a sign-in hint. */
+export function startupAuthError(
+  provider: ProviderId,
+  detail: string,
+  credential: string | null,
+): ProviderError | null {
+  if (credential && isVmCredentialRejection(detail)) {
+    return new ProviderError(
+      "auth_required",
+      vmCredentialRejectedMessage(provider, detail, credential),
+    );
+  }
+  if (AUTH_RE.test(detail)) {
+    return new ProviderError(
+      "auth_required",
+      authMessage(provider, redactCredential(detail, credential)),
+    );
+  }
+  return null;
+}
+
+/** Translates a provider startup failure into a ProviderError the same way for
+ * every driver: a rejected microVM credential or a sign-in hint in the detail
+ * or the stderr tail becomes `auth_required`; anything else becomes
+ * `fallbackCode` with the detail plus a truncated tail, always redacted. */
+export function classifyStartupError(
+  provider: ProviderId,
+  detail: string,
+  tail: string,
+  credential: string | null,
+  fallbackCode: "provider_unavailable" | "internal" = "provider_unavailable",
+): ProviderError {
+  const auth =
+    startupAuthError(provider, detail, credential) ?? startupAuthError(provider, tail, credential);
+  if (auth) return auth;
+  const safeDetail = redactCredential(detail, credential).trim();
+  const safeTail = redactCredential(tail, credential)
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0)
+    .slice(-STARTUP_ERROR_TAIL_LINES)
+    .join("\n");
+  const reason = [safeDetail, safeTail].filter(Boolean).join("\n");
+  return new ProviderError(
+    fallbackCode,
+    `${provider} failed to start${reason ? `: ${reason}` : ""}`,
+  );
+}
+
 /** Spawn command for a provider; `UPBOT_PROVIDER_COMMAND_<P>` (or the older
  * `UPBOT_ACP_COMMAND_<P>`) holds a JSON array that replaces the default. */
 export function commandFor(provider: ProviderId): string[] | null {
@@ -136,6 +190,16 @@ export function spawnProvider(
   extraEnv?: Record<string, string>,
   remote?: RemoteLaunch,
 ): ProviderProcess {
+  // Reject unsanitizable env upfront: the runtime's own env validation error
+  // quotes the offending value verbatim, which would leak an injected credential.
+  for (const [key, value] of Object.entries(extraEnv ?? {})) {
+    if (key.includes("\0") || value.includes("\0")) {
+      throw new ProviderError(
+        "provider_unavailable",
+        `${bin} failed to start: env ${key.replaceAll("\0", "\\0")} contains a NUL byte`,
+      );
+    }
+  }
   const stderrLines: string[] = [];
   let child: ChildProcess;
   try {
@@ -147,7 +211,11 @@ export function spawnProvider(
           env: spawnEnv({ NO_COLOR: "1", ...extraEnv }),
         });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
+    let detail = error instanceof Error ? error.message : String(error);
+    detail = redactSecrets(detail);
+    for (const value of Object.values(extraEnv ?? {})) {
+      if (value) detail = detail.replaceAll(value, "<redacted>");
+    }
     throw new ProviderError("provider_unavailable", `${bin} failed to start: ${detail}`);
   }
   const spawnReady = waitForChildSpawn(child);

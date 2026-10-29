@@ -16,6 +16,7 @@ import type {
 import { AppPermissions, defaultAppPermissions } from "@upbot/protocol";
 import { RpcError } from "./runtime/agent-runtime";
 import { APP_PREFIX, type Vault } from "./vault";
+import { VERSION } from "./version";
 
 // Connected apps: MCP servers the daemon runs (stdio) or talks to (streamable HTTP) on behalf
 // of the bots. Secrets live in the vault as app.<id>.<KEY> and only reach the server process
@@ -213,6 +214,15 @@ export function appStderrDiagnostics(): {
         : "";
     },
   };
+}
+
+/**
+ * A failed app MCP call; the message is a fixed string because upstream errors may echo
+ * credentials. `cause` is the raw SDK error: never show or log its message, only
+ * `errorDiagnostics(cause)`.
+ */
+export class AppToolError extends Error {
+  override name = "AppToolError";
 }
 
 export class AppsService {
@@ -469,7 +479,7 @@ export class AppsService {
       if (transport instanceof StdioClientTransport) {
         transport.stderr?.on("data", (d: Buffer) => stderr.push(d));
       }
-      const client = new Client({ name: "upbot", version: "0.3.0" });
+      const client = new Client({ name: "upbot", version: VERSION });
       timeout = AbortSignal.timeout(Number(process.env.UPBOT_APP_START_TIMEOUT_MS) || 60_000);
       phase = "transport initialization";
       await client.connect(transport as Transport, { signal: timeout });
@@ -577,6 +587,17 @@ export class AppsService {
     return this.rows().some((x) => slugFor(this.config(x).name) === slug);
   }
 
+  /** Exact match against a live app's registered tools — untrusted names stay unverifiable. */
+  hasAppTool(name: string): boolean {
+    const i = name.indexOf("-");
+    if (i <= 0) return false;
+    const slug = name.slice(0, i);
+    const r = this.rows().find((x) => slugFor(this.config(x).name) === slug);
+    const l = r && this.live.get(r.id);
+    if (!r || !l || l.status !== "ready") return false;
+    return appToolNames(slug, l.tools).has(name);
+  }
+
   appForTool(name: string): ConnectedApp | undefined {
     return this.list().find((app) => name.startsWith(`${app.slug}-`));
   }
@@ -608,9 +629,9 @@ export class AppsService {
     let res: Awaited<ReturnType<Client["callTool"]>>;
     try {
       res = await l.client!.callTool({ name: tool.name, arguments: args });
-    } catch {
+    } catch (e) {
       logCallFailure();
-      throw new Error("app MCP tool call failed");
+      throw new AppToolError("app MCP tool call failed", { cause: e });
     }
     if (res.isError === true) logCallFailure();
     const content = (res.content ?? []) as { type: string; text?: string }[];

@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { Gateway, GatewayKind, GatewayStatus, Turn } from "@upbot/protocol";
 import type { AgentStore } from "../agents";
-import type { ChatStore } from "../chat-store";
+import { type ChatStore, parseQueueMeta } from "../chat-store";
 import type { Broadcast } from "../rpc";
 import { RpcError } from "../runtime/agent-runtime";
 import type { RuntimeManager } from "../runtime/runtime-manager";
@@ -21,6 +21,8 @@ export const TOKEN_FIELDS: Record<GatewayKind, string[]> = {
   discord: ["botToken"],
 };
 const MAX_REPLY = 20_000;
+const errorName = (e: unknown) =>
+  e instanceof Error && /^[A-Za-z]{1,40}$/.test(e.name) ? e.name : "unknown";
 
 const tokenName = (id: string, field: string) => `${GATEWAY_PREFIX}${id}.${field}`;
 
@@ -35,9 +37,25 @@ type Row = {
   updated_at: number;
 };
 
+function defaultTransport(
+  kind: GatewayKind,
+  tokens: Record<string, string>,
+  hooks: TransportHooks,
+): Transport {
+  return kind === "telegram"
+    ? new TelegramTransport(tokens.botToken!, hooks)
+    : kind === "slack"
+      ? new SlackTransport(tokens.botToken!, tokens.appToken!, hooks)
+      : new DiscordTransport(tokens.botToken!, hooks);
+}
+
 export class GatewayService {
   private transports = new Map<string, Transport>();
-  private status = new Map<string, { status: GatewayStatus; error: string | null }>();
+  private transportInfo = new WeakMap<Transport, { kind: GatewayKind; secrets: string[] }>();
+  private status = new Map<
+    string,
+    { status: GatewayStatus; error: string | null; sendError: string | null }
+  >();
 
   constructor(
     private db: Database,
@@ -46,6 +64,11 @@ export class GatewayService {
     private runtimes: () => RuntimeManager,
     private vault: Vault,
     private broadcast: Broadcast,
+    private createTransport: (
+      kind: GatewayKind,
+      tokens: Record<string, string>,
+      hooks: TransportHooks,
+    ) => Transport = defaultTransport,
   ) {}
 
   private row(id: string): Row | null {
@@ -64,7 +87,7 @@ export class GatewayService {
       allowedUsers: JSON.parse(r.allowed_users) as string[],
       enabled: r.enabled === 1,
       status: r.enabled === 1 ? (s?.status ?? "connecting") : "stopped",
-      error: r.enabled === 1 ? (s?.error ?? null) : null,
+      error: r.enabled === 1 ? (s?.error ?? s?.sendError ?? null) : null,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };
@@ -185,43 +208,90 @@ export class GatewayService {
     this.status.delete(id);
   }
 
+  private sanitizeError(t: Transport, message: string, fallbackSecrets: string[] = []) {
+    for (const secret of this.transportInfo.get(t)?.secrets ?? fallbackSecrets) {
+      message = message.split(secret).join("[redacted]");
+    }
+    return message.slice(0, 500);
+  }
+
   private restart(id: string) {
     this.stopTransport(id);
     const r = this.row(id);
     if (!r || r.enabled !== 1) return;
+    const tokens = this.tokens(id, r.kind);
+    const secrets = Object.values(tokens).filter((value) => value.length > 0);
     const hooks: TransportHooks = {
-      onMessage: (m) => this.onInbound(id, m),
+      onMessage: (m) => this.onInbound(id, t, m),
       onStatus: (status, error = null) => {
         if (this.transports.get(id) !== t) return;
-        this.status.set(id, { status, error });
+        this.status.set(id, {
+          status,
+          error: error === null ? null : this.sanitizeError(t, error, secrets),
+          sendError: this.status.get(id)?.sendError ?? null,
+        });
         this.emit(id);
       },
     };
-    const tokens = this.tokens(id, r.kind);
-    const t: Transport =
-      r.kind === "telegram"
-        ? new TelegramTransport(tokens.botToken!, hooks)
-        : r.kind === "slack"
-          ? new SlackTransport(tokens.botToken!, tokens.appToken!, hooks)
-          : new DiscordTransport(tokens.botToken!, hooks);
+    const t = this.createTransport(r.kind, tokens, hooks);
     this.transports.set(id, t);
-    this.status.set(id, { status: "connecting", error: null });
+    this.transportInfo.set(t, {
+      kind: r.kind,
+      secrets,
+    });
+    this.status.set(id, { status: "connecting", error: null, sendError: null });
     t.start();
   }
 
-  private onInbound(id: string, m: Inbound) {
+  /**
+   * Posts through the gateway transport and reports redacted send errors separately.
+   */
+  private async deliver(
+    id: string,
+    t: Transport | undefined,
+    chatId: string,
+    text: string,
+    replyTo?: string,
+  ) {
+    if (!t) return;
+    try {
+      await t.send(chatId, text, replyTo);
+    } catch (e) {
+      const info = this.transportInfo.get(t);
+      const message = this.sanitizeError(t, e instanceof Error ? e.message : "send failed");
+      console.error(
+        `[upbotd] gateway ${id} (${info?.kind ?? "unknown"}) send failed (${errorName(e)})`,
+      );
+      if (this.transports.get(id) !== t) return;
+      const status = this.status.get(id) ?? {
+        status: "error" as GatewayStatus,
+        error: null,
+        sendError: null,
+      };
+      this.status.set(id, { ...status, sendError: message });
+      this.emit(id);
+      return;
+    }
+    if (this.transports.get(id) !== t) return;
+    const s = this.status.get(id);
+    if (s?.sendError) {
+      this.status.set(id, { ...s, sendError: null });
+      this.emit(id);
+    }
+  }
+
+  private onInbound(id: string, sourceTransport: Transport, m: Inbound) {
     const r = this.row(id);
-    const t = this.transports.get(id);
-    if (!r || !t || r.enabled !== 1) return;
+    if (!r || !this.transports.has(id) || r.enabled !== 1) return;
     const allowed = JSON.parse(r.allowed_users) as string[];
     if (!allowed.includes(m.userId)) {
-      void t
-        .send(
-          m.chatId,
-          `This UpBot gateway doesn't know you yet. Ask its owner to allow user id ${m.userId}.`,
-          m.replyTo,
-        )
-        .catch(() => {});
+      void this.deliver(
+        id,
+        sourceTransport,
+        m.chatId,
+        `This UpBot gateway doesn't know you yet. Ask its owner to allow user id ${m.userId}.`,
+        m.replyTo,
+      );
       return;
     }
     // "@AgentName message" routes to another agent; otherwise the gateway's default agent
@@ -255,25 +325,28 @@ export class GatewayService {
         meta: { gateway: { ...source, ...(m.replyTo ? { replyTo: m.replyTo } : {}) } },
       });
     } catch (e) {
-      void t
-        .send(m.chatId, `UpBot could not deliver this: ${(e as Error).message}`, m.replyTo)
-        .catch(() => {});
+      void this.deliver(
+        id,
+        sourceTransport,
+        m.chatId,
+        `UpBot could not deliver this: ${(e as Error).message}`,
+        m.replyTo,
+      );
     }
   }
 
   /** Posts the agent's final reply back to the chat the message came from. */
   onTurnEnded(turn: Turn, queueRow: { meta_json: string | null } | null) {
-    if (!queueRow?.meta_json) return;
-    const meta = JSON.parse(queueRow.meta_json) as {
-      gateway?: { id: string; chatId: string; replyTo?: string };
-    };
+    const meta = parseQueueMeta(queueRow);
     if (!meta.gateway) return;
-    const t = this.transports.get(meta.gateway.id);
-    if (!t) return;
     const reply = this.chat.turnReplyText(turn);
-    void t
-      .send(meta.gateway.chatId, reply.slice(0, MAX_REPLY), meta.gateway.replyTo)
-      .catch(() => {});
+    void this.deliver(
+      meta.gateway.id,
+      this.transports.get(meta.gateway.id),
+      meta.gateway.chatId,
+      reply.slice(0, MAX_REPLY),
+      meta.gateway.replyTo,
+    );
   }
 
   private emit(id: string): Gateway {
