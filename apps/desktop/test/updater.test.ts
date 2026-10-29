@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { runUpdater, type UpdateLike } from "../src/lib/updater";
+import { logVersion, runUpdater, type UpdateLike } from "../src/lib/updater";
 
 function fakeUpdate(downloadAndInstall: () => Promise<void> = async () => {}) {
   return { version: "2.10.1", downloadAndInstall } satisfies UpdateLike;
@@ -71,4 +71,26 @@ test("successful install logs and returns the installed update", async () => {
     update,
   });
   expect(calls).toEqual([["updater.installed", { version: "2.10.1" }]]);
+});
+
+test("remote version is logged only as plain x.y.z", async () => {
+  const secret = "1.0.0-token=sk-secret-xyz";
+  const update = { version: secret, downloadAndInstall: () => Promise.reject(new Error("x")) };
+  const calls: [string, Record<string, unknown> | undefined][] = [];
+  const log = {
+    info: (scope: string, fields?: Record<string, unknown>) => calls.push([scope, fields]),
+    error: (scope: string, fields?: Record<string, unknown>) => calls.push([scope, fields]),
+  };
+
+  await runUpdater(update, async () => null, log);
+  await runUpdater({ ...update, downloadAndInstall: async () => {} }, async () => null, log);
+
+  expect(calls).toEqual([
+    ["updater.failed", { phase: "install", version: "invalid", errorType: "Error" }],
+    ["updater.installed", { version: "invalid" }],
+  ]);
+  expect(JSON.stringify(calls)).not.toContain("sk-secret-xyz");
+  expect(logVersion("2.10.1")).toBe("2.10.1");
+  expect(logVersion("2.10.1\nforged")).toBe("invalid");
+  expect(logVersion(undefined)).toBeUndefined();
 });
