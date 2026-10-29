@@ -15,6 +15,8 @@
 //   slowseq        -> sequenced chunks every 100ms; responds to session/cancel
 //   ignorecancel   -> streams forever, ignores session/cancel
 //   crash          -> one chunk then process.exit(1)
+//   fail-secret:<s>  -> prompt error containing <s>
+//   crash-secret:<s> -> stderr containing <s>, then process.exit(1) without a chunk
 
 import { spawn } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -415,6 +417,17 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
 
   if (text === "crash") {
     await say("agent_message_chunk", "before crash");
+    process.exit(1);
+  }
+
+  if (text.startsWith("fail-secret:")) {
+    const secret = text.slice("fail-secret:".length);
+    throw acp.RequestError.internalError({ detail: secret }, `provider failed with ${secret}`);
+  }
+
+  if (text.startsWith("crash-secret:")) {
+    const secret = text.slice("crash-secret:".length);
+    process.stderr.write(`token=${secret}\n`);
     process.exit(1);
   }
 
