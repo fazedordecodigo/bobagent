@@ -89,6 +89,8 @@ export class AgentRuntime {
   private sessionConfigApplied = false;
   private configOptions: ConfigOption[] = [];
   private openTextItem: { id: string; kind: "agent_message" | "agent_thought" } | null = null;
+  // toolCallId -> item id for the running turn; avoids a per-update lookup in items
+  private toolCallItems = new Map<string, string>();
   private pending = new Map<string, PendingEntry>();
   private cancelTimer: ReturnType<typeof setTimeout> | null = null;
   private draining = false;
@@ -207,6 +209,7 @@ export class AgentRuntime {
       this.queue.markStarted(next.id, turnRow.id);
       this.turn = { id: turnRow.id, cancelled: false, byUser: false };
       this.openTextItem = null;
+      this.toolCallItems.clear();
       this.turnHops = next.hops ?? 0;
       this.turnChannelId = next.channel_id ?? null;
       const meta = next.meta_json ? (JSON.parse(next.meta_json) as Record<string, unknown>) : {};
@@ -678,11 +681,15 @@ export class AgentRuntime {
           status: u.status,
           detail: u.detail,
         });
+        this.toolCallItems.set(u.toolCallId, item.id);
         this.broadcast("item.created", item);
         break;
       }
       case "tool_call_update": {
-        const item = this.store.findToolCallItem(turn.id, u.toolCallId);
+        const mappedId = this.toolCallItems.get(u.toolCallId);
+        const item = mappedId
+          ? this.store.getItem(mappedId)
+          : this.store.findToolCallItem(turn.id, u.toolCallId);
         if (item?.kind !== "tool_call") return;
         const updated = this.store.updateItemData(item.id, {
           toolCallId: item.toolCallId,
