@@ -4,7 +4,7 @@ import type { Routine, RoutineRun, RoutineTrigger } from "@upbot/protocol";
 import type { AgentStore } from "./agents";
 import { envPositiveNumber } from "./env/vars";
 import type { Broadcast } from "./rpc";
-import { RpcError } from "./runtime/agent-runtime";
+import { asBadRequest, RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
 
 // Routines: saved prompts sent to an agent on a schedule, via a local webhook, or manually.
@@ -139,11 +139,7 @@ export class RoutineService {
 
   private nextRun(schedule: string | null, enabled: boolean, from = Date.now()): number | null {
     if (!schedule || !enabled) return null;
-    try {
-      return parseSchedule(schedule)(from);
-    } catch (e) {
-      throw new RpcError("bad_request", (e as Error).message);
-    }
+    return asBadRequest(() => parseSchedule(schedule)(from));
   }
 
   create(p: {

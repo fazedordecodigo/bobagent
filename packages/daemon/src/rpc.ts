@@ -19,7 +19,7 @@ import { ProviderError } from "./providers/types";
 import type { VmCredentials } from "./remote/credentials";
 import type { HostStore } from "./remote/hosts";
 import type { RoutineService } from "./routines";
-import { RpcError } from "./runtime/agent-runtime";
+import { asBadRequest, RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
 import type { SkillLibrary } from "./skills";
 import type { SubagentService } from "./subagents";
@@ -284,16 +284,11 @@ export class Rpc {
       case "hosts.check": {
         const id = (params as MethodParsedParams<typeof method>).id;
         if (!this.extras.hosts.get(id)) throw new RpcError("not_found", "host not found");
-        try {
-          const h =
-            method === "hosts.install"
-              ? await this.extras.hosts.install(id)
-              : await this.extras.hosts.check(id);
-          queueMicrotask(() => this.broadcast("hosts.changed", {}));
-          return h;
-        } catch (e) {
-          throw new RpcError("bad_request", (e as Error).message, { cause: e });
-        }
+        const h = await asBadRequest(() =>
+          method === "hosts.install" ? this.extras.hosts.install(id) : this.extras.hosts.check(id),
+        );
+        queueMicrotask(() => this.broadcast("hosts.changed", {}));
+        return h;
       }
       case "vmCredentials.list":
         return this.extras.vmCredentials.list();
@@ -312,12 +307,7 @@ export class Rpc {
       case "placements.set": {
         const p = params as MethodParsedParams<typeof method>;
         if (!this.agents.get(p.agentId)) throw new RpcError("not_found", "agent not found");
-        let placed: ReturnType<HostStore["setPlacement"]>;
-        try {
-          placed = this.extras.hosts.setPlacement(p);
-        } catch (e) {
-          throw new RpcError("bad_request", (e as Error).message, { cause: e });
-        }
+        const placed = asBadRequest(() => this.extras.hosts.setPlacement(p));
         await this.runtimes.restartSession(p.agentId);
         queueMicrotask(() => this.broadcast("placement.updated", placed));
         return placed;
@@ -342,13 +332,9 @@ export class Rpc {
         };
       case "marketplace.install": {
         const p = params as MethodParsedParams<typeof method>;
-        let r: Awaited<ReturnType<Marketplace["install"]>>;
-        try {
-          r = await this.extras.marketplace.install(p.source, p.id, p.provider);
-        } catch (e) {
-          if (e instanceof RpcError) throw e;
-          throw new RpcError("bad_request", (e as Error).message, { cause: e });
-        }
+        const r = await asBadRequest(() =>
+          this.extras.marketplace.install(p.source, p.id, p.provider),
+        );
         if (r.skills.length) this.broadcast("skills.changed", {});
         if (r.agent) {
           const agent = r.agent;
@@ -448,19 +434,15 @@ export class Rpc {
       case "voice.status":
         return this.extras.voice.status();
       case "voice.speak":
-        try {
-          await this.extras.voice.speak((params as MethodParsedParams<typeof method>).text);
-        } catch (e) {
-          throw new RpcError("bad_request", (e as Error).message, { cause: e });
-        }
+        await asBadRequest(() =>
+          this.extras.voice.speak((params as MethodParsedParams<typeof method>).text),
+        );
         return { ok: true };
       case "voice.transcribe": {
         const p = params as MethodParsedParams<typeof method>;
-        try {
-          return { text: await this.extras.voice.transcribe(p.audioBase64, p.mime) };
-        } catch (e) {
-          throw new RpcError("bad_request", (e as Error).message, { cause: e });
-        }
+        return {
+          text: await asBadRequest(() => this.extras.voice.transcribe(p.audioBase64, p.mime)),
+        };
       }
       case "browser.status":
         return {
@@ -526,13 +508,11 @@ export class Rpc {
       }
       case "skills.save": {
         const p = params as MethodParsedParams<typeof method>;
-        try {
+        return asBadRequest(() => {
           const s = this.skills.save({ ...p, author: "user" }, "upsert");
           this.broadcast("skills.changed", {});
           return s;
-        } catch (e) {
-          throw new RpcError("bad_request", (e as Error).message, { cause: e });
-        }
+        });
       }
       case "skills.delete": {
         if (!this.skills.delete((params as MethodParsedParams<typeof method>).name)) {
