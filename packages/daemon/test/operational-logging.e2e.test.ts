@@ -150,4 +150,12 @@ describe("daemon operational logging", () => {
     expect(stderr).not.toContain(secret3);
   });
 
+  test.skipIf(process.platform === "win32")("SIGTERM logs the shutdown reason", async () => {
+    daemon.proc.kill("SIGTERM");
+    await waitForExit(daemon.proc, 5000);
+    const stderr = await stderrText(daemon);
+    expect(stderr).toContain("shutting down");
+    expect(stderr).toContain("SIGTERM");
+  });
+
 });
