@@ -392,7 +392,9 @@ the vault as `team.token`, hidden from `vault.list`, migration 13 `team_messages
 selected agents, runs incoming messages as `<team_message>` turns and replies on `turn.ended`.
 An incoming row is `completed` once the reply is handed to an open relay socket; if the socket
 is down it is `failed` and logged (`team reply not delivered`). The relay has no delivery ack
-and drops replies to offline members, so the sender's `out` row can stay `pending`.
+and drops replies to offline members, so a sender's `out` row still `pending` after
+`UPBOT_TEAM_REPLY_TTL_MS` (default 30 min; checked at start and periodically) becomes `failed`;
+a late reply still overwrites it. No relay protocol change, nothing stored on the relay.
 RPC `team.status/connect/disconnect/share/send/messages`, events `team.updated/message`;
 UI `TeamView`. Tests: `test/team.e2e.test.ts` (spawns the relay).
 

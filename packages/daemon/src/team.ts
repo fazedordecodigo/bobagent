@@ -30,6 +30,14 @@ type MsgRow = {
 const logId = (v: unknown) =>
   typeof v === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(v) ? v : "invalid";
 
+// The relay has no delivery ack, so an `out` request whose reply never comes (e.g. the relay
+// dropped it because we were offline) fails after this TTL; a late reply still overwrites it.
+const REPLY_TTL_MS = (() => {
+  const v = Number(process.env.UPBOT_TEAM_REPLY_TTL_MS);
+  return v > 0 ? v : 30 * 60_000;
+})();
+const EXPIRED_REPLY = "No reply from the teammate in time; the relay may have dropped it.";
+
 const toMessage = (r: MsgRow): TeamMessage => ({
   id: r.id,
   requestId: r.request_id,
@@ -51,6 +59,7 @@ export class TeamClient {
   private me: { id: string; name: string } | null = null;
   private roster: TeamMember[] = [];
   private retry: ReturnType<typeof setTimeout> | null = null;
+  private expiry: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private db: Database,
@@ -94,7 +103,29 @@ export class TeamClient {
   }
 
   start() {
+    this.expirePending();
+    this.expiry ??= setInterval(
+      () => this.expirePending(),
+      Math.max(100, Math.min(REPLY_TTL_MS / 2, 60_000)),
+    );
+    this.expiry.unref?.();
     if (this.config()) this.open(1000);
+  }
+
+  private expirePending() {
+    const rows = this.db
+      .query(
+        "SELECT id FROM team_messages WHERE direction = 'out' AND status = 'pending' AND created_at <= ?",
+      )
+      .all(Date.now() - REPLY_TTL_MS) as { id: string }[];
+    for (const { id } of rows) {
+      this.db
+        .query(
+          "UPDATE team_messages SET reply = ?, status = 'failed' WHERE id = ? AND status = 'pending'",
+        )
+        .run(EXPIRED_REPLY, id);
+      this.emitRow(id);
+    }
   }
 
   connect(url: string, token: string): TeamStatus {

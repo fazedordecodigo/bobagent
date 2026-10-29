@@ -195,6 +195,8 @@ describe("teams via relay e2e", () => {
     let caraSlow: Agent;
     let caraBroken: Agent;
     let caraMemberId: string;
+    let dan: DaemonClient;
+    let danMemberId: string;
 
     const caraIn = async (requestId: string) =>
       ((await cara.request("team.messages", {})) as TeamMessage[]).find(
@@ -202,6 +204,10 @@ describe("teams via relay e2e", () => {
       );
     const bobOut = async (requestId: string) =>
       ((await bob.request("team.messages", {})) as TeamMessage[]).find(
+        (x) => x.requestId === requestId && x.direction === "out",
+      );
+    const danOut = async (requestId: string) =>
+      ((await dan.request("team.messages", {})) as TeamMessage[]).find(
         (x) => x.requestId === requestId && x.direction === "out",
       );
 
@@ -229,6 +235,15 @@ describe("teams via relay e2e", () => {
       await cara.request("team.share", { agentIds: [caraSlow.id, caraBroken.id] });
       await until(async () => {
         const s = (await bob.request("team.status", {})) as TeamStatus;
+        return s.members.find((x) => x.id === caraMemberId)?.agents.length === 2 ? true : undefined;
+      });
+      // A requester whose unanswered requests expire after 1 s instead of 30 min.
+      dan = await daemon({ UPBOT_TEAM_REPLY_TTL_MS: "1000" });
+      const d = await invite("Dan");
+      danMemberId = d.id;
+      await dan.request("team.connect", { url: relayUrl, token: d.token });
+      await until(async () => {
+        const s = (await dan.request("team.status", {})) as TeamStatus;
         return s.members.find((x) => x.id === caraMemberId)?.agents.length === 2 ? true : undefined;
       });
     });
@@ -285,8 +300,30 @@ describe("teams via relay e2e", () => {
       expect(caraLog.text).not.toContain("forged");
     });
 
+    test("an unanswered request fails after the TTL and a late reply still completes it", async () => {
+      const sent = (await dan.request("team.send", {
+        memberId: caraMemberId,
+        agentId: caraSlow.id,
+        text: "watchdog-delay:4000",
+      })) as TeamMessage;
+      expect(sent.status).toBe("pending");
+      const expired = await until(async () => {
+        const m = await danOut(sent.requestId);
+        return m?.status === "failed" ? m : undefined;
+      });
+      expect(expired.reply).toBe(
+        "No reply from the teammate in time; the relay may have dropped it.",
+      );
+      expect((await caraIn(sent.requestId))?.status).toBe("pending");
+      const late = await until(async () => {
+        const m = await danOut(sent.requestId);
+        return m?.status === "completed" ? m : undefined;
+      });
+      expect(late.reply).toBe("(no reply)");
+    });
+
     test("a reply finished after the relay drops the member is recorded as not delivered", async () => {
-      const sent = (await bob.request("team.send", {
+      const sent = (await dan.request("team.send", {
         memberId: caraMemberId,
         agentId: caraSlow.id,
         text: "watchdog-delay:2500",
@@ -309,15 +346,20 @@ describe("teams via relay e2e", () => {
       );
       const line = caraLog.text.split("\n").find((l) => l.includes("team reply not delivered"));
       expect(line).toBe(
-        `[upbotd] team reply not delivered requestId=${sent.requestId} agentId=${caraSlow.id} memberId=${await bobMemberId()} status=completed`,
+        `[upbotd] team reply not delivered requestId=${sent.requestId} agentId=${caraSlow.id} memberId=${danMemberId} status=completed`,
       );
       expect(caraLog.text).not.toContain("watchdog-delay");
       expect(caraLog.text).not.toContain("token=");
-      // The relay keeps no state and has no delivery ack: the requester stays pending.
-      expect((await bobOut(sent.requestId))?.status).toBe("pending");
+      // The relay has no delivery ack and dropped the reply: the requester's TTL fails it.
+      const out = await until(async () => {
+        const m = await danOut(sent.requestId);
+        return m?.status === "pending" ? undefined : m;
+      });
+      expect(out).toMatchObject({
+        status: "failed",
+        reply: "No reply from the teammate in time; the relay may have dropped it.",
+      });
     });
-
-    const bobMemberId = async () => ((await bob.request("team.status", {})) as TeamStatus).me?.id;
   });
 
   test("removed members are disconnected", async () => {
