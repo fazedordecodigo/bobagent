@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useChatApi } from "../hooks/useChat";
 import type { AgentOverview } from "../hooks/useOverview";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 import { moveControlFocus } from "../lib/keyboard";
 import { MonoAv, Pill, role } from "../lib/ui";
 import { PermissionNotice } from "./AgentSettings";
@@ -81,7 +82,7 @@ export function ChatView({
     try {
       await client.request("agents.setConfig", { agentId: agent.id, configId: "mode", value });
     } catch (e) {
-      setModeError(e instanceof Error ? e.message : String(e));
+      setModeError(errorMessage(e));
     }
   };
 
@@ -96,7 +97,7 @@ export function ChatView({
           ...(attachments.length ? { attachments } : {}),
         });
       } catch (e) {
-        setSendError(e instanceof Error ? e.message : String(e));
+        setSendError(errorMessage(e));
         throw e;
       } finally {
         setSendBusy(false);
@@ -112,7 +113,7 @@ export function ChatView({
   const respondPermission = useCallback(
     (requestId: string, optionId: string | null) => {
       void client.request("permissions.respond", { requestId, optionId }).catch((e) => {
-        setSendError(e instanceof Error ? e.message : String(e));
+        setSendError(errorMessage(e));
       });
     },
     [client],

@@ -2,13 +2,15 @@ import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
   ReactNode,
+  SelectHTMLAttributes,
   TextareaHTMLAttributes,
 } from "react";
-import { useId } from "react";
+import { useEffect, useId, useRef } from "react";
+import { useLayerFocus } from "../../hooks/useLayerFocus";
 import s from "./controls.module.css";
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "primary" | "secondary" | "ghost";
+  variant?: "primary" | "secondary" | "ghost" | "danger";
   small?: boolean;
   arrow?: boolean;
 };
@@ -36,14 +38,19 @@ export function IconButton({
   return <button type="button" {...props} className={`${s.iconButton} ${className}`} />;
 }
 
-type FieldBase = { label: string; hint?: string; error?: string };
+type FieldBase = {
+  label: string;
+  hint?: string;
+  error?: string;
+  fieldClassName?: string | undefined;
+};
 type FieldProps = FieldBase &
   (
     | ({ multiline?: false } & InputHTMLAttributes<HTMLInputElement>)
     | ({ multiline: true } & TextareaHTMLAttributes<HTMLTextAreaElement>)
   );
 
-export function Field({ label, hint, error, ...props }: FieldProps) {
+export function Field({ label, hint, error, fieldClassName, ...props }: FieldProps) {
   const generatedId = useId();
   const id = props.id ?? generatedId;
   const description = error || hint;
@@ -64,7 +71,7 @@ export function Field({ label, hint, error, ...props }: FieldProps) {
     control = <input {...inputProps} {...shared} />;
   }
   return (
-    <div className={s.field}>
+    <div className={`${s.field} ${fieldClassName ?? ""}`}>
       <label htmlFor={id}>{label}</label>
       {control}
       {description && (
@@ -191,4 +198,82 @@ export function Chip({ className = "", ...props }: ButtonHTMLAttributes<HTMLButt
 }
 export function KeyboardShortcut({ children }: { children: ReactNode }) {
   return <kbd className={s.kbd}>{children}</kbd>;
+}
+
+export function Select({ className = "", ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
+  return <select {...props} className={`${s.select} ${className}`} />;
+}
+
+export function Tag({ children }: { children: ReactNode }) {
+  return <span className={s.tag}>{children}</span>;
+}
+
+export function Box({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return <div className={`${s.box} ${className}`}>{children}</div>;
+}
+
+export function Toast({
+  children,
+  action,
+  onAction,
+}: {
+  children: ReactNode;
+  action?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <div className={s.toast} role="status" aria-live="polite">
+      {children}
+      {action && onAction && (
+        <button type="button" onClick={onAction}>
+          {action}
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function Dialog({
+  open,
+  title,
+  children,
+  onClose,
+}: {
+  open: boolean;
+  title: string;
+  children: ReactNode;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayerFocus(ref, open);
+  useEffect(() => {
+    if (open) ref.current?.querySelector<HTMLElement>("button, input, select, textarea")?.focus();
+  }, [open]);
+  if (!open) return null;
+  return (
+    <div className={s.dialogScrim}>
+      <button
+        type="button"
+        className={s.dialogBackdrop}
+        aria-label="Fechar diálogo"
+        tabIndex={-1}
+        onClick={onClose}
+      />
+      <div
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className={s.dialog}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onClose();
+          }
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
 }
