@@ -163,6 +163,32 @@ describe("avatars, memories, skills, agent creation e2e", () => {
     );
   });
 
+  test("memories.update enforces edit limits without changing stored memory on invalid edits", async () => {
+    const memory = (await c.request("memories.add", {
+      agentId: a.id,
+      text: "Original memory",
+    })) as Memory;
+    for (const text of ["", "   ", "x".repeat(2_001)]) {
+      await expect(c.request("memories.update", { id: memory.id, text })).rejects.toMatchObject({
+        code: "bad_request",
+      });
+    }
+    expect(await c.request("memories.list", { agentId: a.id })).toContainEqual(memory);
+    const atLimit = (await c.request("memories.update", {
+      id: memory.id,
+      text: "x".repeat(2_000),
+    })) as Memory;
+    expect(atLimit).toMatchObject({
+      id: memory.id,
+      agentId: memory.agentId,
+      createdAt: memory.createdAt,
+      text: "x".repeat(2_000),
+    });
+    expect(atLimit.updatedAt).toBeGreaterThanOrEqual(memory.updatedAt);
+    expect(await c.request("memories.list", { agentId: a.id })).toContainEqual(atLimit);
+    await c.request("memories.delete", { id: memory.id });
+  });
+
   test("memories via RPC are injected into the first prompt of a session", async () => {
     const m = (await c.request("memories.add", {
       agentId: a.id,
