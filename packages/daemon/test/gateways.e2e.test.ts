@@ -78,7 +78,7 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
           const isSecondTelegram = tg[1] === "TG-2";
           if (isSecondTelegram && tg2FailPoll && (tg[2] === "getMe" || tg[2] === "getUpdates"))
             return Response.json(
-              { ok: false, description: "Conflict: polling broken" },
+              { ok: false, description: "Conflict: polling broken for bot TG-2" },
               { status: 409 },
             );
           if (tg[2] === "getMe")
@@ -376,6 +376,8 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
           current.status === "error" && current.error?.includes("polling broken") === true,
       );
       expect(pollError.status).toBe("error");
+      expect(pollError.error ?? "").toContain("[redacted]");
+      expect(pollError.error ?? "").not.toContain("TG-2");
       tg2FailPoll = false;
       const recovered = await waitGateway((current) => current.status === "connected");
       expect(recovered.error ?? "").toContain("chat not found");
@@ -429,6 +431,14 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
       expect(cancelled.error ?? "").toContain("polling broken");
       tg2FailPoll = false;
       await waitGateway((current) => current.status === "connected" && current.error === null);
+      expect(
+        c.events
+          .filter(
+            (event) =>
+              event.event === "gateway.updated" && (event.data as Gateway).id === gatewayId,
+          )
+          .every((event) => !JSON.stringify(event.data).includes("TG-2")),
+      ).toBe(true);
     } finally {
       tg2FailSend = false;
       tg2FailPoll = false;

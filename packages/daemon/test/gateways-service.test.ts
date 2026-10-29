@@ -146,6 +146,17 @@ test("gateway notices stay bound to their source transport and send errors stay 
     const queueRow = {
       meta_json: JSON.stringify({ gateway: { id: gateway.id, chatId: "chat" } }),
     };
+    const from = broadcasts.length;
+    second.hooks.onStatus("error", "connect failed for bot-secret-2");
+    expect(service.get(gateway.id).error).toBe("connect failed for [redacted]");
+    expect(
+      broadcasts
+        .slice(from)
+        .filter((event) => event.event === "gateway.updated")
+        .every((event) => !JSON.stringify(event.data).includes("bot-secret-2")),
+    ).toBe(true);
+    second.hooks.onStatus("error", "x".repeat(600));
+    expect(service.get(gateway.id).error).toHaveLength(500);
     second.hooks.onStatus("error", "poll broken");
     service.onTurnEnded(turn, queueRow);
     await Bun.sleep(0);

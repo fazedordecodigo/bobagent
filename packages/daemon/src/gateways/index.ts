@@ -206,24 +206,36 @@ export class GatewayService {
     this.status.delete(id);
   }
 
+  private sanitizeError(t: Transport, message: string, fallbackSecrets: string[] = []) {
+    for (const secret of this.transportInfo.get(t)?.secrets ?? fallbackSecrets) {
+      message = message.split(secret).join("[redacted]");
+    }
+    return message.slice(0, 500);
+  }
+
   private restart(id: string) {
     this.stopTransport(id);
     const r = this.row(id);
     if (!r || r.enabled !== 1) return;
+    const tokens = this.tokens(id, r.kind);
+    const secrets = Object.values(tokens).filter((value) => value.length > 0);
     const hooks: TransportHooks = {
       onMessage: (m) => this.onInbound(id, t, m),
       onStatus: (status, error = null) => {
         if (this.transports.get(id) !== t) return;
-        this.status.set(id, { status, error, sendError: this.status.get(id)?.sendError ?? null });
+        this.status.set(id, {
+          status,
+          error: error === null ? null : this.sanitizeError(t, error, secrets),
+          sendError: this.status.get(id)?.sendError ?? null,
+        });
         this.emit(id);
       },
     };
-    const tokens = this.tokens(id, r.kind);
     const t = this.createTransport(r.kind, tokens, hooks);
     this.transports.set(id, t);
     this.transportInfo.set(t, {
       kind: r.kind,
-      secrets: Object.values(tokens).filter((value) => value.length > 0),
+      secrets,
     });
     this.status.set(id, { status: "connecting", error: null, sendError: null });
     t.start();
@@ -244,9 +256,7 @@ export class GatewayService {
       await t.send(chatId, text, replyTo);
     } catch (e) {
       const info = this.transportInfo.get(t);
-      let message = e instanceof Error ? e.message : "send failed";
-      for (const secret of info?.secrets ?? []) message = message.split(secret).join("[redacted]");
-      message = message.slice(0, 500);
+      const message = this.sanitizeError(t, e instanceof Error ? e.message : "send failed");
       console.error(
         `[upbotd] gateway ${id} (${info?.kind ?? "unknown"}) send failed (${errorName(e)})`,
       );
