@@ -58,6 +58,9 @@ export function startRelay(opts: {
   const save = () => writeFileSync(teamFile, JSON.stringify(members, null, 2), { mode: 0o600 });
   const sockets = new Map<string, Socket>();
   const shared = new Map<string, SharedAgent[]>();
+  // Structured one-line audit logs on stderr. Never log tokens, token hashes or message text.
+  const log = (event: string, fields: Record<string, unknown> = {}) =>
+    console.error(JSON.stringify({ event, ts: Date.now(), ...fields }));
 
   const active = () => members.filter((m) => !m.removedAt);
   const roster = () => ({
@@ -72,7 +75,9 @@ export function startRelay(opts: {
   const send = (ws: Socket | undefined, msg: unknown) => {
     try {
       ws?.send(JSON.stringify(msg));
-    } catch {}
+    } catch (e) {
+      log("relay.send_error", { memberId: ws?.data?.memberId, error: String(e) });
+    }
   };
   const broadcastRoster = () => {
     const r = roster();
@@ -92,14 +97,28 @@ export function startRelay(opts: {
         const token = url.searchParams.get("token") ?? "";
         const h = hash(token);
         const m = active().find((x) => eq(x.tokenHash, h));
-        if (!m) return new Response("unauthorized", { status: 401 });
+        if (!m) {
+          log("relay.auth_rejected", {
+            path: url.pathname,
+            reason: "member_token",
+            ip: srv.requestIP(req)?.address,
+          });
+          return new Response("unauthorized", { status: 401 });
+        }
         return srv.upgrade(req, { data: { memberId: m.id } })
           ? undefined
           : new Response("upgrade failed", { status: 400 });
       }
       if (url.pathname === "/health") return Response.json({ ok: true, members: active().length });
       if (url.pathname === "/members") {
-        if (!isAdmin(req)) return new Response("unauthorized", { status: 401 });
+        if (!isAdmin(req)) {
+          log("relay.auth_rejected", {
+            path: url.pathname,
+            reason: "admin_token",
+            ip: srv.requestIP(req)?.address,
+          });
+          return new Response("unauthorized", { status: 401 });
+        }
         if (req.method === "GET") return Response.json(roster().members);
         if (req.method === "POST") {
           const body = (await req.json().catch(() => ({}))) as { name?: unknown };
@@ -116,16 +135,25 @@ export function startRelay(opts: {
           };
           members.push(m);
           save();
+          log("relay.member_invited", { memberId: m.id, name });
           return Response.json({ id: m.id, name, token });
         }
       }
       const del = /^\/members\/([\w-]+)$/.exec(url.pathname);
       if (del && req.method === "DELETE") {
-        if (!isAdmin(req)) return new Response("unauthorized", { status: 401 });
+        if (!isAdmin(req)) {
+          log("relay.auth_rejected", {
+            path: url.pathname,
+            reason: "admin_token",
+            ip: srv.requestIP(req)?.address,
+          });
+          return new Response("unauthorized", { status: 401 });
+        }
         const m = active().find((x) => x.id === del[1]);
         if (!m) return new Response("not found", { status: 404 });
         m.removedAt = Date.now();
         save();
+        log("relay.member_removed", { memberId: m.id });
         sockets.get(m.id)?.close(4001, "removed from team");
         return Response.json({ ok: true });
       }
@@ -135,8 +163,10 @@ export function startRelay(opts: {
       maxPayloadLength: 1024 * 1024,
       open(ws) {
         const prev = sockets.get(ws.data.memberId);
-        if (prev && prev !== ws) prev.close(4000, "connected elsewhere");
+        const replaced = !!prev && prev !== ws;
+        if (replaced) prev.close(4000, "connected elsewhere");
         sockets.set(ws.data.memberId, ws);
+        log("relay.connected", { memberId: ws.data.memberId, replaced });
         const me = active().find((m) => m.id === ws.data.memberId)!;
         send(ws, { type: "welcome", member: { id: me.id, name: me.name } });
         broadcastRoster();
@@ -145,6 +175,7 @@ export function startRelay(opts: {
         if (sockets.get(ws.data.memberId) === ws) {
           sockets.delete(ws.data.memberId);
           shared.delete(ws.data.memberId);
+          log("relay.disconnected", { memberId: ws.data.memberId });
           broadcastRoster();
         }
       },
@@ -153,6 +184,7 @@ export function startRelay(opts: {
         try {
           msg = JSON.parse(String(raw)) as Record<string, unknown>;
         } catch {
+          log("relay.bad_message", { memberId: ws.data.memberId });
           return;
         }
         const me = active().find((m) => m.id === ws.data.memberId);
@@ -177,6 +209,13 @@ export function startRelay(opts: {
           const target = sockets.get(String(to.memberId));
           const agent = (shared.get(String(to.memberId)) ?? []).find((a) => a.id === to.agentId);
           if (!target || !agent) {
+            log("relay.route_failed", {
+              requestId,
+              fromMemberId: me.id,
+              toMemberId: String(to.memberId ?? ""),
+              agentId: String(to.agentId ?? ""),
+              reason: target ? "not_shared" : "offline",
+            });
             send(ws, {
               type: "reply",
               requestId,
@@ -195,7 +234,15 @@ export function startRelay(opts: {
           return;
         }
         if (msg.type === "reply") {
-          send(sockets.get(String(msg.toMemberId)), {
+          const dst = sockets.get(String(msg.toMemberId));
+          if (!dst) {
+            log("relay.reply_dropped", {
+              requestId,
+              fromMemberId: me.id,
+              toMemberId: String(msg.toMemberId ?? ""),
+            });
+          }
+          send(dst, {
             type: "reply",
             requestId,
             status: msg.status === "failed" ? "failed" : "completed",
