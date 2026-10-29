@@ -71,7 +71,7 @@ export class DaemonClient {
     return () => this.failureCbs.delete(cb);
   }
 
-  private openSocket(): Promise<void> {
+  private openSocket(retry = false): Promise<void> {
     const { port, token } = this.connection!;
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${encodeURIComponent(token)}`);
@@ -85,6 +85,8 @@ export class DaemonClient {
         this.reconnectDelay = 500;
         if (wasReconnect) {
           logInfo("daemon.socket_reconnected", { attempt, downMs });
+        }
+        if (this.everConnected || retry) {
           for (const cb of this.reconnectCbs) cb();
         }
         this.everConnected = true;
@@ -129,7 +131,7 @@ export class DaemonClient {
             void this.resolveConnection()
               .then(
                 () => {
-                  if (!this.closed) return this.openSocket();
+                  if (!this.closed) return this.openSocket(true);
                 },
                 (e: unknown) => {
                   if (this.closed) return;

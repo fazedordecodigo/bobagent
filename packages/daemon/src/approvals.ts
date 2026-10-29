@@ -1,8 +1,9 @@
 import type { Database } from "bun:sqlite";
 import type { Approval, ApprovalDecision, ApprovalRule } from "@upbot/protocol";
 import { classifyAppTool, isSensitivePermission } from "@upbot/protocol";
+import { z } from "zod";
 import type { AppsService } from "./apps";
-import { getSetting, setSetting } from "./db";
+import { getSetting, InvalidSettingError, setSetting } from "./db/settings";
 import { envPositiveNumber } from "./env/vars";
 import { RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
@@ -41,6 +42,15 @@ export class GateRejection extends Error {
   }
 }
 
+const rulesSchema = z.array(
+  z.looseObject({
+    id: z.string(),
+    pattern: z.string(),
+    action: z.enum(["ask", "allow"]),
+    agentId: z.string().nullable(),
+  }),
+);
+
 export class ApprovalService {
   private pending = new Map<string, Approval>();
   private waiters = new Map<string, Waiter>();
@@ -64,11 +74,18 @@ export class ApprovalService {
   }
 
   rules(): ApprovalRule[] {
-    return getSetting<ApprovalRule[]>(this.db, "approval_rules", []);
+    return getSetting(this.db, "approval_rules", rulesSchema, []);
   }
 
   setRules(rules: ApprovalRule[]): ApprovalRule[] {
-    const previous = this.rules();
+    let previous: ApprovalRule[];
+    try {
+      previous = this.rules();
+    } catch (e) {
+      // A corrupt stored value must not block repair: treat it as empty.
+      if (!(e instanceof InvalidSettingError)) throw e;
+      previous = [];
+    }
     setSetting(this.db, "approval_rules", rules);
     const previousIds = new Set(previous.map((r) => r.id));
     const nextIds = new Set(rules.map((r) => r.id));

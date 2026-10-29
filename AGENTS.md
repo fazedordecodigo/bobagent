@@ -165,7 +165,10 @@ devin/grok need a custom image plus `UPBOT_PROVIDER_COMMAND_<PROVIDER>`.
   stdout when listening on 127.0.0.1; all other logs go to stderr.
   Exits on SIGTERM/SIGINT and on stdin EOF. Migrations live in `src/db/migrations.ts`
   (ordered SQL array, tracked in `schema_migrations`). Agent delete is a soft delete;
-  workspace folders are never removed.
+  workspace folders are never removed. Settings use `src/db/settings.ts` (zod-validated;
+  invalid rows throw `InvalidSettingError`, surfaced over RPC as `internal` naming the key;
+  boot-time mobile/team consumers keep the feature off and log; `default_bot_seeded` is a
+  presence check). Tests: `test/settings.e2e.test.ts`.
 - `apps/desktop` — Tauri 2 + React 19 + Vite + Tailwind 4. Rust spawns the sidecar via
   `tauri-plugin-shell`, parses the READY line, and exposes `daemon_connection` ->
   `{port, token}`. Frontend WS client: `src/lib/daemon.ts`.

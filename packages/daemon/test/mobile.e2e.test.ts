@@ -238,4 +238,42 @@ describe("mobile companion e2e", () => {
     await c.request("mobile.enable", { enabled: false });
     await expect(fetch(`${base}/`)).rejects.toThrow();
   });
+
+  test("a busy stored port falls back to a random port and is not overwritten", async () => {
+    // This daemon has no UPBOT_MOBILE_PORT override, so the stored settings port drives binds.
+    const d2 = tmp("mob-data2-");
+    const a2 = tmp("mob-agents2-");
+    const token2 = `mob-test2-${crypto.randomUUID()}`;
+    const daemon2 = await startDaemon(d2, a2, token2, { UPBOT_MOBILE_HOST: "127.0.0.1" });
+    const c2 = await DaemonClient.connect(daemon2.port, token2);
+    try {
+      let st = (await c2.request("mobile.enable", { enabled: true })) as MobileStatus;
+      const configured = new URL(st.urls[0]!).port;
+      await c2.request("mobile.enable", { enabled: false });
+
+      // Occupy the stored port so the daemon must fall back to a random one.
+      const squatter = Bun.serve({
+        hostname: "127.0.0.1",
+        port: Number(configured),
+        fetch: () => new Response("squat"),
+      });
+      st = (await c2.request("mobile.enable", { enabled: true })) as MobileStatus;
+      expect(new URL(st.urls[0]!).port).not.toBe(configured);
+
+      // The ephemeral fallback port must not replace the stored one.
+      await c2.request("mobile.enable", { enabled: false });
+      squatter.stop(true);
+      st = (await c2.request("mobile.enable", { enabled: true })) as MobileStatus;
+      expect(new URL(st.urls[0]!).port).toBe(configured);
+      await c2.request("mobile.enable", { enabled: false });
+    } finally {
+      c2.close();
+      try {
+        daemon2.proc.kill("SIGKILL");
+      } catch {}
+      await daemon2.proc.exited;
+      rmSync(d2, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      rmSync(a2, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
 });

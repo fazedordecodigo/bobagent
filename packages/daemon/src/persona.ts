@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { AgentStore } from "./agents";
-import { getSetting, setSetting } from "./db";
+import { hasSetting, setSetting } from "./db/settings";
 
 export const DEFAULT_BOT_NAME = "UpBot";
 
@@ -28,7 +28,7 @@ research and browse the web, read and edit files, draft emails and documents, an
 /** Creates the default UpBot bot once, on a fresh install. */
 export function seedDefaultBot(db: Database, store: AgentStore): void {
   if (process.env.UPBOT_DEFAULT_BOT === "off") return;
-  if (getSetting(db, "default_bot_seeded", null)) return;
+  if (hasSetting(db, "default_bot_seeded")) return;
   const any = db.query("SELECT 1 FROM agents LIMIT 1").get();
   if (!any) {
     store.create({
