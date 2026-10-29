@@ -9,6 +9,8 @@
 //   think:<t>      -> thought chunk then message chunk <t>
 //   tool           -> tool_call pending -> request_permission (4 options)
 //                     -> tool_call_update -> message "permission:<optionId|cancelled>"
+//   tools          -> tool_call tc-a + tc-b, interleaved tool_call_updates (incl. an
+//                     orphan update for tc-orphan) -> message "tools:done"
 //   slow           -> a chunk every 100ms; responds to session/cancel
 //   ignorecancel   -> streams forever, ignores session/cancel
 //   crash          -> one chunk then process.exit(1)
@@ -37,7 +39,10 @@ function logRequest(method: string, params: unknown) {
 }
 
 const MODE_VALUES = ["ask-all", "default", "bypass", "accept-edits"];
-const MODEL_VALUES = ["m1", "m2"];
+const MODEL_VALUES =
+  process.env.FAKE_ACP_EFFORT === "1" ? ["grok-4.7-fast", "grok-4.7"] : ["m1", "m2"];
+const MODEL_NAMES =
+  process.env.FAKE_ACP_EFFORT === "1" ? ["Grok 4.7 Fast", "Grok 4.7"] : MODEL_VALUES;
 
 function configOptions() {
   return [
@@ -49,19 +54,38 @@ function configOptions() {
       currentValue: state.config.mode ?? "default",
       options: MODE_VALUES.map((v) => ({ value: v, name: v })),
     },
+    ...(process.env.FAKE_ACP_EFFORT === "1"
+      ? [
+          {
+            id: "effort",
+            name: "Effort",
+            category: "thought_level",
+            type: "select",
+            currentValue: state.config.effort ?? "medium",
+            options: ["low", "medium", "high"].map((value) => ({ value, name: value })),
+          },
+        ]
+      : []),
     {
       id: "model",
       name: "Model",
       category: "model",
       type: "select",
-      currentValue: state.config.model ?? "m1",
-      options: MODEL_VALUES.map((v) => ({ value: v, name: v })),
+      currentValue: state.config.model ?? MODEL_VALUES[0],
+      options: MODEL_VALUES.map((value, index) => ({
+        value,
+        name: MODEL_NAMES[index] ?? value,
+      })),
     },
   ];
 }
 
 const state = {
-  config: { mode: undefined as string | undefined, model: undefined as string | undefined },
+  config: {
+    mode: undefined as string | undefined,
+    model: undefined as string | undefined,
+    effort: undefined as string | undefined,
+  },
 };
 try {
   Object.assign(state, JSON.parse(readFileSync(join(STATE_DIR, "state.json"), "utf8")));
@@ -322,6 +346,39 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
     return { stopReason: "end_turn" };
   }
 
+  if (text === "tools") {
+    const toolCall = (toolCallId: string, title: string) =>
+      ctx.client.notify("session/update", {
+        sessionId,
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId,
+          title,
+          kind: "execute",
+          status: "pending",
+        },
+      });
+    const toolUpdate = (toolCallId: string, status: string, title?: string) =>
+      ctx.client.notify("session/update", {
+        sessionId,
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId,
+          status,
+          ...(title === undefined ? {} : { title }),
+        },
+      });
+    await toolCall("tc-a", "Tool A");
+    await toolCall("tc-b", "Tool B");
+    await toolUpdate("tc-a", "in_progress");
+    await toolUpdate("tc-b", "completed");
+    // update for a toolCallId the daemon never saw: must be ignored
+    await toolUpdate("tc-orphan", "completed");
+    await toolUpdate("tc-a", "completed", "Tool A renamed");
+    await say("agent_message_chunk", "tools:done");
+    return { stopReason: "end_turn" };
+  }
+
   if (text === "slow") {
     while (!cancelledSessions.has(sessionId)) {
       await say("agent_message_chunk", ".");
@@ -338,7 +395,7 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
   }
 
   if (text === "switchmodel") {
-    state.config.model = "m2";
+    state.config.model = MODEL_VALUES[1];
     saveState();
     await ctx.client.notify("session/update", {
       sessionId,
@@ -415,7 +472,7 @@ acp
   .onRequest("session/set_config_option", async (ctx) => {
     const params = ctx.params as { configId: string; value: string };
     logRequest("session/set_config_option", params);
-    if (params.configId === "mode" || params.configId === "model") {
+    if (params.configId === "mode" || params.configId === "model" || params.configId === "effort") {
       state.config[params.configId] = params.value;
       saveState();
     }

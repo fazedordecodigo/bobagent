@@ -123,16 +123,6 @@ export function recordedFirecrackerPid(runDir: string): number {
   return Number(readFileSync(join(runDir, "firecracker.pid"), "utf8"));
 }
 
-export function recordedFirecrackerAlive(runDir: string): boolean {
-  const pid = recordedFirecrackerPid(runDir);
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code !== "ESRCH";
-  }
-}
-
 export function assertGuestInitExecutable(rootfs: string): void {
   const r = spawnSync("debugfs", ["-R", "stat /usr/sbin/upbot-init", rootfs], {
     encoding: "utf8",

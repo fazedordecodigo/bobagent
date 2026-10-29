@@ -40,10 +40,13 @@ impl INotificationActivationCallback_Impl for Activator_Impl {
     ) -> windows::core::Result<()> {
         let app_id = unsafe { app_id.to_string()? };
         let args = unsafe { args.to_string()? };
-        if app_id == AUMID {
-            if let Some(response) = super::parse_activation(&args) {
-                super::respond(&self.app, response.id, response.action);
-            }
+        if app_id != AUMID {
+            log::warn!("ignored toast activation for app id {app_id}");
+            return Ok(());
+        }
+        match super::parse_activation(&args) {
+            Some(response) => super::respond(&self.app, response.id, response.action),
+            None => log::warn!("ignored unparseable toast activation"),
         }
         Ok(())
     }

@@ -711,7 +711,7 @@ export class Bridge {
           throw new Error(`unknown provider "${provider}"`);
         const instructions = typeof args.instructions === "string" ? args.instructions : "";
         const avatar = avatarFor(`${agentName} ${instructions}`);
-        if (typeof args.emoji === "string" && args.emoji.trim())
+        if (typeof args.emoji === "string" && args.emoji.trim() && "emoji" in avatar)
           avatar.emoji = args.emoji.trim().slice(0, 16);
         const created = this.agents.create({
           name: agentName,
