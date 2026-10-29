@@ -332,14 +332,15 @@ describe("daemon e2e", () => {
     });
     expect(rejected.status).toBe(401);
 
-    d.proc.kill("SIGTERM");
+    // stdin EOF (not SIGTERM): Windows can't deliver signals to the child handler
+    (d.proc.stdin as { end: () => void }).end();
     await waitForExit(d.proc, 5000);
 
     const stderr = await stderrText;
     expect(stderr).toContain("auth.rejected");
     expect(stderr).toContain("/health");
     expect(stderr).toContain("shutting down");
-    expect(stderr).toContain("SIGTERM");
+    expect(stderr).toContain("stdin EOF");
     expect(stderr).not.toContain("wrong-token");
   });
 });
