@@ -15,6 +15,7 @@ import {
   proxyTarget,
   type RunSpec,
   readFirstLine,
+  relayErrorReporter,
   vmConfig,
 } from "../src/main";
 
@@ -177,6 +178,19 @@ describe("upbot-host", () => {
       await new Promise<void>((resolve) => alive.close(() => resolve()));
       rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
+  });
+
+  test("relay error reporter flushes suppressed failures", async () => {
+    const lines: string[] = [];
+    const report = relayErrorReporter("/bridge.sock", (line) => lines.push(line), 100);
+    const error = Object.assign(new Error("connection refused"), { code: "ECONNREFUSED" });
+    report(error);
+    report(error);
+    report(error);
+    await Bun.sleep(250);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("/bridge.sock: ECONNREFUSED");
+    expect(lines[1]).toContain("2");
   });
 
   test("bridge reports daemon failures on stderr without the token", () => {

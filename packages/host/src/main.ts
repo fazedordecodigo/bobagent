@@ -382,22 +382,47 @@ export function proxyServer(logPath?: string, resolveTarget = proxyTarget): Serv
   });
 }
 
-function relayServer(targetPath: string): Server {
-  let lastErrorLog = 0;
+export function relayErrorReporter(
+  targetPath: string,
+  write: (line: string) => void = (line) => process.stderr.write(line),
+  windowMs = 10_000,
+): (error: NodeJS.ErrnoException) => void {
+  let lastErrorLog: number | undefined;
   let suppressedErrors = 0;
-  const logRelayError = (error: NodeJS.ErrnoException) => {
+  let flushTimer: ReturnType<typeof setTimeout> | undefined;
+  const flush = () => {
+    flushTimer = undefined;
+    if (!suppressedErrors) return;
+    write(
+      `upbot-host bridge relay: cannot reach ${targetPath}: ${suppressedErrors} more failure(s) suppressed in the last ${windowMs / 1000}s\n`,
+    );
+    suppressedErrors = 0;
+  };
+  return (error) => {
     const now = Date.now();
-    if (now - lastErrorLog < 10_000) {
+    if (lastErrorLog !== undefined && now - lastErrorLog < windowMs) {
       suppressedErrors++;
+      if (!flushTimer) {
+        flushTimer = setTimeout(flush, Math.max(0, lastErrorLog + windowMs - now));
+        flushTimer.unref();
+      }
       return;
     }
+    if (flushTimer) clearTimeout(flushTimer);
     lastErrorLog = now;
     const extra = suppressedErrors ? ` (+${suppressedErrors} more)` : "";
     suppressedErrors = 0;
-    process.stderr.write(
-      `upbot-host bridge relay: cannot reach ${targetPath}: ${error.code ?? error.message}${extra}\n`,
-    );
+    flushTimer = undefined;
+    const code =
+      typeof error.code === "string" && /^[A-Za-z0-9_]{1,40}$/.test(error.code)
+        ? error.code
+        : "error";
+    write(`upbot-host bridge relay: cannot reach ${targetPath}: ${code}${extra}\n`);
   };
+}
+
+function relayServer(targetPath: string): Server {
+  const logRelayError = relayErrorReporter(targetPath);
   return createServer((conn) => {
     const up = createConnection({ path: targetPath });
     conn.pipe(up).pipe(conn);
