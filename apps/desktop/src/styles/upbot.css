@@ -129,9 +129,9 @@
     .thread-inner { max-width: 720px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
     .day { text-align: center; }
     .msg-user { justify-self: end; max-width: 78%; overflow-wrap: anywhere; background: var(--fg-soft); padding: 10px 14px; border-radius: 14px 14px 4px 14px; }
-    .msg-agent { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; }
-    .msg-agent .mono-av { width: 28px; height: 28px; border-radius: 8px; font-size: 11px; }
-    .msg-agent .body { display: grid; gap: 10px; min-width: 0; padding-top: 3px; }
+    .thread-message { display: grid; min-width: 0; }
+    .msg-agent { justify-self: start; width: 100%; max-width: 90%; min-width: 0; }
+    .msg-agent .body { display: grid; gap: 10px; min-width: 0; padding: 12px 14px; border-radius: 14px 14px 14px 4px; background: var(--fg-softer); overflow-wrap: anywhere; }
     .msg-agent .who { font-weight: 600; font-size: 13px; }
     .msg-agent .who .meta { font-weight: 400; margin-left: 6px; }
 
@@ -184,10 +184,9 @@
     .composer-wrap { padding: 8px 24px 20px; flex: none; }
     .composer { max-width: 720px; margin: 0 auto; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: none; transition: border-color var(--dur-fast) var(--ease); }
     .composer:focus-within { border-color: color-mix(in oklch, var(--fg) 60%, var(--border)); }
-    .composer textarea { width: 100%; border: 0; resize: none; padding: 14px 16px 6px; min-height: 52px; max-height: 160px; background: transparent; outline: none; font-size: 14px; line-height: 1.5; }
-    .composer-bar { display: flex; align-items: center; gap: 4px; padding: 6px 8px 8px; }
-    .composer-bar .grow { flex: 1; }
-    .ctx { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 99px; background: var(--fg-soft); font-size: 12px; }
+    .composer textarea { flex: 1; min-width: 0; border: 0; resize: none; padding: 11px 8px; min-height: 44px; max-height: 160px; background: transparent; font-size: 14px; line-height: 1.5; }
+    .composer-row { display: flex; align-items: flex-end; gap: 4px; padding: 8px; }
+    .composer-row > button { flex: none; min-width: 44px; min-height: 44px; }
     .send { width: 44px; height: 44px; border-radius: 10px; display: grid; place-items: center; background: var(--fg); color: var(--bg); transition: background var(--dur-fast) var(--ease); }
     .send:hover { background: color-mix(in oklch, var(--fg) 86%, var(--bg)); }
     .send:disabled { background: var(--fg-soft); color: var(--muted); cursor: not-allowed; }

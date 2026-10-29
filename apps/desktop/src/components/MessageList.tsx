@@ -169,7 +169,7 @@ export function MessageList({
             !previous ||
             new Date(previous.createdAt).toDateString() !== new Date(item.createdAt).toDateString();
           return (
-            <div key={item.id}>
+            <div key={item.id} className="thread-message">
               {separator && <p className="meta day">{messageDay(item.createdAt)}</p>}
               {item.kind === "user_message" ? (
                 <div className="msg-user">
@@ -197,10 +197,8 @@ export function MessageList({
                 </div>
               ) : item.kind === "agent_message" ? (
                 <div className="msg-agent">
-                  <MonoAv agent={agent} dot={false} />
                   <div className="body">
                     <div className="who">
-                      {agent.name}
                       <span className="meta">
                         {new Date(item.createdAt).toLocaleTimeString("pt-BR", {
                           hour: "2-digit",
@@ -225,7 +223,6 @@ export function MessageList({
                 </div>
               ) : item.kind === "agent_thought" ? (
                 <div className="msg-agent">
-                  <MonoAv agent={agent} dot={false} />
                   <div className="body">
                     <details className="thought">
                       <summary className="meta">Pensando</summary>
@@ -235,7 +232,6 @@ export function MessageList({
                 </div>
               ) : item.kind === "tool_call" ? (
                 <div className="msg-agent">
-                  <MonoAv agent={agent} dot={false} />
                   <div className="body">
                     <div className="tool">
                       <b>{item.title}</b>
@@ -251,14 +247,12 @@ export function MessageList({
                 </div>
               ) : item.kind === "permission" ? (
                 <div className="msg-agent">
-                  <MonoAv agent={agent} dot={false} />
                   <div className="body">
                     <PermissionCard item={item} onRespond={onPermissionRespond} />
                   </div>
                 </div>
               ) : item.kind === "error" ? (
                 <div className="msg-agent">
-                  <MonoAv agent={agent} dot={false} />
                   <div className="body">
                     <div className="approval is-err" data-od-id="error-card">
                       <div className="approval-head">
@@ -315,9 +309,7 @@ export function MessageList({
         })}
         {running && last?.kind === "user_message" && (
           <div className="msg-agent">
-            <MonoAv agent={agent} dot={false} />
             <div className="body">
-              <div className="who">{agent.name}</div>
               <span className="typing" role="status" aria-label="Digitando">
                 <i />
                 <i />

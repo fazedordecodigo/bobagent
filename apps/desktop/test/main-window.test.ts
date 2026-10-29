@@ -2,7 +2,14 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Agent, Approval, ApprovalRule, ConnectedApp, Routine } from "@upbot/protocol";
+import type {
+  Agent,
+  Approval,
+  ApprovalRule,
+  ChannelMessage,
+  ConnectedApp,
+  Routine,
+} from "@upbot/protocol";
 import { type Browser, chromium, type Page } from "playwright-core";
 import {
   DaemonClient,
@@ -726,6 +733,133 @@ test("Buscar matches instructions without exposing them and shows live overview 
   } finally {
     await target.close();
     await rpc.request("agents.delete", { id: agent.id });
+  }
+}, 15000);
+
+test("chat uses a single composer row and anonymous left/right bubbles in both themes", async () => {
+  const agent = (await rpc.request("agents.create", {
+    name: "Rascunhos",
+    provider: "devin",
+    instructions: "Organiza ideias para a semana.",
+  })) as Agent;
+  const target = await browser.newPage({ viewport: { width: 1568, height: 1089 } });
+  target.setDefaultTimeout(5000);
+  try {
+    await target.addInitScript((id) => {
+      localStorage.setItem("upbot.agent", id);
+      localStorage.setItem("upbot.view", "chat");
+    }, agent.id);
+    for (const theme of ["light", "dark"]) {
+      await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+      await target.evaluate((value) => localStorage.setItem("upbot.theme", value), theme);
+      await target.reload();
+      const prompt = target.getByRole("textbox", { name: "Mensagem para o bot", exact: true });
+      await prompt.waitFor();
+      const composer = target.locator("form.composer");
+      const send = composer.getByRole("button", { name: "Enviar", exact: true });
+      expect(await send.isDisabled()).toBe(true);
+      expect(await composer.locator(".ctx, #ctxChip, .composer-bar").count()).toBe(0);
+      expect(await composer.getByRole("button", { name: "Escolher ferramentas" }).count()).toBe(0);
+      expect(await composer.textContent()).not.toContain("ferramenta");
+      const attach = composer.getByRole("button", { name: "Anexar arquivo" });
+      await composer.locator('input[type="file"]').setInputFiles({
+        name: "ideias.txt",
+        mimeType: "text/plain",
+        buffer: Buffer.from("Ideias para revisão."),
+      });
+      await target.getByTitle("Remover anexo", { exact: true }).waitFor();
+      expect(await send.isEnabled()).toBe(true);
+      await target.getByTitle("Remover anexo", { exact: true }).click();
+      expect(await send.isDisabled()).toBe(true);
+      await prompt.fill(`echo:As ideias estão organizadas para revisão em tema ${theme}.`);
+      await send.click();
+      await target
+        .locator(".msg-agent .md")
+        .filter({ hasText: `revisão em tema ${theme}.` })
+        .waitFor();
+      await prompt.fill("");
+      expect(await target.locator(".thread .mono-av").count()).toBe(0);
+      expect((await target.locator(".thread .who").allTextContents()).join(" ")).not.toContain(
+        agent.name,
+      );
+      const user = await target.locator(".msg-user").last().boundingBox();
+      const reply = await target.locator(".msg-agent").last().boundingBox();
+      expect(user).not.toBeNull();
+      expect(reply).not.toBeNull();
+      if (!user || !reply) throw new Error("Mensagens não visíveis");
+      expect(user.x).toBeGreaterThan(reply.x);
+      const checkRow = async () => {
+        const boxes = await Promise.all([
+          attach.boundingBox(),
+          prompt.boundingBox(),
+          send.boundingBox(),
+        ]);
+        const [a, t, s] = boxes;
+        if (!a || !t || !s) throw new Error("Compositor não visível");
+        expect(a.x + a.width).toBeLessThanOrEqual(t.x);
+        expect(t.x + t.width).toBeLessThanOrEqual(s.x);
+        expect(Math.abs(a.y + a.height - s.y - s.height)).toBeLessThan(1);
+        expect(Math.abs(t.y + t.height - s.y - s.height)).toBeLessThan(1);
+        for (const box of [a, s]) {
+          expect(box.width).toBeGreaterThanOrEqual(44);
+          expect(box.height).toBeGreaterThanOrEqual(44);
+        }
+      };
+      await checkRow();
+      await prompt.fill("Primeira linha\nSegunda linha\nTerceira linha");
+      await checkRow();
+      await prompt.focus();
+      expect(await prompt.evaluate((element) => getComputedStyle(element).outlineWidth)).toBe(
+        "2px",
+      );
+      await capture(`chat-${theme}`, target);
+      await prompt.fill("");
+      await target.setViewportSize({ width: 700, height: 900 });
+      await checkRow();
+      await target.setViewportSize({ width: 1568, height: 1089 });
+    }
+  } finally {
+    await target.close();
+    await rpc.request("agents.delete", { id: agent.id });
+  }
+}, 30000);
+
+test("group chat keeps only speaker names and its composer stays on one row", async () => {
+  const channel = (await rpc.request("channels.create", {
+    name: "Ideias em grupo",
+    memberIds: [bot.id],
+    ownerId: bot.id,
+  })) as { id: string };
+  const target = await browser.newPage();
+  try {
+    await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+    await target.getByRole("button", { name: "Ideias em grupo", exact: false }).click();
+    const prompt = target.getByRole("textbox", {
+      name: "Mensagem para #Ideias em grupo",
+      exact: true,
+    });
+    const reply = rpc.waitForEventWhere("channel.message", (event) => {
+      const message = event as ChannelMessage;
+      return message.channelId === channel.id && message.authorKind === "agent";
+    });
+    await prompt.fill("echo:Podemos revisar juntos.");
+    await target
+      .locator(".channel-composer")
+      .getByRole("button", { name: "Enviar", exact: true })
+      .click();
+    await reply;
+    await target.locator(".msg-agent .md").filter({ hasText: "Podemos revisar juntos." }).waitFor();
+    expect(await target.locator(".msg-agent .who").textContent()).toContain(bot.name);
+    expect(await target.locator(".thread .mono-av").count()).toBe(0);
+    const input = await prompt.boundingBox();
+    const send = await target.locator(".channel-composer .send").boundingBox();
+    expect(input).not.toBeNull();
+    expect(send).not.toBeNull();
+    if (!input || !send) throw new Error("Compositor não visível");
+    expect(Math.abs(input.y + input.height - send.y - send.height)).toBeLessThan(1);
+  } finally {
+    await target.close();
+    await rpc.request("channels.archive", { channelId: channel.id });
   }
 }, 15000);
 
