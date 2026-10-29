@@ -25,6 +25,8 @@ describe("approvals e2e", () => {
   let c: DaemonClient;
   let a: Agent;
   let app: ConnectedApp;
+  let daemonStderr = "";
+  let daemonStderrRead: Promise<void> | undefined;
 
   async function tool(agent: Agent, name: string, args: Record<string, unknown> = {}) {
     const { queueId } = (await c.request("chat.send", {
@@ -70,6 +72,17 @@ describe("approvals e2e", () => {
       UPBOT_VAULT_KEY: "12".repeat(32),
       UPBOT_APPROVAL_TTL_MS: "2000",
     });
+    const stderrReader = (daemon.proc.stderr as ReadableStream<Uint8Array>).getReader();
+    daemonStderrRead = (async () => {
+      const decoder = new TextDecoder();
+      for (;;) {
+        const { done, value } = await stderrReader.read();
+        if (done) break;
+        daemonStderr += decoder.decode(value, { stream: true });
+      }
+      daemonStderr += decoder.decode();
+      stderrReader.releaseLock();
+    })();
     c = await DaemonClient.connect(daemon.port, TOKEN);
     a = (await c.request("agents.create", {
       name: "A",
@@ -95,6 +108,7 @@ describe("approvals e2e", () => {
       daemon.proc.kill("SIGKILL");
     } catch {}
     await daemon.proc.exited;
+    if (daemonStderrRead) await daemonStderrRead;
     await stopTestChildren(stateDir);
     for (const d of [dataDir, agentsRoot, stateDir])
       rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
@@ -439,6 +453,76 @@ describe("approvals e2e", () => {
       const serialized = entries.map((row) => row.data_json).join("\n");
       expect(serialized).not.toContain("audit-arg-marker");
       expect(serialized).not.toContain("sk_audit_marker_77");
+    } finally {
+      db.close();
+    }
+  }, 30000);
+
+  test("secret approval keeps corrupt vault allowlist contents out of stderr and audit", async () => {
+    const db = new Database(join(dataDir, "upbot.db"));
+    db.exec("PRAGMA busy_timeout = 5000");
+    try {
+      const startSeq =
+        (db.query("SELECT MAX(seq) AS seq FROM approval_audit").get() as { seq: number | null })
+          .seq ?? 0;
+      const marker = "sk_vault_err_marker_42";
+      const secretValue = "sk_secret_value_43";
+      const now = Date.now();
+      db.query(
+        "INSERT INTO vault (name, iv, data, agent_ids, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+      ).run("audit.corrupt", "00", "AA==", marker, now, now);
+
+      const stderrStart = daemonStderr.length;
+      await withApproval(
+        "request_secret",
+        {
+          name: "audit.corrupt",
+          label: "Corrupt vault row",
+          reason: "test audit logging",
+        },
+        (ap) =>
+          c.request("approvals.respond", {
+            id: ap.id,
+            decision: "approve",
+            value: secretValue,
+          }),
+      );
+
+      const entries = db
+        .query("SELECT event, data_json FROM approval_audit WHERE seq > ? ORDER BY seq")
+        .all(startSeq) as { event: string; data_json: string }[];
+      const parsed = entries.map((entry) => ({
+        ...entry,
+        data: JSON.parse(entry.data_json) as Record<string, unknown>,
+      }));
+      expect(
+        parsed.find((entry) => entry.event === "approval.secret_allowlist_read_failed")?.data,
+      ).toMatchObject({ failure: "SyntaxError", secretName: "audit.corrupt" });
+      expect(
+        parsed.find(
+          (entry) =>
+            entry.event === "approval.decided" &&
+            entry.data.kind === "secret" &&
+            entry.data.secretName === "audit.corrupt",
+        )?.data,
+      ).toMatchObject({ status: "approved" });
+
+      const auditJson = (
+        db.query("SELECT data_json FROM approval_audit").all() as { data_json: string }[]
+      )
+        .map((row) => row.data_json)
+        .join("\n");
+      expect(auditJson).not.toContain(marker);
+      expect(auditJson).not.toContain(secretValue);
+
+      const logEvent = "[upbotd] approval.secret_allowlist_read_failed";
+      const deadline = Date.now() + 5000;
+      while (!daemonStderr.slice(stderrStart).includes(logEvent) && Date.now() < deadline)
+        await Bun.sleep(10);
+      const stderr = daemonStderr.slice(stderrStart);
+      expect(stderr).toContain(logEvent);
+      expect(stderr).not.toContain(marker);
+      expect(stderr).not.toContain(secretValue);
     } finally {
       db.close();
     }

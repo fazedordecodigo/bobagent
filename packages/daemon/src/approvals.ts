@@ -248,21 +248,23 @@ export class ApprovalService {
           const existing = this.vault.list().find((v) => v.name === name);
           if (existing) agentIds = [...new Set([...existing.agentIds, a.agentId])];
         } catch (error) {
+          const failure = error instanceof RpcError ? error.code : (error as Error).name;
           this.audit(
             "approval.secret_allowlist_read_failed",
             {
               approvalId: a.id,
               agentId: a.agentId,
               secretName: name,
-              failure: error instanceof RpcError ? error.code : (error as Error).name,
+              failure,
             },
             a,
           );
-          console.error(
-            "[upbotd] approval.secret_allowlist_read_failed",
-            { approvalId: a.id, agentId: a.agentId, secretName: name },
-            (error as Error).stack,
-          );
+          console.error("[upbotd] approval.secret_allowlist_read_failed", {
+            approvalId: a.id,
+            agentId: a.agentId,
+            secretName: name,
+            failure,
+          });
         }
         this.vault.set(name, p.value, agentIds);
         return this.finish(a.id, "approved", undefined, { decision: p.decision })!;

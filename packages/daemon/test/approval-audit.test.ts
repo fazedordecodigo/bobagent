@@ -274,7 +274,7 @@ test("secret approval logs and audits a vault read failure without the secret va
   await withApprovals(async ({ approvals, vault, db }) => {
     const stderr = spyOn(console, "error").mockImplementation(() => {});
     spyOn(vault, "list").mockImplementationOnce(() => {
-      throw new Error("decrypt failed");
+      throw new Error("decrypt failed sk_leak_marker_1");
     });
     const secret = approvals.requestSecret("bot", "stripe.key", "Stripe", "check invoices");
     const pending = approvals.list()[0]!;
@@ -288,8 +288,13 @@ test("secret approval logs and audits a vault read failure without the secret va
       approvalId: pending.id,
       agentId: "bot",
       secretName: "stripe.key",
+      failure: "Error",
     });
+    const stderrCalls = JSON.stringify(stderr.mock.calls);
     stderr.mockRestore();
+
+    expect(stderrCalls).not.toContain("sk_leak_marker_1");
+    expect(stderrCalls).not.toContain("decrypt failed");
 
     const failed = rows(db, "approval.secret_allowlist_read_failed");
     expect(failed).toHaveLength(1);
