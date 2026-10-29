@@ -121,7 +121,10 @@ async function startDaemon(
     stdout: "pipe",
     stderr: "pipe",
   });
-  const port = await readReadyPort(proc, TOKEN, 20000);
+  const port = await readReadyPort(proc, TOKEN, 20000).catch((error) => {
+    proc.kill();
+    throw error;
+  });
   return { proc, port };
 }
 

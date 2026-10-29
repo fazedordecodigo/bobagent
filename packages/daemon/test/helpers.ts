@@ -157,7 +157,10 @@ export async function startDaemon(
     ? new Response(proc.stderr as ReadableStream<Uint8Array>).text()
     : undefined;
   // token is delivered on the first stdin line, never via env
-  const port = await readReadyPort(proc, token, 15000);
+  const port = await readReadyPort(proc, token, 15000).catch((error) => {
+    proc.kill();
+    throw error;
+  });
   return stderrText ? { proc, port, stderrText } : { proc, port };
 }
 

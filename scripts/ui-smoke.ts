@@ -55,7 +55,10 @@ async function main() {
     stderr: "inherit",
     cwd: ROOT,
   });
-  const port = await readReadyPort(daemon, TOKEN, 15000);
+  const port = await readReadyPort(daemon, TOKEN, 15000).catch((error) => {
+    daemon.kill();
+    throw error;
+  });
 
   let vite: ReturnType<typeof Bun.spawn> | undefined;
   try {

@@ -7,8 +7,8 @@ export function readyLine(port: number): string {
 
 /**
  * Delivers the auth token as the first stdin line, then reads stdout until the
- * READY line and resolves with the announced port. Rejects on timeout or when
- * stdout closes first.
+ * READY line and resolves with the announced port. On failure, stdout is
+ * cancelled and the reader is released.
  */
 export async function readReadyPort(
   proc: { stdin: unknown; stdout: unknown },
@@ -22,30 +22,60 @@ export async function readReadyPort(
   const decoder = new TextDecoder();
   let buf = "";
   const port = await new Promise<number>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("daemon did not print READY")), timeoutMs);
-    const pump = async () => {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) {
-          reject(new Error("daemon stdout closed before READY"));
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const settle = (result: { port: number } | { error: unknown }) => {
+      if (settled) return;
+      if ("port" in result) {
+        try {
+          reader.releaseLock();
+        } catch (error) {
+          settle({ error });
           return;
         }
-        buf += decoder.decode(value, { stream: true });
-        let idx = buf.indexOf("\n");
-        while (idx >= 0) {
-          const line = buf.slice(0, idx);
-          buf = buf.slice(idx + 1);
-          if (line.startsWith(READY_PREFIX)) {
-            clearTimeout(timer);
-            resolve(JSON.parse(line.slice(READY_PREFIX.length)).port);
+        settled = true;
+        clearTimeout(timer);
+        resolve(result.port);
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      void (async () => {
+        try {
+          await reader.cancel(result.error).catch(() => {});
+        } catch {}
+        try {
+          reader.releaseLock();
+        } catch {}
+        reject(result.error);
+      })();
+    };
+    timer = setTimeout(() => settle({ error: new Error("daemon did not print READY") }), timeoutMs);
+    const pump = async () => {
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) {
+            settle({ error: new Error("daemon stdout closed before READY") });
             return;
           }
-          idx = buf.indexOf("\n");
+          buf += decoder.decode(value, { stream: true });
+          let idx = buf.indexOf("\n");
+          while (idx >= 0) {
+            const line = buf.slice(0, idx);
+            buf = buf.slice(idx + 1);
+            if (line.startsWith(READY_PREFIX)) {
+              settle({ port: JSON.parse(line.slice(READY_PREFIX.length)).port });
+              return;
+            }
+            idx = buf.indexOf("\n");
+          }
         }
+      } catch (error) {
+        settle({ error });
       }
     };
-    pump().catch(reject);
+    void pump();
   });
-  reader.releaseLock();
   return port;
 }
