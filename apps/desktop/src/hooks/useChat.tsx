@@ -66,14 +66,17 @@ export function useChat(client: DaemonClient, agentId: string | null) {
     });
     seqCursor.current = null;
     if (!agentId) return;
-    load().catch(() => {});
-    client
-      .request("agents.statuses", {})
-      .then((st) => {
-        const info = st[agentId];
-        if (info) setState((s) => ({ ...s, status: info }));
-      })
-      .catch(() => {});
+    const sync = () => {
+      load().catch(() => {});
+      client
+        .request("agents.statuses", {})
+        .then((st) => {
+          const info = st[agentId];
+          if (info) setState((s) => ({ ...s, status: info }));
+        })
+        .catch(() => {});
+    };
+    sync();
 
     const matches = (id: string | undefined | null) => id === agentId;
     const offs = [
@@ -135,16 +138,7 @@ export function useChat(client: DaemonClient, agentId: string | null) {
         if (!matches(q.agentId)) return;
         setState((s) => ({ ...s, queue: q }));
       }),
-      client.onReconnect(() => {
-        load().catch(() => {});
-        client
-          .request("agents.statuses", {})
-          .then((st) => {
-            const info = st[agentId];
-            if (info) setState((s) => ({ ...s, status: info }));
-          })
-          .catch(() => {});
-      }),
+      client.onReconnect(sync),
     ];
     return () => {
       for (const off of offs) off();
