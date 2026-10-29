@@ -54,11 +54,42 @@ export class ApprovalService {
   }
 
   setRules(rules: ApprovalRule[]): ApprovalRule[] {
+    const previous = this.rules();
     this.db
       .query("INSERT OR REPLACE INTO settings (key, value) VALUES ('approval_rules', ?)")
       .run(JSON.stringify(rules));
+    const previousIds = new Set(previous.map((r) => r.id));
+    const nextIds = new Set(rules.map((r) => r.id));
+    const addedRuleIds = rules.filter((r) => !previousIds.has(r.id)).map((r) => r.id);
+    const removedRuleIds = previous.filter((r) => !nextIds.has(r.id)).map((r) => r.id);
+    this.audit("approval.rules_changed", {
+      addedCount: addedRuleIds.length,
+      removedCount: removedRuleIds.length,
+      addedRuleIds,
+      removedRuleIds,
+    });
     this.broadcast("approvals.rulesChanged", {});
     return rules;
+  }
+
+  /** Persistent audit trail (approval_audit). Never stores args, details or secret values. */
+  private audit(event: string, data: Record<string, unknown>, a?: Approval): void {
+    try {
+      this.db
+        .query(
+          "INSERT INTO approval_audit (event, approval_id, agent_id, turn_id, data_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run(
+          event,
+          a?.id ?? (typeof data.approvalId === "string" ? data.approvalId : null),
+          a?.agentId ?? (typeof data.agentId === "string" ? data.agentId : null),
+          a?.turnId ?? null,
+          JSON.stringify(data),
+          Date.now(),
+        );
+    } catch (error) {
+      console.error("[upbotd] approval.audit_write_failed", (error as Error).message);
+    }
   }
 
   /** "ask" | "allow" for a tool call, after rules and defaults. */
@@ -126,13 +157,35 @@ export class ApprovalService {
     });
   }
 
-  private finish(id: string, status: Approval["status"], value?: string): Approval | null {
+  private finish(
+    id: string,
+    status: Approval["status"],
+    value?: string,
+    decision?: ApprovalDecision,
+  ): Approval | null {
     if (status === "expired" && this.responding.has(id)) return null;
     const a = this.pending.get(id);
     if (!a) return null;
     this.pending.delete(id);
     const done = { ...a, status };
     this.recent = [done, ...this.recent].slice(0, 50);
+    this.audit(
+      "approval.decided",
+      {
+        approvalId: done.id,
+        turnId: done.turnId,
+        kind: done.kind,
+        tool: done.tool,
+        appId: done.appId ?? null,
+        permission: done.permission ?? null,
+        secretName: done.kind === "secret" ? done.secretName : null,
+        status,
+        decision: decision ?? null,
+        background: done.background,
+        ageMs: Date.now() - done.createdAt,
+      },
+      done,
+    );
     const w = this.waiters.get(id);
     this.waiters.delete(id);
     if (w) {
@@ -159,22 +212,38 @@ export class ApprovalService {
     if (waiter) clearTimeout(waiter.timer);
     try {
       if (a.kind === "secret") {
-        if (p.decision === "deny") return this.finish(a.id, "denied")!;
+        if (p.decision === "deny") return this.finish(a.id, "denied", undefined, "deny")!;
         if (!p.value) throw new RpcError("bad_request", "enter the secret value");
         const name = a.secretName!;
         let agentIds = [a.agentId];
         try {
           const existing = this.vault.list().find((v) => v.name === name);
           if (existing) agentIds = [...new Set([...existing.agentIds, a.agentId])];
-        } catch {}
+        } catch (error) {
+          this.audit(
+            "approval.secret_allowlist_read_failed",
+            {
+              approvalId: a.id,
+              agentId: a.agentId,
+              secretName: name,
+              error: (error as Error).message,
+            },
+            a,
+          );
+          console.error(
+            "[upbotd] approval.secret_allowlist_read_failed",
+            { approvalId: a.id, agentId: a.agentId, secretName: name },
+            (error as Error).stack,
+          );
+        }
         this.vault.set(name, p.value, agentIds);
-        return this.finish(a.id, "approved")!;
+        return this.finish(a.id, "approved", undefined, p.decision)!;
       }
       if (a.kind === "takeover")
-        return this.finish(a.id, p.decision === "deny" ? "denied" : "done")!;
+        return this.finish(a.id, p.decision === "deny" ? "denied" : "done", undefined, p.decision)!;
       if (a.appId && a.permission) {
         if (p.decision === "deny" || this.apps.get(a.appId).permissions[a.permission] === "off")
-          return this.finish(a.id, "denied")!;
+          return this.finish(a.id, "denied", undefined, "deny")!;
         if (p.decision === "always" && !isSensitivePermission(a.permission)) {
           const app = this.apps.get(a.appId);
           a.previousLevel = app.permissions[a.permission];
@@ -184,6 +253,17 @@ export class ApprovalService {
             this.apps.restorePermission(a.appId, a.permission, a.previousLevel);
             throw error;
           }
+          this.audit(
+            "approval.permission_escalated",
+            {
+              approvalId: a.id,
+              agentId: a.agentId,
+              appId: a.appId,
+              permission: a.permission,
+              previousLevel: a.previousLevel,
+            },
+            a,
+          );
         }
         if (p.decision === "task" && a.turnId && !isSensitivePermission(a.permission)) {
           const key = `${a.agentId}:${a.turnId}`;
@@ -192,14 +272,27 @@ export class ApprovalService {
           this.grants.set(key, grants);
         }
       } else if (p.decision === "always" && a.tool) {
-        this.setRules([
-          ...this.rules(),
-          { id: crypto.randomUUID(), pattern: a.tool, action: "allow", agentId: a.agentId },
-        ]);
+        const rule: ApprovalRule = {
+          id: crypto.randomUUID(),
+          pattern: a.tool,
+          action: "allow",
+          agentId: a.agentId,
+        };
+        this.setRules([...this.rules(), rule]);
+        this.audit(
+          "approval.permission_escalated",
+          { approvalId: a.id, agentId: a.agentId, ruleId: rule.id, pattern: rule.pattern },
+          a,
+        );
       }
-      return this.finish(a.id, p.decision === "deny" ? "denied" : "approved")!;
+      return this.finish(
+        a.id,
+        p.decision === "deny" ? "denied" : "approved",
+        undefined,
+        p.decision,
+      )!;
     } catch (error) {
-      this.finish(a.id, "denied");
+      this.finish(a.id, "denied", undefined, p.decision);
       throw error;
     } finally {
       this.responding.delete(p.id);
@@ -218,8 +311,16 @@ export class ApprovalService {
     const app = isAppTool ? this.apps.appForTool(tool) : undefined;
     if (isAppTool && !app) throw new RpcError("not_found", "app not found");
     const permission = classifyAppTool(tool);
-    if (app?.permissions[permission] === "off")
+    if (app?.permissions[permission] === "off") {
+      this.audit("approval.auto_denied", {
+        agentId,
+        tool,
+        appId: app.id,
+        permission,
+        reason: "permission_off",
+      });
       throw new Error(`${app.name} não permite ${permission}`);
+    }
     if (this.decide(agentId, tool, isAppTool) === "allow") return;
     const detail = JSON.stringify(args ?? {}, null, 2);
     const { approval } = await this.open(agentId, {

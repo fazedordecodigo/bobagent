@@ -78,7 +78,13 @@ vault allowlisted to the bot) and `request_takeover` (user uses the bot browser,
 RPC `approvals.list/respond/rules/setRules` (also allowed for mobile), events
 `approval.updated`, `approvals.rulesChanged`. Codex gets `tool_timeout_sec = 3600` for MCP
 servers so waits do not time out. UI: `ApprovalCards` above the composer, Settings →
-Approvals. Tests: `test/approvals.e2e.test.ts`.
+Approvals. Tests: `test/approvals.e2e.test.ts`, `test/approval-audit.test.ts`.
+Every terminal decision persists to `approval_audit` (migration 20): `approval.decided`
+(status, decision, kind, tool, app/permission, ageMs — never args or secret values),
+`approval.auto_denied` for off permissions, `approval.permission_escalated` for
+`always` escalations (app previousLevel or created ruleId), `approval.rules_changed`
+(added/removed rule ids) and `approval.secret_allowlist_read_failed` (also on stderr)
+when the vault allowlist cannot be read before re-sharing a secret.
 
 Desktop notifications: `apps/desktop/src/lib/notifications.ts` owns approval eligibility,
 bounded summaries, actions, persisted one-hour mute and daemon decisions. Only pending
