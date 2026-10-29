@@ -2,13 +2,13 @@ import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, ChatItem, Turn } from "@upbot/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
   FAKE_AGENT,
   readLog,
   readPids,
+  sendAndWait,
   startDaemon,
   stopTestChildren,
   tmp,
@@ -39,22 +39,15 @@ for (const behavior of ["resume", "unknown", "error", "close", "auth", "new-erro
       if (daemon) await waitForExit(daemon.proc, 8000);
       for (const pid of readPids(stateDir)) await waitForPidDead(pid);
     };
-    const send = async (c: DaemonClient, agentId: string, text: string) => {
-      const { queueId } = (await c.request("chat.send", { agentId, text })) as {
-        queueId: string;
-      };
-      return (await c.waitForEventWhere(
-        "turn.ended",
-        (event) => (event as Turn).queueId === queueId,
-      )) as Turn;
-    };
+    const send = (c: DaemonClient, agentId: string, text: string) =>
+      sendAndWait(c, agentId, text, 10000);
     try {
       let c = await start();
-      const agent = (await c.request("agents.create", {
+      const agent = await c.request("agents.create", {
         name: "Resume",
         provider: "devin",
         instructions: "",
-      })) as Agent;
+      });
       expect((await send(c, agent.id, "echo:earlier conversation")).status).toBe("completed");
       const firstPrompt = readLog(stateDir).find((entry) => entry.method === "session/prompt");
       if (!firstPrompt) throw new Error("Missing first session prompt");
@@ -73,9 +66,7 @@ for (const behavior of ["resume", "unknown", "error", "close", "auth", "new-erro
       const prompts = log
         .filter((entry) => entry.method === "session/prompt")
         .map((entry) => entry.params as { sessionId: string; prompt: { text: string }[] });
-      const history = (await c.request("chat.history", { agentId: agent.id })) as {
-        items: ChatItem[];
-      };
+      const history = await c.request("chat.history", { agentId: agent.id });
       const db = new Database(join(dataDir, "upbot.db"), { readonly: true });
       try {
         const stored = db

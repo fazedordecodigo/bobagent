@@ -1,14 +1,16 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, ChatItem, Memory, Skill, Turn } from "@upbot/protocol";
+import type { Agent } from "@upbot/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
   FAKE_AGENT,
+  lastAgentText,
   readLog,
+  sendAndWait,
   startDaemon,
-  stopTestChildren,
+  stopDaemon,
   tmp,
 } from "./helpers";
 
@@ -24,15 +26,12 @@ describe("avatars, memories, skills, agent creation e2e", () => {
   let a: Agent;
 
   const newAgent = async (name: string) =>
-    (await c.request("agents.create", { name, provider: "devin", instructions: "" })) as Agent;
+    c.request("agents.create", { name, provider: "devin", instructions: "" });
 
-  async function turn(agentId: string, text: string): Promise<string> {
-    const { queueId } = (await c.request("chat.send", { agentId, text })) as { queueId: string };
-    await c.waitForEventWhere("turn.ended", (d) => (d as Turn).queueId === queueId, 20000);
-    const { items } = (await c.request("chat.history", { agentId })) as { items: ChatItem[] };
-    const last = items.filter((i) => i.kind === "agent_message").pop();
-    return last && "text" in last ? last.text : "";
-  }
+  const turn = async (agentId: string, text: string) => {
+    await sendAndWait(c, agentId, text, 20000);
+    return lastAgentText(c, agentId);
+  };
 
   const lastPrompt = () => {
     const prompts = readLog(stateDir).filter((l) => l.method === "session/prompt");
@@ -54,42 +53,35 @@ describe("avatars, memories, skills, agent creation e2e", () => {
   });
 
   afterAll(async () => {
-    c?.close();
-    try {
-      daemon.proc.kill("SIGKILL");
-    } catch {}
-    await daemon.proc.exited;
-    await stopTestChildren(stateDir);
+    await stopDaemon(daemon, c, stateDir);
     for (const d of [dataDir, agentsRoot, stateDir, sharedRoot])
       rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   test("draft turns a description into name, instructions and avatar", async () => {
-    const d = (await c.request("agents.draft", {
+    const d = await c.request("agents.draft", {
       prompt: "an agent named Sentinel that audits our code for security issues",
-    })) as { name: string; instructions: string; avatar: { emoji: string; color: string } };
+    });
     expect(d.name).toBe("Sentinel");
     expect(d.instructions).toContain("audits our code");
-    expect(d.avatar.emoji).toBe("🛡️");
-    const plain = (await c.request("agents.draft", { prompt: "write release notes" })) as {
-      name: string;
-    };
+    expect(d.avatar).toMatchObject({ emoji: "🛡️" });
+    const plain = await c.request("agents.draft", { prompt: "write release notes" });
     expect(plain.name).toBe("Write Release");
   });
 
   test("avatar is stored on create and update", async () => {
-    const x = (await c.request("agents.create", {
+    const x = await c.request("agents.create", {
       name: "Av",
       provider: "devin",
       avatar: { emoji: "🦊", color: "#ff8800" },
-    })) as Agent;
+    });
     expect(x.avatar).toEqual({ emoji: "🦊", color: "#ff8800" });
-    const y = (await c.request("agents.update", { id: x.id, avatar: null })) as Agent;
+    const y = await c.request("agents.update", { id: x.id, avatar: null });
     expect(y.avatar).toBeNull();
-    const icon = (await c.request("agents.update", {
+    const icon = await c.request("agents.update", {
       id: x.id,
       avatar: { icon: "sheet" },
-    })) as Agent;
+    });
     expect(icon.avatar).toEqual({ icon: "sheet" });
     await expect(
       c.request("agents.update", { id: x.id, avatar: { emoji: "x", color: "red" } }),
@@ -103,29 +95,22 @@ describe("avatars, memories, skills, agent creation e2e", () => {
     const deleted = await newAgent("Restaurar");
     await c.request("agents.update", { id: deleted.id, avatar: { icon: "chart" } });
     await c.request("agents.delete", { id: deleted.id });
-    expect(
-      ((await c.request("agents.list")) as Agent[]).some((item) => item.id === deleted.id),
-    ).toBe(false);
-    const created = c.waitForEventWhere(
-      "agent.created",
-      (item) => (item as Agent).id === deleted.id,
-    );
-    const restored = (await c.request("agents.restore", { id: deleted.id })) as Agent;
+    expect((await c.request("agents.list", {})).some((item) => item.id === deleted.id)).toBe(false);
+    const created = c.waitForEventWhere("agent.created", (item) => item.id === deleted.id);
+    const restored = await c.request("agents.restore", { id: deleted.id });
     expect(restored.avatar).toEqual({ icon: "chart" });
     await created;
-    expect(
-      ((await c.request("agents.list")) as Agent[]).some((item) => item.id === deleted.id),
-    ).toBe(true);
+    expect((await c.request("agents.list", {})).some((item) => item.id === deleted.id)).toBe(true);
     await expect(c.request("agents.restore", { id: deleted.id })).rejects.toMatchObject({
       code: "not_found",
     });
   });
 
   test("memories enforce the configuration screen character limit", async () => {
-    const accepted = (await c.request("memories.add", {
+    const accepted = await c.request("memories.add", {
       agentId: a.id,
       text: "x".repeat(2_000),
-    })) as Memory;
+    });
     expect(accepted.text).toHaveLength(2_000);
     await c.request("memories.delete", { id: accepted.id });
     await expect(
@@ -134,23 +119,20 @@ describe("avatars, memories, skills, agent creation e2e", () => {
   });
 
   test("memories.update edits text, emits memories.changed and rejects unknown ids", async () => {
-    const m = (await c.request("memories.add", {
+    const m = await c.request("memories.add", {
       agentId: a.id,
       text: "before the edit",
-    })) as Memory;
-    const changed = c.waitForEventWhere(
-      "memories.changed",
-      (d) => (d as { agentId: string }).agentId === a.id,
-    );
-    const updated = (await c.request("memories.update", {
+    });
+    const changed = c.waitForEventWhere("memories.changed", (d) => d.agentId === a.id);
+    const updated = await c.request("memories.update", {
       id: m.id,
       text: "  after the edit  ",
-    })) as Memory;
+    });
     expect(updated.id).toBe(m.id);
     expect(updated.text).toBe("after the edit");
     expect(updated.updatedAt).toBeGreaterThanOrEqual(updated.createdAt);
     await changed;
-    const list = (await c.request("memories.list", { agentId: a.id })) as Memory[];
+    const list = await c.request("memories.list", { agentId: a.id });
     expect(list.find((x) => x.id === m.id)?.text).toBe("after the edit");
     await expect(
       c.request("memories.update", { id: "mem-missing", text: "x" }),
@@ -159,20 +141,20 @@ describe("avatars, memories, skills, agent creation e2e", () => {
   });
 
   test("memories.update enforces edit limits without changing stored memory on invalid edits", async () => {
-    const memory = (await c.request("memories.add", {
+    const memory = await c.request("memories.add", {
       agentId: a.id,
       text: "Original memory",
-    })) as Memory;
+    });
     for (const text of ["", "   ", "x".repeat(2_001)]) {
       await expect(c.request("memories.update", { id: memory.id, text })).rejects.toMatchObject({
         code: "bad_request",
       });
     }
     expect(await c.request("memories.list", { agentId: a.id })).toContainEqual(memory);
-    const atLimit = (await c.request("memories.update", {
+    const atLimit = await c.request("memories.update", {
       id: memory.id,
       text: "x".repeat(2_000),
-    })) as Memory;
+    });
     expect(atLimit).toMatchObject({
       id: memory.id,
       agentId: memory.agentId,
@@ -185,10 +167,10 @@ describe("avatars, memories, skills, agent creation e2e", () => {
   });
 
   test("memories via RPC are injected into the first prompt of a session", async () => {
-    const m = (await c.request("memories.add", {
+    const m = await c.request("memories.add", {
       agentId: a.id,
       text: "User prefers tabs",
-    })) as Memory;
+    });
     await turn(a.id, "echo:hi");
     expect(lastPrompt()).toContain("agent_memories");
     expect(lastPrompt()).toContain(`[${m.id}] User prefers tabs`);
@@ -199,12 +181,12 @@ describe("avatars, memories, skills, agent creation e2e", () => {
   test("agents remember and forget through the bridge", async () => {
     const out = await turn(a.id, 'mcp:remember {"text":"Deploys happen on Fridays"}');
     expect(out).toMatch(/^tool-ok:remembered \[/);
-    const list = (await c.request("memories.list", { agentId: a.id })) as Memory[];
+    const list = await c.request("memories.list", { agentId: a.id });
     const fri = list.find((m) => m.text === "Deploys happen on Fridays")!;
     expect(fri).toBeTruthy();
     expect(await turn(a.id, `mcp:forget {"id":"${fri.id}"}`)).toContain("tool-ok:forgot");
     expect(await turn(a.id, 'mcp:forget {"id":"nope"}')).toContain("tool-error:");
-    const after = (await c.request("memories.list", { agentId: a.id })) as Memory[];
+    const after = await c.request("memories.list", { agentId: a.id });
     expect(after.map((m) => m.text)).toEqual(["User prefers tabs"]);
   });
 
@@ -228,7 +210,7 @@ describe("avatars, memories, skills, agent creation e2e", () => {
     expect(
       await turn(a.id, 'mcp:revise_skill {"name":"release-checklist","body":"1. Tag first"}'),
     ).toBe("tool-ok:revised skill release-checklist");
-    const s = (await c.request("skills.get", { name: "release-checklist" })) as Skill;
+    const s = await c.request("skills.get", { name: "release-checklist" });
     expect(s).toMatchObject({
       description: "Use before releases",
       author: "Mem",
@@ -236,7 +218,7 @@ describe("avatars, memories, skills, agent creation e2e", () => {
     });
     expect(readdirSync(join(sharedRoot, "Skills", "release-checklist", ".history")).length).toBe(1);
     await c.request("skills.save", { name: "triage", description: "Bug triage", body: "Label it" });
-    expect(((await c.request("skills.list", {})) as Skill[]).map((x) => x.name)).toEqual([
+    expect((await c.request("skills.list", {})).map((x) => x.name)).toEqual([
       "release-checklist",
       "triage",
     ]);
@@ -249,17 +231,13 @@ describe("avatars, memories, skills, agent creation e2e", () => {
   });
 
   test("agents can create agents", async () => {
-    const created = c.waitForEventWhere(
-      "agent.created",
-      (d) => (d as Agent).name === "Scribe",
-      20000,
-    );
+    const created = c.waitForEventWhere("agent.created", (d) => d.name === "Scribe", 20000);
     const out = await turn(
       a.id,
       'mcp:create_agent {"name":"Scribe","instructions":"Write docs","emoji":"✍️"}',
     );
     expect(out).toContain("tool-ok:created agent Scribe");
-    const ag = (await created) as Agent;
+    const ag = await created;
     expect(ag.provider).toBe("devin");
     expect(ag.avatar && "emoji" in ag.avatar ? ag.avatar.emoji : undefined).toBe("✍️");
     expect(

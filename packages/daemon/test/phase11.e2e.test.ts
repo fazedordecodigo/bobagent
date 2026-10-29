@@ -2,14 +2,15 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, ChatItem, Turn, VaultEntry } from "@upbot/protocol";
+import type { Agent } from "@upbot/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
   FAKE_AGENT,
   startDaemon,
-  stopTestChildren,
+  stopDaemon,
   tmp,
+  toolCall,
 } from "./helpers";
 
 const TOKEN = `p11-test-${crypto.randomUUID()}`;
@@ -25,26 +26,8 @@ describe("vault, connectors, computer use, voice e2e", () => {
   let b: Agent;
   let gh: ReturnType<typeof Bun.serve>;
 
-  async function tool(
-    agent: Agent,
-    name: string,
-    args: Record<string, unknown> = {},
-  ): Promise<string> {
-    const { queueId } = (await c.request("chat.send", {
-      agentId: agent.id,
-      text: `mcp:${name} ${JSON.stringify(args)}`,
-    })) as { queueId: string };
-    const t = (await c.waitForEventWhere(
-      "turn.ended",
-      (d) => (d as Turn).queueId === queueId,
-      20000,
-    )) as Turn;
-    const { items } = (await c.request("chat.history", { agentId: agent.id })) as {
-      items: ChatItem[];
-    };
-    const msg = items.filter((i) => i.turnId === t.id && i.kind === "agent_message").pop();
-    return msg && "text" in msg ? msg.text : "";
-  }
+  const tool = (agent: Agent, name: string, args: Record<string, unknown> = {}) =>
+    toolCall(c, agent, name, args, 20000);
 
   beforeAll(async () => {
     gh = Bun.serve({
@@ -91,26 +74,21 @@ describe("vault, connectors, computer use, voice e2e", () => {
       ]),
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
-    a = (await c.request("agents.create", {
+    a = await c.request("agents.create", {
       name: "A",
       provider: "devin",
       instructions: "",
-    })) as Agent;
-    b = (await c.request("agents.create", {
+    });
+    b = await c.request("agents.create", {
       name: "B",
       provider: "devin",
       instructions: "",
-    })) as Agent;
+    });
   });
 
   afterAll(async () => {
-    c?.close();
     gh?.stop(true);
-    try {
-      daemon.proc.kill("SIGKILL");
-    } catch {}
-    await daemon.proc.exited;
-    await stopTestChildren(stateDir);
+    await stopDaemon(daemon, c, stateDir);
     for (const d of [dataDir, agentsRoot, stateDir, work])
       rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
@@ -121,7 +99,7 @@ describe("vault, connectors, computer use, voice e2e", () => {
       value: "sk_live_SECRET123",
       agentIds: [a.id],
     });
-    const list = (await c.request("vault.list", {})) as VaultEntry[];
+    const list = await c.request("vault.list", {});
     expect(list).toMatchObject([{ name: "stripe.key", agentIds: [a.id] }]);
     expect(JSON.stringify(list)).not.toContain("SECRET123");
     const db = new Database(join(dataDir, "upbot.db"), { readonly: true });
@@ -228,10 +206,10 @@ describe("vault, connectors, computer use, voice e2e", () => {
     await c.request("voice.speak", { text: "Hello from UpBot" });
     await Bun.sleep(300);
     expect(readFileSync(join(work, "tts.txt"), "utf8")).toBe("Hello from UpBot");
-    const r = (await c.request("voice.transcribe", {
+    const r = await c.request("voice.transcribe", {
       audioBase64: Buffer.from("0123456789").toString("base64"),
       mime: "audio/webm;codecs=opus",
-    })) as { text: string };
+    });
     expect(r.text).toBe("heard 10 bytes");
   });
 });

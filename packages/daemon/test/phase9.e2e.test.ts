@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, ChatItem, Routine, RoutineRun, Turn } from "@upbot/protocol";
+import type { Agent, ChatItem, RoutineRun } from "@upbot/protocol";
 import { parseSchedule } from "../src/routines";
 import { storedZip } from "./fixtures/stored-zip";
 import {
@@ -11,7 +11,7 @@ import {
   FAKE_AGENT,
   readLog,
   startDaemon,
-  stopTestChildren,
+  stopDaemon,
   tmp,
 } from "./helpers";
 
@@ -45,12 +45,8 @@ describe("routines + attachments e2e", () => {
     return JSON.stringify(prompts[prompts.length - 1]!.params);
   };
   const userItem = async (queueId: string) => {
-    const t = (await c.waitForEventWhere(
-      "turn.ended",
-      (d) => (d as Turn).queueId === queueId,
-      20000,
-    )) as Turn;
-    const { items } = (await c.request("chat.history", { agentId: a.id })) as { items: ChatItem[] };
+    const t = await c.waitForEventWhere("turn.ended", (d) => d.queueId === queueId, 20000);
+    const { items } = await c.request("chat.history", { agentId: a.id });
     return items.find((i) => i.turnId === t.id && i.kind === "user_message") as Extract<
       ChatItem,
       { kind: "user_message" }
@@ -67,20 +63,15 @@ describe("routines + attachments e2e", () => {
       UPBOT_ROUTINE_TICK_MS: "150",
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
-    a = (await c.request("agents.create", {
+    a = await c.request("agents.create", {
       name: "R",
       provider: "devin",
       instructions: "",
-    })) as Agent;
+    });
   });
 
   afterAll(async () => {
-    c?.close();
-    try {
-      daemon.proc.kill("SIGKILL");
-    } catch {}
-    await daemon.proc.exited;
-    await stopTestChildren(stateDir);
+    await stopDaemon(daemon, c, stateDir);
     for (const d of [dataDir, agentsRoot, stateDir])
       rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
@@ -92,52 +83,52 @@ describe("routines + attachments e2e", () => {
   });
 
   test("manual run sends the routine prompt and records the run", async () => {
-    const r = (await c.request("routines.create", {
+    const r = await c.request("routines.create", {
       agentId: a.id,
       name: "Standup",
       prompt: "echo:standup",
       schedule: "daily 09:00",
-    })) as Routine;
+    });
     expect(r.nextRunAt).toBeGreaterThan(Date.now());
     expect(r.webhook).toBe(false);
-    const run = (await c.request("routines.run", { id: r.id })) as RoutineRun;
+    const run = await c.request("routines.run", { id: r.id });
     expect(run.trigger).toBe("manual");
     const u = await userItem(run.queueId!);
     expect(u.text).toBe("echo:standup");
     expect(u.routine).toEqual({ id: r.id, name: "Standup", trigger: "manual" });
     expect(lastPrompt()).toContain('<routine name=\\"Standup\\" trigger=\\"manual\\">');
-    const runs = (await c.request("routines.runs", { id: r.id })) as RoutineRun[];
+    const runs = await c.request("routines.runs", { id: r.id });
     expect(runs.length).toBe(1);
   });
 
   test("scheduler fires due routines and computes the next run", async () => {
-    const r = (await c.request("routines.create", {
+    const r = await c.request("routines.create", {
       agentId: a.id,
       name: "Tick",
       prompt: "echo:tick",
       schedule: "every 5m",
-    })) as Routine;
+    });
     const db = new Database(join(dataDir, "upbot.db"));
     db.query("UPDATE routines SET next_run_at = 1 WHERE id = ?").run(r.id);
     db.close();
-    const ev = (await c.waitForEventWhere(
+    const ev = await c.waitForEventWhere(
       "routine.updated",
-      (d) => (d as Routine).id === r.id && (d as Routine).lastRunAt !== null,
+      (d) => d.id === r.id && d.lastRunAt !== null,
       10000,
-    )) as Routine;
+    );
     expect(ev.nextRunAt! - Date.now()).toBeGreaterThan(4 * 60_000);
-    const [run] = (await c.request("routines.runs", { id: r.id })) as RoutineRun[];
+    const [run] = await c.request("routines.runs", { id: r.id });
     expect(run!.trigger).toBe("schedule");
     expect((await userItem(run!.queueId!)).routine?.trigger).toBe("schedule");
   });
 
   test("webhook trigger requires its token and passes the payload", async () => {
-    const r = (await c.request("routines.create", {
+    const r = await c.request("routines.create", {
       agentId: a.id,
       name: "Hook",
       prompt: "echo:hooked",
       webhook: true,
-    })) as Routine;
+    });
     expect(r.webhookUrl).toBe(`http://127.0.0.1:${daemon.port}/hooks/${r.id}`);
     expect(r.nextRunAt).toBeNull();
     const post = (headers: Record<string, string>) =>
@@ -157,29 +148,30 @@ describe("routines + attachments e2e", () => {
     await c.request("routines.update", { id: r.id, enabled: false });
     expect((await post({ authorization: `Bearer ${r.webhookToken}` })).status).toBe(401);
     await c.request("routines.delete", { id: r.id });
-    expect(
-      ((await c.request("routines.list", { agentId: a.id })) as Routine[]).map((x) => x.name),
-    ).toEqual(["Standup", "Tick"]);
+    expect((await c.request("routines.list", { agentId: a.id })).map((x) => x.name)).toEqual([
+      "Standup",
+      "Tick",
+    ]);
   });
 
   test("deleted agents stop scheduled and manual routines until restored", async () => {
-    const agent = (await c.request("agents.create", {
+    const agent = await c.request("agents.create", {
       name: "Paused agent",
       provider: "devin",
       instructions: "",
-    })) as Agent;
-    const r = (await c.request("routines.create", {
+    });
+    const r = await c.request("routines.create", {
       agentId: agent.id,
       name: "Paused routine",
       prompt: "echo:paused",
       schedule: "every 5m",
       webhook: true,
-    })) as Routine;
+    });
     const db = new Database(join(dataDir, "upbot.db"));
     await c.request("agents.delete", { id: agent.id });
     db.query("UPDATE routines SET next_run_at = 1 WHERE id = ?").run(r.id);
     await Bun.sleep(450);
-    expect(((await c.request("routines.runs", { id: r.id })) as RoutineRun[]).length).toBe(0);
+    expect((await c.request("routines.runs", { id: r.id })).length).toBe(0);
     await expect(c.request("routines.run", { id: r.id })).rejects.toMatchObject({
       code: "not_found",
     });
@@ -205,7 +197,7 @@ describe("routines + attachments e2e", () => {
     expect(webhookRun.trigger).toBe("webhook");
     if (!webhookRun.queueId) throw new Error("Expected a webhook queue ID");
     await userItem(webhookRun.queueId);
-    expect(((await c.request("routines.runs", { id: r.id })) as RoutineRun[]).length).toBe(1);
+    expect((await c.request("routines.runs", { id: r.id })).length).toBe(1);
     db.close();
   });
 
@@ -214,7 +206,7 @@ describe("routines + attachments e2e", () => {
       { name: "notes.txt", contents: Buffer.from("zipped content") },
     ]).toString("base64");
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64");
-    const { queueId } = (await c.request("chat.send", {
+    const { queueId } = await c.request("chat.send", {
       agentId: a.id,
       text: "echo:look",
       attachments: [
@@ -226,7 +218,7 @@ describe("routines + attachments e2e", () => {
           dataBase64: Buffer.from("x").toString("base64"),
         },
       ],
-    })) as { queueId: string };
+    });
     const u = await userItem(queueId);
     expect(u.text).toBe("echo:look");
     const [img, z, esc] = u.attachments!;

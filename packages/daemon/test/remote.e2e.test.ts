@@ -1,13 +1,15 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, AgentPlacement, ChatItem, RemoteHost, Subagent, Turn } from "@upbot/protocol";
+import type { Agent, RemoteHost } from "@upbot/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
   FAKE_AGENT,
+  lastAgentText,
+  sendAndWait,
   startDaemon,
-  stopTestChildren,
+  stopDaemon,
   tmp,
 } from "./helpers";
 
@@ -24,21 +26,9 @@ describe.skipIf(process.platform === "win32")("remote hosts + subagents e2e", ()
   let host: RemoteHost;
   let boss: Agent;
 
-  async function turn(agentId: string, text: string): Promise<Turn> {
-    const { queueId } = (await c.request("chat.send", { agentId, text })) as { queueId: string };
-    return (await c.waitForEventWhere(
-      "turn.ended",
-      (d) => (d as Turn).queueId === queueId,
-      30000,
-    )) as Turn;
-  }
-  const items = async (agentId: string) =>
-    ((await c.request("chat.history", { agentId })) as { items: ChatItem[] }).items;
-  async function lastText(agentId: string): Promise<string> {
-    const msgs = (await items(agentId)).filter((i) => i.kind === "agent_message");
-    const last = msgs[msgs.length - 1];
-    return last && "text" in last ? last.text : "";
-  }
+  const turn = (agentId: string, text: string) => sendAndWait(c, agentId, text);
+  const items = async (agentId: string) => (await c.request("chat.history", { agentId })).items;
+  const lastText = (agentId: string) => lastAgentText(c, agentId);
   const sshCalls = () =>
     readFileSync(sshLog, "utf8")
       .trim()
@@ -66,20 +56,15 @@ describe.skipIf(process.platform === "win32")("remote hosts + subagents e2e", ()
       FAKE_SSH_LOG: sshLog,
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
-    boss = (await c.request("agents.create", {
+    boss = await c.request("agents.create", {
       name: "Boss",
       provider: "devin",
       instructions: "",
-    })) as Agent;
+    });
   });
 
   afterAll(async () => {
-    c?.close();
-    try {
-      daemon.proc.kill("SIGKILL");
-    } catch {}
-    await daemon.proc.exited;
-    await stopTestChildren(stateDir);
+    await stopDaemon(daemon, c, stateDir);
     rmSync(sshHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
@@ -90,16 +75,16 @@ describe.skipIf(process.platform === "win32")("remote hosts + subagents e2e", ()
   });
 
   test("create + install uploads the helper and runs preflight", async () => {
-    host = (await c.request("hosts.create", {
+    host = await c.request("hosts.create", {
       name: "vps",
       target: "bob@vps.example.com",
       port: 2222,
-    })) as RemoteHost;
+    });
     expect(host.root).toBeNull();
     await expect(
       c.request("placements.set", { agentId: boss.id, hostId: host.id, isolation: "none" }),
     ).rejects.toThrow(/not installed/);
-    host = (await c.request("hosts.install", { id: host.id })) as RemoteHost;
+    host = await c.request("hosts.install", { id: host.id });
     expect(existsSync(join(sshHome, ".upbot/bin/upbot-host.ts"))).toBe(true);
     expect(host.root).toBe(join(sshHome, ".upbot"));
     const pre = host.preflight;
@@ -128,11 +113,11 @@ describe.skipIf(process.platform === "win32")("remote hosts + subagents e2e", ()
   });
 
   test("agent turns run on the host over ssh, bridge included", async () => {
-    const p = (await c.request("placements.set", {
+    const p = await c.request("placements.set", {
       agentId: boss.id,
       hostId: host.id,
       isolation: "none",
-    })) as AgentPlacement;
+    });
     expect(p.hostId).toBe(host.id);
     expect((await turn(boss.id, "echo:hello-vps")).status).toBe("completed");
     expect(await lastText(boss.id)).toBe("hello-vps");
@@ -150,7 +135,7 @@ describe.skipIf(process.platform === "win32")("remote hosts + subagents e2e", ()
     let bossTurns = 0;
     const results = c.waitForEventWhere(
       "turn.ended",
-      (d) => (d as Turn).agentId === boss.id && ++bossTurns === 2,
+      (d) => d.agentId === boss.id && ++bossTurns === 2,
       60000,
     );
     const t = await turn(
@@ -170,11 +155,11 @@ describe.skipIf(process.platform === "win32")("remote hosts + subagents e2e", ()
     const last = msgs.at(-1) as { text: string };
     expect(last.text).toContain("<subagent_results");
     for (const r of ["alpha-result", "beta-result", "gamma-result"]) expect(last.text).toContain(r);
-    const subs = (await c.request("subagents.list", { parentId: boss.id })) as Subagent[];
+    const subs = await c.request("subagents.list", { parentId: boss.id });
     expect(subs).toHaveLength(3);
     expect(subs.every((s) => s.status === "done")).toBe(true);
     // non-kept subagents are removed, and they ran on the parent's host
-    const agents = (await c.request("agents.list", {})) as Agent[];
+    const agents = await c.request("agents.list", {});
     for (const s of subs) {
       expect(agents.some((a) => a.id === s.agentId)).toBe(false);
       expect(existsSync(join(sshHome, ".upbot/agents", s.agentId))).toBe(true);
@@ -191,10 +176,10 @@ describe.skipIf(process.platform === "win32")("remote hosts + subagents e2e", ()
   }, 30000);
 
   test("unreachable host surfaces the ssh error", async () => {
-    const bad = (await c.request("hosts.create", {
+    const bad = await c.request("hosts.create", {
       name: "down",
       target: "unreachable.example",
-    })) as RemoteHost;
+    });
     await expect(c.request("hosts.check", { id: bad.id })).rejects.toThrow(/Connection refused/);
     await c.request("hosts.delete", { id: bad.id });
   });

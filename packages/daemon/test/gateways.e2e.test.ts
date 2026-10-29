@@ -16,7 +16,7 @@ import {
   type DaemonHandle,
   FAKE_AGENT,
   startDaemon,
-  stopTestChildren,
+  stopDaemon,
   tmp,
 } from "./helpers";
 
@@ -220,26 +220,21 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
       UPBOT_DISCORD_API: `${base}/discord`,
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
-    a = (await c.request("agents.create", {
+    a = await c.request("agents.create", {
       name: "Main",
       provider: "devin",
       instructions: "",
-    })) as Agent;
-    bee = (await c.request("agents.create", {
+    });
+    bee = await c.request("agents.create", {
       name: "Bee",
       provider: "devin",
       instructions: "",
-    })) as Agent;
+    });
   });
 
   afterAll(async () => {
-    c?.close();
     fake?.stop(true);
-    try {
-      daemon.proc.kill("SIGKILL");
-    } catch {}
-    await daemon.proc.exited;
-    await stopTestChildren(stateDir);
+    await stopDaemon(daemon, c, stateDir);
     for (const d of [dataDir, agentsRoot, stateDir])
       rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
@@ -262,21 +257,19 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
         tokens: { botToken: "xoxb-1" },
       }),
     ).rejects.toMatchObject({ code: "bad_request" });
-    const g = (await c.request("gateways.create", {
+    const g = await c.request("gateways.create", {
       kind: "telegram",
       name: "TG",
       agentId: a.id,
       tokens: { botToken: "TG-TOKEN" },
       allowedUsers: ["42"],
-    })) as Gateway;
+    });
     expect(g).toMatchObject({ kind: "telegram", status: "connecting", allowedUsers: ["42"] });
     expect(JSON.stringify(g)).not.toContain("TG-TOKEN");
-    expect((await c.request("vault.list", {})) as VaultEntry[]).toEqual([]);
+    expect(await c.request("vault.list", {})).toEqual([]);
     let status = "";
     for (let i = 0; i < 100 && status !== "connected"; i++) {
-      status = ((await c.request("gateways.list", {})) as Gateway[]).find(
-        (x) => x.id === g.id,
-      )!.status;
+      status = (await c.request("gateways.list", {})).find((x) => x.id === g.id)!.status;
       await Bun.sleep(50);
     }
     expect(status).toBe("connected");
@@ -288,7 +281,7 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
     expect(reply.text).toBe("hello telegram");
     const refused = await waitFor(() => tgSent.find((m) => m.chat_id === "1007"));
     expect(String(refused.text)).toContain("allow user id 7");
-    const { items } = (await c.request("chat.history", { agentId: a.id })) as { items: ChatItem[] };
+    const { items } = await c.request("chat.history", { agentId: a.id });
     const u = items.find((i) => i.kind === "user_message") as Extract<
       ChatItem,
       { kind: "user_message" }
@@ -305,9 +298,7 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
   test("telegram: @Agent prefix routes to another agent", async () => {
     tgUpdates.push(tgMsg(42, "@bee echo:routed"));
     await waitFor(() => tgSent.find((m) => m.text === "routed"));
-    const { items } = (await c.request("chat.history", { agentId: bee.id })) as {
-      items: ChatItem[];
-    };
+    const { items } = await c.request("chat.history", { agentId: bee.id });
     expect(items.some((i) => i.kind === "user_message" && i.text === "echo:routed")).toBe(true);
   });
 
@@ -355,23 +346,23 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
   });
 
   test("discord gateway: identifies with intents and replies to mentions only", async () => {
-    const g = (await c.request("gateways.create", {
+    const g = await c.request("gateways.create", {
       kind: "discord",
       name: "Discord",
       agentId: a.id,
       tokens: { botToken: "DC-TOKEN" },
       allowedUsers: ["D1"],
-    })) as Gateway;
+    });
     const sent = await waitFor(() => discordSent.find((m) => m.body.content === "hi discord"));
     expect(sent.channel).toBe("G1");
     expect(sent.body.message_reference).toMatchObject({ message_id: "x2" });
     expect(discordIdentify).toMatchObject({ token: "DC-TOKEN" });
     expect(Number(discordIdentify!.intents) & (1 << 15)).toBe(1 << 15);
     expect(discordSent.some((m) => m.body.content === "ignored")).toBe(false);
-    const off = (await c.request("gateways.update", { id: g.id, enabled: false })) as Gateway;
+    const off = await c.request("gateways.update", { id: g.id, enabled: false });
     expect(off.status).toBe("stopped");
     await c.request("gateways.delete", { id: g.id });
-    expect(((await c.request("gateways.list", {})) as Gateway[]).map((x) => x.kind)).toEqual([
+    expect((await c.request("gateways.list", {})).map((x) => x.kind)).toEqual([
       "telegram",
       "slack",
     ]);
