@@ -4,6 +4,7 @@ import { ApprovalService } from "../src/approvals";
 import { AppsService } from "../src/apps";
 import { migrations } from "../src/db/migrations";
 import type { RuntimeManager } from "../src/runtime/runtime-manager";
+import { RpcError } from "../src/runtime/agent-runtime";
 import { Vault } from "../src/vault";
 
 type AuditRow = {
@@ -167,6 +168,34 @@ test("approval.permission_escalated records always decisions for apps and tool r
   });
 });
 
+test("failed always decisions record a safe failure outcome without escalation", async () => {
+  await withApprovals(async ({ approvals, apps, db }) => {
+    const gate = approvals.gate("bot", "notes-create_note", {}, true).catch((error) => error);
+    const pending = approvals.list()[0]!;
+    spyOn(apps, "update").mockImplementationOnce(async () => {
+      throw new RpcError("busy", "x");
+    });
+
+    await expect(approvals.respond({ id: pending.id, decision: "always" })).rejects.toThrow("x");
+    expect(await gate).toBeInstanceOf(Error);
+    expect(apps.get("notes").permissions.write).toBe("ask");
+
+    const decided = rows(db, "approval.decided").map(json).find((r) => r.approvalId === pending.id);
+    expect(decided).toMatchObject({
+      status: "denied",
+      decision: null,
+      requestedDecision: "always",
+      reason: "respond_failed",
+      failure: "busy",
+    });
+    expect(
+      rows(db, "approval.permission_escalated")
+        .map(json)
+        .some((r) => r.approvalId === pending.id),
+    ).toBe(false);
+  });
+});
+
 test("approval.rules_changed records added and removed rule ids", async () => {
   await withApprovals(async ({ approvals, db }) => {
     approvals.setRules([
@@ -239,8 +268,9 @@ test("secret approval logs and audits a vault read failure without the secret va
       approvalId: pending.id,
       agentId: "bot",
       secretName: "stripe.key",
-      error: "decrypt failed",
+      failure: "Error",
     });
+    expect(failed[0]!.data_json).not.toContain("decrypt failed");
     expect(vault.list().find((v) => v.name === "stripe.key")?.agentIds).toEqual(["bot"]);
 
     const dump = JSON.stringify(

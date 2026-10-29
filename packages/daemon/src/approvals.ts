@@ -173,7 +173,12 @@ export class ApprovalService {
     id: string,
     status: Approval["status"],
     value?: string,
-    decision?: ApprovalDecision,
+    outcome?: {
+      decision?: ApprovalDecision;
+      requestedDecision?: ApprovalDecision;
+      reason?: string;
+      failure?: string;
+    },
   ): Approval | null {
     if (status === "expired" && this.responding.has(id)) return null;
     const a = this.pending.get(id);
@@ -192,7 +197,10 @@ export class ApprovalService {
         permission: done.permission ?? null,
         secretName: done.kind === "secret" ? done.secretName : null,
         status,
-        decision: decision ?? null,
+        decision: outcome?.decision ?? null,
+        requestedDecision: outcome?.requestedDecision ?? null,
+        reason: outcome?.reason ?? null,
+        failure: outcome?.failure ?? null,
         background: done.background,
         ageMs: Date.now() - done.createdAt,
       },
@@ -224,7 +232,8 @@ export class ApprovalService {
     if (waiter) clearTimeout(waiter.timer);
     try {
       if (a.kind === "secret") {
-        if (p.decision === "deny") return this.finish(a.id, "denied", undefined, "deny")!;
+        if (p.decision === "deny")
+          return this.finish(a.id, "denied", undefined, { decision: "deny" })!;
         if (!p.value) throw new RpcError("bad_request", "enter the secret value");
         const name = a.secretName!;
         let agentIds = [a.agentId];
@@ -238,7 +247,7 @@ export class ApprovalService {
               approvalId: a.id,
               agentId: a.agentId,
               secretName: name,
-              error: (error as Error).message,
+              failure: error instanceof RpcError ? error.code : (error as Error).name,
             },
             a,
           );
@@ -249,13 +258,21 @@ export class ApprovalService {
           );
         }
         this.vault.set(name, p.value, agentIds);
-        return this.finish(a.id, "approved", undefined, p.decision)!;
+        return this.finish(a.id, "approved", undefined, { decision: p.decision })!;
       }
       if (a.kind === "takeover")
-        return this.finish(a.id, p.decision === "deny" ? "denied" : "done", undefined, p.decision)!;
+        return this.finish(a.id, p.decision === "deny" ? "denied" : "done", undefined, {
+          decision: p.decision,
+        })!;
       if (a.appId && a.permission) {
-        if (p.decision === "deny" || this.apps.get(a.appId).permissions[a.permission] === "off")
-          return this.finish(a.id, "denied", undefined, "deny")!;
+        if (p.decision === "deny")
+          return this.finish(a.id, "denied", undefined, { decision: "deny" })!;
+        if (this.apps.get(a.appId).permissions[a.permission] === "off")
+          return this.finish(a.id, "denied", undefined, {
+            decision: "deny",
+            requestedDecision: p.decision,
+            reason: "permission_off",
+          })!;
         if (p.decision === "always" && !isSensitivePermission(a.permission)) {
           const app = this.apps.get(a.appId);
           a.previousLevel = app.permissions[a.permission];
@@ -301,10 +318,14 @@ export class ApprovalService {
         a.id,
         p.decision === "deny" ? "denied" : "approved",
         undefined,
-        p.decision,
+        { decision: p.decision },
       )!;
     } catch (error) {
-      this.finish(a.id, "denied", undefined, p.decision);
+      this.finish(a.id, "denied", undefined, {
+        requestedDecision: p.decision,
+        reason: "respond_failed",
+        failure: error instanceof RpcError ? error.code : (error as Error).name,
+      });
       throw error;
     } finally {
       this.responding.delete(p.id);
