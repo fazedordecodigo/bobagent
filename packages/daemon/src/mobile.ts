@@ -55,6 +55,7 @@ export class MobileServer {
   private server: ReturnType<typeof Bun.serve> | null = null;
   private pairing: { code: string; expiresAt: number; attempts: number } | null = null;
   private streams = new Set<Stream>();
+  private usedFallbackPort = false;
 
   constructor(private db: Database) {}
 
@@ -105,9 +106,11 @@ export class MobileServer {
     const s = this.setting();
     if (enabled) this.listen();
     else this.close();
+    // After a fallback bind, keep the configured port so the ephemeral one doesn't replace it.
+    const port = this.usedFallbackPort ? s.port : (this.server?.port ?? s.port);
     this.db
       .query("INSERT OR REPLACE INTO settings (key, value) VALUES ('mobile', ?)")
-      .run(JSON.stringify({ enabled, port: this.server?.port ?? s.port }));
+      .run(JSON.stringify({ enabled, port }));
     return this.status();
   }
 
@@ -158,6 +161,7 @@ export class MobileServer {
     this.server?.stop(true);
     this.server = null;
     this.pairing = null;
+    this.usedFallbackPort = false;
   }
 
   private device(req: Request, url: URL): DeviceRow | null {
@@ -188,7 +192,12 @@ export class MobileServer {
     };
     try {
       this.server = Bun.serve({ ...opts, port });
-    } catch {
+    } catch (e) {
+      console.error(
+        `[upbotd] mobile port ${port} unavailable, falling back:`,
+        (e as Error).message,
+      );
+      this.usedFallbackPort = true;
       this.server = Bun.serve({ ...opts, port: 0 });
     }
   }

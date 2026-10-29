@@ -153,4 +153,41 @@ describe("mobile companion e2e", () => {
     await c.request("mobile.enable", { enabled: false });
     await expect(fetch(`${base}/`)).rejects.toThrow();
   });
+
+  test("a busy configured port falls back to a random port and is not overwritten", async () => {
+    // Mobile is disabled but keeps its persisted port; re-enable to learn it.
+    let st = (await c.request("mobile.enable", { enabled: true })) as MobileStatus;
+    const configured = new URL(st.urls[0]!).port;
+    await c.request("mobile.enable", { enabled: false });
+
+    // Occupy the configured port so the daemon must fall back to a random one.
+    const squatter = Bun.serve({
+      hostname: "127.0.0.1",
+      port: Number(configured),
+      fetch: () => new Response("squat"),
+    });
+    const stderr = (async () => {
+      const reader = (daemon.proc.stderr as ReadableStream<Uint8Array>).getReader();
+      const dec = new TextDecoder();
+      let s = "";
+      while (!s.includes("unavailable")) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        s += dec.decode(value);
+      }
+      reader.releaseLock();
+      return s;
+    })();
+    st = (await c.request("mobile.enable", { enabled: true })) as MobileStatus;
+    const fallback = new URL(st.urls[0]!).port;
+    expect(fallback).not.toBe(configured);
+    expect(await stderr).toContain(`mobile port ${configured} unavailable, falling back`);
+
+    // The ephemeral fallback port must not replace the configured one.
+    await c.request("mobile.enable", { enabled: false });
+    squatter.stop(true);
+    st = (await c.request("mobile.enable", { enabled: true })) as MobileStatus;
+    expect(new URL(st.urls[0]!).port).toBe(configured);
+    await c.request("mobile.enable", { enabled: false });
+  });
 });
