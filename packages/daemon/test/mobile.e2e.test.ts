@@ -12,6 +12,7 @@ import {
 
 setDefaultTimeout(30000);
 const TOKEN = `mob-test-${crypto.randomUUID()}`;
+const DEVICE_NAME = "pair-name-secret-canary";
 
 describe("mobile companion e2e", () => {
   let dataDir: string;
@@ -24,11 +25,10 @@ describe("mobile companion e2e", () => {
   let device = "";
   let stderrBuf = "";
 
-  const waitForLog = async (needle: string) => {
+  const waitForLog = async (needle: string, after = 0) => {
     const deadline = Date.now() + 5000;
-    while (!stderrBuf.includes(needle)) {
-      if (Date.now() > deadline)
-        throw new Error(`log line not found: ${needle}\n--- stderr ---\n${stderrBuf}`);
+    while (!stderrBuf.slice(after).includes(needle)) {
+      if (Date.now() > deadline) throw new Error(`log line not found: ${needle}`);
       await Bun.sleep(50);
     }
   };
@@ -107,13 +107,16 @@ describe("mobile companion e2e", () => {
     const wrong = code === "123456" ? "654321" : "123456";
     expect((await api("/api/pair", { code: wrong }, "")).status).toBe(401);
     await waitForLog('mobile.pair_failed {"reason":"wrong_code"');
-    const ok = await api("/api/pair", { code, name: "iPhone" }, "");
+    const ok = await api("/api/pair", { code, name: DEVICE_NAME }, "");
     expect(ok.status).toBe(200);
     await waitForLog('mobile.paired {"deviceId"');
     device = ((await ok.json()) as { token: string }).token;
     expect(device).toMatch(/^[0-9a-f]{64}$/);
+    expect(stderrBuf).not.toContain(DEVICE_NAME);
+    expect(stderrBuf).not.toContain(device);
+    const afterPair = stderrBuf.length;
     expect((await api("/api/pair", { code, name: "again" }, "")).status).toBe(401);
-    await waitForLog('mobile.pair_failed {"reason":"inactive","attempts":0');
+    await waitForLog('mobile.pair_failed {"reason":"inactive","attempts":0', afterPair);
     expect(stderrBuf).not.toContain('"reason":"expired"');
     const { code: c2 } = (await c.request("mobile.pair", {})) as { code: string };
     for (let i = 0; i < 5; i++)
@@ -121,7 +124,21 @@ describe("mobile companion e2e", () => {
     expect((await api("/api/pair", { code: c2 }, "")).status).toBe(401);
     await waitForLog('mobile.pair_failed {"reason":"exhausted"');
     const st = (await c.request("mobile.status", {})) as MobileStatus;
-    expect(st.devices.map((d) => d.name)).toEqual(["iPhone"]);
+    expect(st.devices.map((d) => d.name)).toEqual([DEVICE_NAME]);
+  });
+
+  test("audit metadata never copies arbitrary request paths or RPC methods", async () => {
+    const pathSecret = "path-secret-canary";
+    const querySecret = "query-secret-canary";
+    const methodSecret = "method-secret-canary";
+    expect((await api(`/api/${pathSecret}?token=${querySecret}`, undefined, "")).status).toBe(401);
+    await waitForLog('mobile.unauthorized {"path":"unknown","method":"GET","reason":"bad_token"');
+    expect((await api(`/api/${pathSecret}`, undefined, "")).status).toBe(401);
+    await waitForLog('"reason":"missing_token"');
+    expect((await rpc(methodSecret, {})).status).toBe(403);
+    await waitForLog('"method":"unknown"');
+    for (const secret of [pathSecret, querySecret, methodSecret, DEVICE_NAME, device])
+      expect(stderrBuf).not.toContain(secret);
   });
 
   test("devices chat through an allowlist of methods and get live events", async () => {

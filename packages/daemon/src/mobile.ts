@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { networkInterfaces } from "node:os";
-import type { MobileDevice, MobileStatus } from "@upbot/protocol";
+import { type MobileDevice, type MobileStatus, methodMap } from "@upbot/protocol";
 import { MOBILE_HTML } from "./mobile-app";
 import { RpcError } from "./runtime/agent-runtime";
 
@@ -38,6 +38,18 @@ const FORWARDED_EVENTS = new Set([
 ]);
 const PAIR_TTL = 5 * 60_000;
 const PAIR_ATTEMPTS = 5;
+const AUDIT_PATHS = new Set(["/", "/manifest.webmanifest", "/api/pair", "/api/rpc", "/api/events"]);
+const AUDIT_HTTP_METHODS = new Set([
+  "GET",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "HEAD",
+  "OPTIONS",
+  "CONNECT",
+  "TRACE",
+]);
 
 type DeviceRow = {
   id: string;
@@ -256,14 +268,14 @@ export class MobileServer {
       this.db
         .query("INSERT INTO mobile_devices (id, name, token_hash, created_at) VALUES (?, ?, ?, ?)")
         .run(id, name, hash(token), Date.now());
-      emit("mobile.paired", { deviceId: id, name, ip });
+      emit("mobile.paired", { deviceId: id, ip });
       return Response.json({ token, deviceId: id }, { headers });
     }
     const device = this.device(req, url);
     if (url.pathname.startsWith("/api/") && !device) {
       emit("mobile.unauthorized", {
-        path: url.pathname,
-        method: req.method,
+        path: AUDIT_PATHS.has(url.pathname) ? url.pathname : "unknown",
+        method: AUDIT_HTTP_METHODS.has(req.method) ? req.method : "unknown",
         reason: this.requestToken(req, url) ? "bad_token" : "missing_token",
         ip,
       });
@@ -287,7 +299,11 @@ export class MobileServer {
       const body = (await req.json().catch(() => ({}))) as { method?: unknown; params?: unknown };
       const method = String(body.method ?? "");
       if (!ALLOWED_METHODS.has(method)) {
-        emit("mobile.method_denied", { deviceId: device.id, method: method.slice(0, 100), ip });
+        emit("mobile.method_denied", {
+          deviceId: device.id,
+          method: Object.hasOwn(methodMap, method) ? method : "unknown",
+          ip,
+        });
         return Response.json({ error: "method not allowed" }, { status: 403, headers });
       }
       const params = (body.params ?? {}) as Record<string, unknown>;
