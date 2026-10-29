@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { rmSync } from "node:fs";
+import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Agent, ChatItem, ConfigOption, PendingPermission, Turn } from "@upbot/protocol";
 import {
@@ -84,6 +84,50 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
     const msgs = h.items.filter((i) => i.kind === "agent_message");
     const last = msgs[msgs.length - 1];
     return last && "text" in last ? last.text : "";
+  }
+
+  function persistedSessionId(agentId: string): string | null {
+    const db = new Database(join(dataDir, "upbot.db"), { readonly: true });
+    try {
+      return (
+        db.query("SELECT session_id FROM agent_sessions WHERE agent_id = ?").get(agentId) as {
+          session_id: string;
+        } | null
+      )?.session_id ?? null;
+    } finally {
+      db.close();
+    }
+  }
+
+  function captureStderr(): string[] {
+    const chunks: string[] = [];
+    void (async () => {
+      const reader = (daemon.proc.stderr as ReadableStream<Uint8Array>).getReader();
+      const dec = new TextDecoder();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(dec.decode(value));
+      }
+    })();
+    return chunks;
+  }
+
+  async function restartDaemon(): Promise<string[]> {
+    const before = readPids(stateDir);
+    daemon.proc.kill("SIGKILL");
+    await daemon.proc.exited;
+    for (const pid of before) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {}
+      await waitForPidDead(pid).catch(() => {});
+    }
+    c.close();
+    daemon = await startDaemon(dataDir, agentsRoot, TOKEN, env());
+    const stderrChunks = captureStderr();
+    c = await DaemonClient.connect(daemon.port, TOKEN);
+    return stderrChunks;
   }
 
   beforeAll(async () => {
@@ -205,18 +249,7 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
   test("session resumes across a daemon restart", async () => {
     const a = await newAgent("Resume");
     await turn(a.id, "echo:first");
-    const before = readPids(stateDir);
-    daemon.proc.kill("SIGKILL");
-    await daemon.proc.exited;
-    for (const pid of before) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {}
-      await waitForPidDead(pid).catch(() => {});
-    }
-    c.close();
-    daemon = await startDaemon(dataDir, agentsRoot, TOKEN, env());
-    c = await DaemonClient.connect(daemon.port, TOKEN);
+    await restartDaemon();
     await turn(a.id, "whoami");
     const who = await lastAgentText(a.id);
     const log = readLog(stateDir);
@@ -245,30 +278,9 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
       }
     ).session_id;
     db.close();
-    const before = readPids(stateDir);
-    daemon.proc.kill("SIGKILL");
-    await daemon.proc.exited;
-    for (const pid of before) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {}
-      await waitForPidDead(pid).catch(() => {});
-    }
-    c.close();
     // the fake CLI no longer knows the saved session/thread
     rmSync(join(stateDir, cs.provider === "claude" ? "sessions.json" : "threads.json"));
-    daemon = await startDaemon(dataDir, agentsRoot, TOKEN, env());
-    const stderrChunks: string[] = [];
-    void (async () => {
-      const reader = (daemon.proc.stderr as ReadableStream<Uint8Array>).getReader();
-      const dec = new TextDecoder();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        stderrChunks.push(dec.decode(value));
-      }
-    })();
-    c = await DaemonClient.connect(daemon.port, TOKEN);
+    const stderrChunks = await restartDaemon();
     const t = await turn(a.id, "whoami");
     expect(t.status).toBe("completed");
     const who = await lastAgentText(a.id);
@@ -294,6 +306,43 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
     }
     expect(stderr).toContain("provider.resume_failed");
     expect(stderr).toContain(oldSessionId);
+  });
+
+  test("transient resume failure keeps the saved session until a fresh launch succeeds", async () => {
+    const a = await newAgent("TransientResumeFail");
+    await turn(a.id, "echo:first");
+    const oldSessionId = persistedSessionId(a.id)!;
+    writeFileSync(join(stateDir, "fail-start"), "");
+    const stderrChunks = await restartDaemon();
+
+    const failed = await turn(a.id, "whoami");
+    expect(failed.status).toBe("failed");
+    expect(persistedSessionId(a.id)).toBe(oldSessionId);
+    const deadline = Date.now() + 5000;
+    let stderr = stderrChunks.join("");
+    while (!stderr.includes("provider.resume_failed") && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 50));
+      stderr = stderrChunks.join("");
+    }
+    expect(stderr).toContain("provider.resume_failed");
+
+    rmSync(join(stateDir, "fail-start"));
+    const { queueId } = (await c.request("chat.send", { agentId: a.id, text: "whoami" })) as {
+      queueId: string;
+    };
+    const retryTurn = c.waitForEventWhere(
+      "turn.ended",
+      (d) => (d as Turn).queueId === queueId,
+    ) as Promise<Turn>;
+    const queue = (await c.request("queue.get", { agentId: a.id })) as { paused: boolean };
+    if (queue.paused) await c.request("queue.resume", { agentId: a.id });
+    const completed = await retryTurn;
+    expect(completed.status).toBe("completed");
+    const who = await lastAgentText(a.id);
+    expect(who).toContain(
+      cs.provider === "claude" ? `session=${oldSessionId}` : `thread=${oldSessionId}`,
+    );
+    expect(persistedSessionId(a.id)).toBe(oldSessionId);
   });
 
   test("provider crash fails the turn and the next turn respawns", async () => {

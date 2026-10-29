@@ -53,21 +53,18 @@ export function redactCredential(detail: string, credential: string | null): str
   return redactSecrets(credential ? detail.replaceAll(credential, "<redacted>") : detail);
 }
 
-/** A resume fell back to a fresh session: clear the saved session via the hook
- * and leave a redacted trace (the reason is otherwise invisible). */
-export function reportResumeFailed(
-  hooks: ProviderHooks,
+/** Logs a failed resume fallback; callers fire onResumeFailed only after the replacement session started. */
+export function logResumeFailed(
   provider: ProviderId,
   resumeSessionId: string,
   error: unknown,
   credential: string | null,
 ): void {
-  hooks.onResumeFailed?.();
   const detail = error instanceof Error ? error.message : String(error);
   console.error("[upbotd] provider.resume_failed", {
     provider,
     resumeSessionId,
-    error: redactCredential(detail, credential),
+    error: truncate(redactCredential(detail, credential), 500),
   });
 }
 

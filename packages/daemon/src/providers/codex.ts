@@ -6,8 +6,8 @@ import {
   type ProviderProcess,
   providerCommand,
   readJsonLines,
+  logResumeFailed,
   redactCredential,
-  reportResumeFailed,
   spawnProvider,
   truncate,
   vmCredentialRejectedMessage,
@@ -557,6 +557,7 @@ export class CodexDriver implements ProviderDriver {
           : {}),
       };
       let res: Json | null = null;
+      let resumeFailed = false;
       if (resumeSessionId) {
         try {
           res = await session.request("thread/resume", {
@@ -567,7 +568,8 @@ export class CodexDriver implements ProviderDriver {
           session.resumed = true;
         } catch (e) {
           res = null;
-          reportResumeFailed(hooks, "codex", resumeSessionId, e, vmKey);
+          logResumeFailed("codex", resumeSessionId, e, vmKey);
+          resumeFailed = true;
         }
       }
       res ??= await session.request("thread/start", threadParams);
@@ -581,10 +583,11 @@ export class CodexDriver implements ProviderDriver {
       } catch (e) {
         console.error(
           "[upbotd] codex model/list failed:",
-          redactCredential((e as Error).message, vmKey),
+          truncate(redactCredential((e as Error).message, vmKey), 500),
         );
       }
       session.configOptions = buildConfigOptions(models, str(res.model), str(res.reasoningEffort));
+      if (resumeFailed) hooks.onResumeFailed?.();
       return session;
     } catch (e) {
       proc.kill();

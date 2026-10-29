@@ -3,6 +3,7 @@
 // Fake `codex app-server` for daemon e2e tests: JSON-RPC lines over stdio.
 // Logs every inbound message to $FAKE_CODEX_STATE_DIR/log.jsonl, its pid to pids.txt.
 // FAKE_CODEX_NO_AUTH=1 makes account/read report a signed-out user.
+// A $FAKE_CODEX_STATE_DIR/fail-start file makes thread/resume and thread/start fail transiently.
 //
 // Prompt behaviors (text after any <conversation_history>/<agent_instructions> block):
 //   echo:<t>  -> agentMessage deltas, turn completed
@@ -13,7 +14,7 @@
 //   fail      -> turn completed with status failed
 //   crash     -> process.exit(1)
 
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const STATE_DIR = process.env.FAKE_CODEX_STATE_DIR ?? join(process.cwd(), ".fake-codex-state");
@@ -225,12 +226,18 @@ function handle(m: J) {
           : { account: { type: "chatgpt", email: "x@y.z" }, requiresOpenaiAuth: true },
       );
     case "thread/start": {
+      if (existsSync(join(STATE_DIR, "fail-start"))) {
+        return send({ id, error: { code: -32603, message: "transient backend failure" } });
+      }
       const tid = crypto.randomUUID();
       writeFileSync(THREADS, JSON.stringify([...threads(), tid]));
       ok(thread(tid));
       return notify("thread/started", thread(tid));
     }
     case "thread/resume":
+      if (existsSync(join(STATE_DIR, "fail-start"))) {
+        return send({ id, error: { code: -32603, message: "transient backend failure" } });
+      }
       if (!threads().includes(String(p.threadId))) {
         return send({
           id,

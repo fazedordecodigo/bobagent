@@ -6,8 +6,8 @@ import {
   type ProviderProcess,
   providerCommand,
   readJsonLines,
+  logResumeFailed,
   redactCredential,
-  reportResumeFailed,
   spawnProvider,
   truncate,
   vmCredentialRejectedMessage,
@@ -431,6 +431,7 @@ export class ClaudeDriver implements ProviderDriver {
   async start(opts: StartOpts): Promise<ProviderSession> {
     const mcp = opts.mcpServers ?? [];
     const resumeSessionId = opts.resumeSessionId;
+    let resumeFailed = false;
     if (resumeSessionId) {
       try {
         return await this.launch(
@@ -444,10 +445,13 @@ export class ClaudeDriver implements ProviderDriver {
       } catch (e) {
         if (e instanceof ProviderError && e.code !== "internal") throw e;
         // stale/unknown session: fall back to a fresh one
-        reportResumeFailed(opts.hooks, "claude", resumeSessionId, e, claudeCredential(opts.remote));
+        logResumeFailed("claude", resumeSessionId, e, claudeCredential(opts.remote));
+        resumeFailed = true;
       }
     }
-    return this.launch(opts.cwd, null, opts.hooks, mcp, opts.remote, opts.extraDirs);
+    const session = await this.launch(opts.cwd, null, opts.hooks, mcp, opts.remote, opts.extraDirs);
+    if (resumeFailed) opts.hooks.onResumeFailed?.();
+    return session;
   }
 
   private async launch(
