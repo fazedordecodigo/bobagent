@@ -1,5 +1,6 @@
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useState } from "react";
+import { errorMessage } from "../lib/errors";
 
 export function UpdateButton() {
   const [state, setState] = useState<
@@ -22,7 +23,7 @@ export function UpdateButton() {
       setUpdate(u);
       setState(u ? "available" : "none");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
       setState("error");
     }
   };

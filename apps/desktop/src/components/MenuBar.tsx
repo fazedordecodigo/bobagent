@@ -10,6 +10,7 @@ import { permissionActions } from "../lib/app-permissions";
 import { approvalAction, decideApproval } from "../lib/approval-decisions";
 import { describeApproval, requiresFullReview } from "../lib/approval-description";
 import { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 import {
   GLOBAL_PAUSE_KEY,
   type GlobalPauseAction,
@@ -37,7 +38,6 @@ import { Menu } from "./ds/Menu";
 import { Icon } from "./icons";
 import s from "./MenuBar.module.css";
 
-const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 function relativeTime(createdAt: number, now: number) {
   const minutes = Math.max(0, Math.floor((now - createdAt) / 60000));
   return minutes < 1

@@ -25,6 +25,7 @@ import { UpdateButton } from "./components/UpdateButton";
 import { useLayerFocus, useMediaQuery } from "./hooks/useLayerFocus";
 import { useOverview } from "./hooks/useOverview";
 import { DaemonClient } from "./lib/daemon";
+import { errorMessage } from "./lib/errors";
 import { moveControlFocus } from "./lib/keyboard";
 import { nativeCommand } from "./lib/native";
 import { useNativeNotifications } from "./lib/native-notifications";
@@ -148,7 +149,7 @@ export default function App() {
         if (alive) setClientReady(true);
       })
       .catch((e: unknown) => {
-        if (alive) setError(e instanceof Error ? e.message : String(e));
+        if (alive) setError(errorMessage(e));
       });
     const offs = [
       client.on("agent.created", (agent) =>
@@ -242,7 +243,7 @@ export default function App() {
           return nativeCommand("main_ready");
         }
       })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => setError(errorMessage(e)));
     return () => {
       disposed = true;
       unlisten?.();
@@ -428,9 +429,7 @@ export default function App() {
           await client.request("approvals.setRules", { rules: [...rules, rule] });
         } catch (e) {
           setNotice(
-            `Bot criado, mas não foi possível salvar a regra de autonomia: ${
-              e instanceof Error ? e.message : String(e)
-            }`,
+            `Bot criado, mas não foi possível salvar a regra de autonomia: ${errorMessage(e)}`,
           );
         }
       }
@@ -1173,7 +1172,7 @@ function CreateAgentDialog({
       setInstructions(proposal.instructions);
       setAvatar(proposal.avatar);
     } catch (e) {
-      setDraftError(e instanceof Error ? e.message : String(e));
+      setDraftError(errorMessage(e));
     } finally {
       setDrafting(false);
     }
@@ -1214,7 +1213,7 @@ function CreateAgentDialog({
               avatar,
             });
           } catch (e) {
-            setSubmitError(e instanceof Error ? e.message : String(e));
+            setSubmitError(errorMessage(e));
             setBusy(false);
           }
         }}
