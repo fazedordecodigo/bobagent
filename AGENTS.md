@@ -256,7 +256,7 @@ spawns the real bridge and calls the tool).
 
 `src/channels.ts` (`ChannelService`, migration 6: `channels`, `channel_members`,
 `channel_messages`, `queue.channel_id` + `queue.prompt`). RPC `channels.list/create/
-history/post/stop/resume/archive/restore/reassign/setMembers`; events `channel.created`,
+history/post/stop/resume/archive/restore/reassign`; events `channel.created`,
 `channel.updated`, `channel.message`. A user post goes to the owner (default: first
 member) as a queue item whose provider prompt (`queue.prompt`) carries a
 `<channel_context>` block with role and recent transcript. When a channel turn ends
@@ -286,7 +286,7 @@ Tests: `test/usage.e2e.test.ts`.
 `Agent.avatar` (`{emoji,color}` or null, `agents.avatar_json`, migration 8). `agents.draft
 {prompt}` (`src/draft.ts`, deterministic) proposes name/instructions/avatar for the create
 form. Memories: `memories` table, `MemoryStore` (`src/memories.ts`), RPC
-`memories.list/add/update/delete`, event `memories.changed`. Skills library:
+`memories.list/add/delete`, event `memories.changed`. Skills library:
 `<shared>/Skills/<name>/SKILL.md` with name/description/author frontmatter, previous versions
 in `.history/` (`src/skills.ts`), RPC `skills.list/get/save/delete`, event `skills.changed`.
 Bridge tools: `remember`, `forget`, `list_memories`, `list_skills`, `read_skill`,
@@ -341,7 +341,7 @@ Computer Use (`src/computer.ts`, macOS): off per agent until `computer.setAccess
 `computer_screenshot` (screencapture), `computer_click` (CoreGraphics via JXA),
 `computer_type`, `computer_key` (System Events, whitelisted keys/modifiers);
 `UPBOT_COMPUTER_DRYRUN=<file>` logs commands instead (tests).
-Voice (`src/voice.ts`): `voice.speak/stop` (`say`, or `UPBOT_TTS_COMMAND` with text on
+Voice (`src/voice.ts`): `voice.speak` (`say`, or `UPBOT_TTS_COMMAND` with text on
 stdin), `voice.transcribe` (`UPBOT_STT_COMMAND` with `{file}`, or `whisper` on PATH),
 `voice.status`. UI: Vault view, Computer Use toggle, composer mic, read-aloud button;
 `src-tauri/Info.plist` has the microphone usage string. Tests: `test/phase11.e2e.test.ts`.
@@ -412,7 +412,7 @@ UI `TeamView`. Tests: `test/team.e2e.test.ts` (spawns the relay).
 ## Remote hosts, Firecracker, subagents
 
 `src/remote/hosts.ts` (`HostStore`, migration 14: `hosts`, `agent_placement`, `subagents`).
-RPC `hosts.list/create/update/delete/install/check`, `placements.list/set`, `subagents.list`;
+RPC `hosts.list/create/delete/install/check`, `placements.list/set`, `subagents.list`;
 events `hosts.changed`, `placement.updated`, `subagent.updated`; UI `components/HostsView.tsx`
 (Settings → Hosts). SSH runs the system `ssh` with `BatchMode=yes`,
 `StrictHostKeyChecking=accept-new`, keepalives, `-p`, optional `-i`, then `--` and the target
