@@ -66,7 +66,7 @@ export class RpcError extends Error {
 }
 
 const ERROR_TYPE_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
-const ERRNO_RE = /^E[A-Z]{2,15}$/;
+export const ERRNO_RE = /^E[A-Z]{2,15}$/;
 
 /** Bounded diagnostics for an untrusted error: never its message, stack or payload. */
 export function errorFields(e: unknown): string {
