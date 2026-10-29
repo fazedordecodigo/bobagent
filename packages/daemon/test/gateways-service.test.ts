@@ -148,11 +148,11 @@ test("gateway notices stay bound to their source transport and send errors stay 
       meta_json: JSON.stringify({
         gateway: {
           id: gateway.id,
-          kind: "telegram",
-          name: "Relay",
+          kind: gateway.kind,
+          name: gateway.name,
           chatId: "chat",
           userId: "1",
-          userName: "unknown",
+          userName: "allowed",
         },
       }),
     };
