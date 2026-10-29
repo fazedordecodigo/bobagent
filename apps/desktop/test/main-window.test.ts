@@ -78,9 +78,7 @@ async function seedEchoHistory(agentId: string, text: string) {
   await rpc.request("chat.send", { agentId, text: `echo:${text}` });
   for (let attempt = 0; attempt < 150; attempt++) {
     const history = await rpc.request("chat.history", { agentId });
-    if (
-      history.items.some((item) => item.kind === "agent_message" && item.text.includes(text))
-    ) {
+    if (history.items.some((item) => item.kind === "agent_message" && item.text.includes(text))) {
       return;
     }
     await Bun.sleep(100);
@@ -1057,7 +1055,7 @@ test("earlier-history failure is shown", async () => {
     });
     server.onMessage((message) => {
       const response = JSON.parse(String(message));
-      if (response.result && response.result.items && response.result.hasMore !== undefined) {
+      if (response.result?.items && response.result.hasMore !== undefined) {
         response.result.hasMore = true;
         socket.send(JSON.stringify(response));
       } else {
