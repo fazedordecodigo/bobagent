@@ -1,7 +1,6 @@
 import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_BOT_NAME } from "../src/persona";
 import {
@@ -178,31 +177,39 @@ describe("daemon e2e", () => {
   });
 
   test("logs auth rejections and the shutdown reason to stderr", async () => {
-    const d = await startDaemon(
-      mkdtempSync(join(tmpdir(), "upbotd-data3-")),
-      mkdtempSync(join(tmpdir(), "upbotd-agents3-")),
-      TOKEN,
-      {},
-      true,
-    );
-    const stderrText = d.stderrText;
-    if (!stderrText) throw new Error("stderr capture was not enabled");
+    const authDataDir = tmp("upbotd-data3-");
+    const authAgentsRoot = tmp("upbotd-agents3-");
+    let d: DaemonHandle | undefined;
 
-    const rejected = await fetch(`http://127.0.0.1:${d.port}/health`, {
-      headers: { Authorization: "Bearer wrong-token" },
-    });
-    expect(rejected.status).toBe(401);
+    try {
+      d = await startDaemon(authDataDir, authAgentsRoot, TOKEN, {}, true);
+      const stderrText = d.stderrText;
+      if (!stderrText) throw new Error("stderr capture was not enabled");
 
-    // stdin EOF (not SIGTERM): Windows can't deliver signals to the child handler
-    (d.proc.stdin as { end: () => void }).end();
-    await waitForExit(d.proc, 5000);
+      const rejected = await fetch(`http://127.0.0.1:${d.port}/health`, {
+        headers: { Authorization: "Bearer wrong-token" },
+      });
+      expect(rejected.status).toBe(401);
 
-    const stderr = await stderrText;
-    expect(stderr).toContain("auth.rejected");
-    expect(stderr).toContain("/health");
-    expect(stderr).toContain("shutting down");
-    expect(stderr).toContain("stdin EOF");
-    expect(stderr).not.toContain("wrong-token");
+      // stdin EOF (not SIGTERM): Windows can't deliver signals to the child handler
+      (d.proc.stdin as { end: () => void }).end();
+      await waitForExit(d.proc, 5000);
+      d = undefined;
+
+      const stderr = await stderrText;
+      expect(stderr).toContain("auth.rejected");
+      expect(stderr).toContain("/health");
+      expect(stderr).toContain("shutting down");
+      expect(stderr).toContain("stdin EOF");
+      expect(stderr).not.toContain("wrong-token");
+    } finally {
+      try {
+        if (d) await stopDaemon(d, undefined);
+      } finally {
+        rmSync(authDataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+        rmSync(authAgentsRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      }
+    }
   });
 
   test("fresh install seeds the default UpBot bot once, not again after delete + restart", async () => {
