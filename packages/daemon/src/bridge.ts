@@ -461,14 +461,17 @@ const ERROR_CODE = /^[A-Z][A-Z0-9_]{0,31}$/;
  * Log-safe description of a caught error: its class, a format-checked code and the stack
  * frames, never its message (tools and app MCP servers may echo credentials into it).
  */
-export function errorDiagnostics(e: unknown): {
+type ErrorDiagnostics = {
   errorType: string;
   code?: string | number;
   frames?: string[];
-} {
+  cause?: ErrorDiagnostics;
+};
+
+export function errorDiagnostics(e: unknown, depth = 0): ErrorDiagnostics {
   if (!(e instanceof Error)) return { errorType: typeof e };
   const errorType = typeof e.name === "string" && ERROR_NAME.test(e.name) ? e.name : "Error";
-  const out: { errorType: string; code?: string | number; frames?: string[] } = { errorType };
+  const out: ErrorDiagnostics = { errorType };
   const code = (e as { code?: unknown }).code;
   if (Number.isSafeInteger(code)) out.code = code as number;
   else if (typeof code === "string" && ERROR_CODE.test(code)) out.code = code;
@@ -484,6 +487,7 @@ export function errorDiagnostics(e: unknown): {
       .map((l) => l.trim().slice(0, 300));
     if (frames.length) out.frames = frames;
   }
+  if (e.cause !== undefined && depth < 2) out.cause = errorDiagnostics(e.cause, depth + 1);
   return out;
 }
 

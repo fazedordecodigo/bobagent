@@ -121,6 +121,7 @@ describe("bridge failure logging e2e", () => {
     const line = await stderrEntry(run.log, "[upbotd] bridge tool failed", "leaky-leak_token");
     expect(line).toContain("isApp: true");
     expect(line).toContain('errorType: "AppToolError"');
+    expect(line).toMatch(/cause: \{[\s\S]*errorType: "McpError"[\s\S]*code: -32000/);
     expect(run.log.text).not.toContain(APP_SECRET);
   }, 30_000);
 });

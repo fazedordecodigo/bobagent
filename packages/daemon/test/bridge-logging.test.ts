@@ -133,3 +133,22 @@ describe("errorDiagnostics", () => {
     expect(errorDiagnostics(Object.assign(new Error("x"), { code: -32000 })).code).toBe(-32000);
   });
 });
+
+test("errorDiagnostics keeps the upstream cause's type, code and frames, never its message", () => {
+  const upstream = Object.assign(new Error("MCP error -32000: Bearer ghp_upstreamSecret"), {
+    name: "McpError",
+    code: -32000,
+  });
+  const wrapper = new Error("Bearer [redacted]", { cause: upstream });
+  wrapper.name = "AppToolError";
+  const out = errorDiagnostics(wrapper);
+  expect(out.errorType).toBe("AppToolError");
+  expect(out.cause).toMatchObject({ errorType: "McpError", code: -32000 });
+  expect(JSON.stringify(out)).not.toContain("ghp_upstreamSecret");
+});
+
+test("errorDiagnostics bounds the cause chain", () => {
+  const loop = new Error("loop");
+  (loop as { cause?: unknown }).cause = loop;
+  expect(JSON.stringify(errorDiagnostics(loop)).match(/errorType/g)).toHaveLength(3);
+});

@@ -54,7 +54,7 @@ test("an app deleted while its call is pending still has its secret redacted fro
     const err = await apps.call("bot1", "leaky-leak", {}).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AppToolError);
     expect((err as Error).message).toBe("upstream rejected Bearer [redacted]");
-    
+    expect((err as Error).cause).toBe(cause);
   } finally {
     db.close();
   }

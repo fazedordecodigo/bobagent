@@ -175,7 +175,10 @@ function redactSecrets(values: string[], text: string): string {
   return out;
 }
 
-/** A failed app MCP call; the message has the app's secrets redacted. */
+/**
+ * A failed app MCP call; the message has the app's secrets redacted. `cause` is the raw SDK
+ * error: never show or log its message, only `errorDiagnostics(cause)`.
+ */
 export class AppToolError extends Error {
   override name = "AppToolError";
 }
@@ -526,7 +529,7 @@ export class AppsService {
       res = await l.client!.callTool({ name: tool.name, arguments: args });
     } catch (e) {
       const message = redactSecrets(secrets, (e as Error)?.message ?? String(e)).slice(0, 500);
-      throw new AppToolError(message);
+      throw new AppToolError(message, { cause: e });
     }
     const content = (res.content ?? []) as { type: string; text?: string }[];
     const text = content
