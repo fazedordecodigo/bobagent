@@ -32,9 +32,9 @@ import { SkillLibrary } from "./skills";
 import { SubagentService } from "./subagents";
 import { TeamClient } from "./team";
 import { Vault } from "./vault";
+import { VERSION } from "./version";
 import { Voice } from "./voice";
 
-const VERSION = "0.3.0";
 const ORIGIN_ALLOWLIST = new Set([
   "tauri://localhost",
   "http://tauri.localhost",
@@ -301,9 +301,17 @@ async function main() {
           return new Response("forbidden", { status: 403 });
         }
         const auth = req.headers.get("authorization") ?? "";
-        const agentId = bridge.agentForToken(auth.startsWith("Bearer ") ? auth.slice(7) : "");
+        const presented = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+        const agentId = bridge.agentForToken(presented);
         if (!agentId) {
-          logLimited("auth.rejected", "/bridge:401", { route: "/bridge", status: 401 });
+          const tokenFp = presented
+            ? createHash("sha256").update(presented).digest("hex").slice(0, 8)
+            : "none";
+          logLimited("auth.rejected", `/bridge:401:${tokenFp}`, {
+            route: "/bridge",
+            status: 401,
+            tokenFp,
+          });
           return new Response("unauthorized", { status: 401 });
         }
         return req

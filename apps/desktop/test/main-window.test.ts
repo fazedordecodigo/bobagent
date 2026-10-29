@@ -66,6 +66,26 @@ async function capture(name: string, target = page) {
   });
 }
 
+async function createChatErrorBot(name: string) {
+  return (await rpc.request("agents.create", {
+    name,
+    provider: "devin",
+    instructions: "Fixture de erro de chat.",
+  })) as Agent;
+}
+
+async function seedEchoHistory(agentId: string, text: string) {
+  await rpc.request("chat.send", { agentId, text: `echo:${text}` });
+  for (let attempt = 0; attempt < 150; attempt++) {
+    const history = await rpc.request("chat.history", { agentId });
+    if (history.items.some((item) => item.kind === "agent_message" && item.text.includes(text))) {
+      return;
+    }
+    await Bun.sleep(100);
+  }
+  throw new Error("A resposta de teste não apareceu no histórico.");
+}
+
 beforeAll(async () => {
   state = mkdtempSync(join(homedir(), "upbot-window-test-"));
   const fake = join(state, "fake");
@@ -949,6 +969,160 @@ test("scheduled routines show recoverable RPC errors", async () => {
     fail = false;
     await target.getByRole("button", { name: "Tentar novamente", exact: true }).click();
     await target.getByText("Nenhuma rotina ainda.", { exact: false }).waitFor();
+  } finally {
+    await target.close();
+  }
+}, 15000);
+
+test("status failure survives chat loading", async () => {
+  const agent = await createChatErrorBot(`Erro de status ${crypto.randomUUID().slice(0, 8)}`);
+  const echo = `Resposta de status ${crypto.randomUUID().slice(0, 8)}`;
+  await seedEchoHistory(agent.id, echo);
+  const target = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  target.setDefaultTimeout(5000);
+  let statusFailed = false;
+  const heldHistory: string[] = [];
+  await target.addInitScript((id) => {
+    localStorage.setItem("upbot.agent", id);
+    localStorage.setItem("upbot.view", "chat");
+  }, agent.id);
+  await target.routeWebSocket(/\/ws\?/, (socket) => {
+    const server = socket.connectToServer();
+    let bootstrapStatuses = 2;
+    socket.onMessage((message) => {
+      const request = JSON.parse(String(message));
+      if (request.method === "chat.history" && !statusFailed) {
+        heldHistory.push(String(message));
+        return;
+      }
+      if (request.method === "agents.statuses") {
+        if (bootstrapStatuses > 0) {
+          bootstrapStatuses -= 1;
+          server.send(message);
+          return;
+        }
+        statusFailed = true;
+        socket.send(
+          JSON.stringify({
+            id: request.id,
+            error: { code: "internal", message: "Falha de teste" },
+          }),
+        );
+        for (const history of heldHistory.splice(0)) server.send(history);
+        return;
+      }
+      server.send(message);
+    });
+    server.onMessage((message) => socket.send(message));
+  });
+  try {
+    await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+    const chat = target.locator('[data-od-id="chat-view"]');
+    await chat.getByText(echo, { exact: true }).waitFor();
+    await chat
+      .getByRole("alert")
+      .filter({ hasText: "Não foi possível carregar o status: Falha de teste" })
+      .waitFor();
+  } finally {
+    await target.close();
+  }
+}, 15000);
+
+test("earlier-history failure is shown", async () => {
+  const agent = await createChatErrorBot(`Erro de histórico ${crypto.randomUUID().slice(0, 8)}`);
+  const echo = `Resposta anterior ${crypto.randomUUID().slice(0, 8)}`;
+  await seedEchoHistory(agent.id, echo);
+  const target = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  target.setDefaultTimeout(5000);
+  await target.addInitScript((id) => {
+    localStorage.setItem("upbot.agent", id);
+    localStorage.setItem("upbot.view", "chat");
+  }, agent.id);
+  await target.routeWebSocket(/\/ws\?/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      const request = JSON.parse(String(message));
+      if (request.method === "chat.history" && request.params?.beforeSeq !== undefined) {
+        socket.send(
+          JSON.stringify({
+            id: request.id,
+            error: { code: "internal", message: "Falha de teste" },
+          }),
+        );
+        return;
+      }
+      server.send(message);
+    });
+    server.onMessage((message) => {
+      const response = JSON.parse(String(message));
+      if (response.result?.items && response.result.hasMore !== undefined) {
+        response.result.hasMore = true;
+        socket.send(JSON.stringify(response));
+      } else {
+        socket.send(message);
+      }
+    });
+  });
+  try {
+    await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+    const chat = target.locator('[data-od-id="chat-view"]');
+    await chat.getByText(echo, { exact: true }).waitFor();
+    await chat.getByRole("button", { name: "Carregar anteriores", exact: true }).click();
+    await chat
+      .getByRole("alert")
+      .filter({ hasText: "Não foi possível carregar mensagens anteriores: Falha de teste" })
+      .waitFor();
+  } finally {
+    await target.close();
+  }
+}, 15000);
+
+test("run panel shows its hook errors", async () => {
+  const agent = await createChatErrorBot(`Erro no painel ${crypto.randomUUID().slice(0, 8)}`);
+  const target = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  target.setDefaultTimeout(5000);
+  await target.addInitScript((id) => {
+    localStorage.setItem("upbot.agent", id);
+    localStorage.setItem("upbot.view", "chat");
+  }, agent.id);
+  await target.routeWebSocket(/\/ws\?/, (socket) => {
+    const server = socket.connectToServer();
+    let bootstrapStatuses = 2;
+    socket.onMessage((message) => {
+      const request = JSON.parse(String(message));
+      if (request.method === "agents.statuses") {
+        if (bootstrapStatuses > 0) {
+          bootstrapStatuses -= 1;
+          server.send(message);
+          return;
+        }
+        socket.send(
+          JSON.stringify({
+            id: request.id,
+            error: { code: "internal", message: "Falha de teste" },
+          }),
+        );
+      } else {
+        server.send(message);
+      }
+    });
+    server.onMessage((message) => socket.send(message));
+  });
+  try {
+    await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+    await target
+      .locator('[data-od-id="chat-view"] .main-head')
+      .getByRole("heading", { name: agent.name, exact: true })
+      .waitFor();
+    const panel = target.locator('[data-od-id="run-panel"]');
+    if (!(await panel.isVisible())) {
+      await target.getByRole("button", { name: "Alternar painel de execução" }).click();
+    }
+    await panel.waitFor({ state: "visible" });
+    await panel
+      .getByRole("alert")
+      .filter({ hasText: "Não foi possível carregar o status: Falha de teste" })
+      .waitFor();
   } finally {
     await target.close();
   }
