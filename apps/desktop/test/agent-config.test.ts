@@ -23,6 +23,8 @@ let state: string;
 let agent: Agent;
 const token = `agent-config-${crypto.randomUUID()}`;
 const shots = process.env.AGENT_CONFIG_SCREEN_DIR;
+const macUserAgent =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36";
 const handoff = join(
   homedir(),
   "attachments",
@@ -51,6 +53,18 @@ const fixture = JSON.parse(
 };
 const prototype = join(handoff, "prototipo", "upbot-config-agente.html");
 const blueCounts: Record<string, number> = {};
+
+async function newMacAppPage() {
+  const target = await browser.newPage({
+    viewport: { width: 1280, height: 860 },
+    deviceScaleFactor: 2,
+    userAgent: macUserAgent,
+  });
+  await target.addInitScript(() => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "MacIntel" });
+  });
+  return target;
+}
 
 async function capturePrototype(name: string, fullPage = false) {
   if (!shots) return;
@@ -279,10 +293,7 @@ beforeAll(async () => {
       : { channel: "chrome" }),
     headless: true,
   });
-  page = await browser.newPage({
-    viewport: { width: 1280, height: 860 },
-    deviceScaleFactor: 2,
-  });
+  page = await newMacAppPage();
   if (shots) {
     mkdirSync(shots, { recursive: true });
     mkdirSync(join(shots, "prototipo"), { recursive: true });
@@ -314,10 +325,7 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
   for (const theme of ["claro", "escuro"] as const) {
     if (theme === "escuro") {
       await page.close();
-      page = await browser.newPage({
-        viewport: { width: 1280, height: 860 },
-        deviceScaleFactor: 2,
-      });
+      page = await newMacAppPage();
       await rpc.request("agents.delete", { id: agent.id });
     }
     writeFileSync(
@@ -373,6 +381,8 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
       { id: currentAgent.id, color: theme },
     );
     await page.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+    expect(await page.evaluate(() => navigator.userAgent)).toBe(macUserAgent);
+    expect(await page.evaluate(() => navigator.platform)).toBe("MacIntel");
     await page.addStyleTag({
       content:
         "*{transition:none!important;animation:none!important;scroll-behavior:auto!important}",
