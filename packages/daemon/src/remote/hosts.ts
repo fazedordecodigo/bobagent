@@ -138,7 +138,12 @@ export class HostStore {
     return r ? this.toHost(r) : null;
   }
 
-  create(p: { name: string; target: string; port?: number; identityFile?: string | null }) {
+  create(p: {
+    name: string;
+    target: string;
+    port?: number | undefined;
+    identityFile?: string | null | undefined;
+  }) {
     const id = crypto.randomUUID();
     this.db
       .query(
@@ -146,32 +151,6 @@ export class HostStore {
       )
       .run(id, p.name, p.target, p.port ?? 22, p.identityFile ?? null, Date.now());
     return this.get(id)!;
-  }
-
-  update(p: {
-    id: string;
-    name?: string;
-    target?: string;
-    port?: number;
-    identityFile?: string | null;
-  }): RemoteHost | null {
-    const h = this.get(p.id);
-    if (!h) return null;
-    const changedConn = p.target !== undefined || p.port !== undefined;
-    this.db
-      .query(
-        "UPDATE hosts SET name = ?, target = ?, port = ?, identity_file = ?, root = ?, preflight_json = ? WHERE id = ?",
-      )
-      .run(
-        p.name ?? h.name,
-        p.target ?? h.target,
-        p.port ?? h.port,
-        p.identityFile !== undefined ? p.identityFile : h.identityFile,
-        changedConn ? null : h.root,
-        changedConn ? null : h.preflight ? JSON.stringify(h.preflight) : null,
-        p.id,
-      );
-    return this.get(p.id);
   }
 
   delete(id: string): boolean {
@@ -251,8 +230,8 @@ export class HostStore {
     agentId: string;
     hostId: string | null;
     isolation: Isolation;
-    vcpus?: number;
-    memMib?: number;
+    vcpus?: number | undefined;
+    memMib?: number | undefined;
   }): AgentPlacement {
     if (p.hostId) {
       const h = this.mustGet(p.hostId);

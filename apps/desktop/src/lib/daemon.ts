@@ -18,6 +18,7 @@ export class DaemonClient {
   private connection: DaemonConnection | null = null;
   private everConnected = false;
   private reconnectCbs = new Set<() => void>();
+  private failureCbs = new Set<(error: Error) => void>();
   private connecting: Promise<void> | null = null;
   private closeTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -30,13 +31,7 @@ export class DaemonClient {
     if (this.ws?.readyState === WebSocket.OPEN) return Promise.resolve();
     if (this.connecting) return this.connecting;
     const opening = (async () => {
-      // Dev-only browser path: vite dev server outside Tauri has no invoke bridge.
-      if (!("__TAURI_INTERNALS__" in window) && import.meta.env.DEV) {
-        const p = new URLSearchParams(location.hash.split("?")[1] ?? location.hash.slice(1));
-        this.connection = { port: Number(p.get("port")), token: p.get("token") ?? "" };
-      } else {
-        this.connection = await invoke<DaemonConnection>("daemon_connection");
-      }
+      await this.resolveConnection();
       await this.openSocket();
     })();
     const connection = opening.finally(() => {
@@ -46,9 +41,24 @@ export class DaemonClient {
     return connection;
   }
 
+  private async resolveConnection(): Promise<void> {
+    // Dev-only browser path: vite dev server outside Tauri has no invoke bridge.
+    if (!("__TAURI_INTERNALS__" in window) && import.meta.env.DEV) {
+      const p = new URLSearchParams(location.hash.split("?")[1] ?? location.hash.slice(1));
+      this.connection = { port: Number(p.get("port")), token: p.get("token") ?? "" };
+    } else {
+      this.connection = await invoke<DaemonConnection>("daemon_connection");
+    }
+  }
+
   onReconnect(cb: () => void): () => void {
     this.reconnectCbs.add(cb);
     return () => this.reconnectCbs.delete(cb);
+  }
+
+  onFailure(cb: (error: Error) => void): () => void {
+    this.failureCbs.add(cb);
+    return () => this.failureCbs.delete(cb);
   }
 
   private openSocket(): Promise<void> {
@@ -90,7 +100,19 @@ export class DaemonClient {
         this.pending.clear();
         if (!this.closed) {
           setTimeout(() => {
-            if (!this.closed) this.openSocket().catch(() => {});
+            if (this.closed) return;
+            void this.resolveConnection()
+              .then(
+                () => {
+                  if (!this.closed) return this.openSocket();
+                },
+                (e: unknown) => {
+                  if (this.closed) return;
+                  const err = e instanceof Error ? e : new Error(String(e));
+                  for (const cb of this.failureCbs) cb(err);
+                },
+              )
+              .catch(() => {});
           }, this.reconnectDelay);
           this.reconnectDelay = Math.min(this.reconnectDelay * 2, 5000);
         }

@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { timingSafeEqual } from "node:crypto";
 import type { Routine, RoutineRun, RoutineTrigger } from "@upbot/protocol";
 import type { AgentStore } from "./agents";
+import { envPositiveNumber } from "./env/vars";
 import type { Broadcast } from "./rpc";
 import { asBadRequest, RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
@@ -60,6 +61,11 @@ type RunRow = {
   created_at: number;
 };
 
+export type WebhookAuth =
+  | { kind: "ok"; routineId: string }
+  | { kind: "notFound" }
+  | { kind: "unauthorized"; known: boolean };
+
 const toRun = (r: RunRow): RoutineRun => ({
   id: r.id,
   routineId: r.routine_id,
@@ -106,6 +112,10 @@ export class RoutineService {
       .get(id) as Row | null;
   }
 
+  exists(id: string): boolean {
+    return this.row(id) !== null;
+  }
+
   get(id: string): Routine {
     const r = this.row(id);
     if (!r) throw new RpcError("not_found", "routine not found");
@@ -136,9 +146,9 @@ export class RoutineService {
     agentId: string;
     name: string;
     prompt: string;
-    schedule?: string | null;
-    webhook?: boolean;
-    enabled?: boolean;
+    schedule?: string | null | undefined;
+    webhook?: boolean | undefined;
+    enabled?: boolean | undefined;
   }): Routine {
     if (!this.agents.get(p.agentId)) throw new RpcError("not_found", "agent not found");
     const id = crypto.randomUUID();
@@ -167,11 +177,11 @@ export class RoutineService {
 
   update(p: {
     id: string;
-    name?: string;
-    prompt?: string;
-    schedule?: string | null;
-    webhook?: boolean;
-    enabled?: boolean;
+    name?: string | undefined;
+    prompt?: string | undefined;
+    schedule?: string | null | undefined;
+    webhook?: boolean | undefined;
+    enabled?: boolean | undefined;
   }): Routine {
     const r = this.row(p.id);
     if (!r) throw new RpcError("not_found", "routine not found");
@@ -222,6 +232,7 @@ export class RoutineService {
   run(id: string, trigger: RoutineTrigger, payload?: string): RoutineRun {
     const r = this.row(id);
     if (!r) throw new RpcError("not_found", "routine not found");
+    if (!this.agents.get(r.agent_id)) throw new RpcError("not_found", "agent not found");
     const body = payload
       ? `\n<webhook_payload>\n${payload.slice(0, PAYLOAD_LIMIT)}${payload.length > PAYLOAD_LIMIT ? "\n[truncated]" : ""}\n</webhook_payload>`
       : "";
@@ -250,19 +261,20 @@ export class RoutineService {
     return toRun(this.db.query("SELECT * FROM routine_runs WHERE id = ?").get(runId) as RunRow);
   }
 
-  /** Routine id for a webhook call, or null when the token does not match. */
-  webhookRoutine(id: string, token: string): string | null {
+  webhookAuth(id: string, token: string): WebhookAuth {
     const r = this.row(id);
-    if (!r?.webhook_token || !r.enabled) return null;
+    if (!r?.webhook_token || !r.enabled) return { kind: "unauthorized", known: r !== null };
     const a = Buffer.from(r.webhook_token);
     const b = Buffer.from(token);
-    return a.length === b.length && timingSafeEqual(a, b) ? r.id : null;
+    if (a.length !== b.length || !timingSafeEqual(a, b))
+      return { kind: "unauthorized", known: true };
+    return this.agents.get(r.agent_id) ? { kind: "ok", routineId: r.id } : { kind: "notFound" };
   }
 
   tick(now = Date.now()): void {
     const due = this.db
       .query(
-        "SELECT * FROM routines WHERE deleted_at IS NULL AND enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?",
+        "SELECT routines.* FROM routines JOIN agents ON agents.id = routines.agent_id WHERE routines.deleted_at IS NULL AND agents.deleted_at IS NULL AND routines.enabled = 1 AND routines.next_run_at IS NOT NULL AND routines.next_run_at <= ?",
       )
       .all(now) as Row[];
     for (const r of due) {
@@ -275,9 +287,8 @@ export class RoutineService {
   }
 
   start(): void {
-    const n = Number(process.env.UPBOT_ROUTINE_TICK_MS);
     this.tick();
-    this.timer = setInterval(() => this.tick(), Number.isFinite(n) && n > 0 ? n : 30_000);
+    this.timer = setInterval(() => this.tick(), envPositiveNumber("UPBOT_ROUTINE_TICK_MS", 30_000));
   }
 
   stop(): void {
