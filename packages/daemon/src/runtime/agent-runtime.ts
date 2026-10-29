@@ -778,6 +778,10 @@ export class AgentRuntime {
     try {
       this.finishTurn(turn, "failed", null, message);
     } catch {}
+    // the prompt may still be running against a broken store: drop the provider
+    // and always clear the turn so the queue can't wedge on a phantom run
+    this.dropSession();
+    if (this.turn === turn) this.turn = null;
     this.setStatus("error", message);
   }
 
