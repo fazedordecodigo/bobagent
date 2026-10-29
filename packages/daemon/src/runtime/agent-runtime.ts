@@ -83,17 +83,40 @@ export function errorFields(e: unknown): string {
   let code: string | undefined;
   try {
     if (e instanceof RpcError) {
-      if (/^[a-z_]{1,32}$/.test(e.code)) code = e.code;
+      const c = e.code as unknown;
+      // Numeric ACP/JSON-RPC codes are bounded metadata, never free text.
+      if (typeof c === "number" && Number.isInteger(c)) code = String(c);
+      else if (typeof c === "string" && (/^[a-z_]{1,32}$/.test(c) || /^-?\d{1,10}$/.test(c)))
+        code = c;
     } else if (e instanceof ProviderError) {
       code = e.code;
     } else {
       const c = (e as { code?: unknown } | null)?.code;
-      if (typeof c === "string" && ERRNO_RE.test(c)) code = c;
+      if (typeof c === "number" && Number.isInteger(c)) code = String(c);
+      else if (typeof c === "string" && ERRNO_RE.test(c)) code = c;
     }
   } catch {}
   return code ? `errorType=${type} code=${code}` : `errorType=${type}`;
 }
 
+/**
+ * Bounded provider-exit diagnostics: exit kind, code/signal and whether a detail
+ * tail followed — never the tail itself (provider stderr can contain secrets).
+ */
+function providerExitFields(error: string | null): string {
+  const exited = error?.match(
+    /^process exited \(code (-?\d{1,10}|null), signal ([A-Z0-9]{1,16}|null)\)/,
+  );
+  if (exited) {
+    const detail = error !== null && error.length > exited[0].length ? "yes" : "no";
+    return `exit=code:${exited[1]},signal:${exited[2]} detail=${detail}`;
+  }
+  if (error?.startsWith("process error:")) {
+    return `exit=process-error detail=${error.length > "process error:".length ? "yes" : "no"}`;
+  }
+  if (error === null) return "exit=unknown detail=no";
+  return `exit=other detail=${error.length > 0 ? "yes" : "no"}`;
+}
 /**
  * Runs `fn` and converts a thrown `Error` into `RpcError("bad_request", e.message)`.
  * `RpcError`/`ProviderError` and non-`Error` throws pass through untouched so
@@ -115,7 +138,6 @@ export function asBadRequest<T>(fn: () => T | Promise<T>): T | Promise<T> {
     return rethrow(e);
   }
 }
-
 type PendingEntry = {
   requestId: string;
   turnId: string;
@@ -162,6 +184,7 @@ export class AgentRuntime {
   private cancelTimer: ReturnType<typeof setTimeout> | null = null;
   private draining = false;
   private turnHops = 0;
+  private turnStartedAt = 0;
   private turnBackground = false;
   private turnChannelId: string | null = null;
   private compacting = false;
@@ -202,6 +225,17 @@ export class AgentRuntime {
     this.status = status;
     this.statusError = error;
     this.broadcast("agent.status", { agentId: this.agent.id, status, error });
+  }
+
+  /**
+   * Log a turn-lifecycle event to stderr — the only channel forwarded to the
+   * Tauri app log. `detail` must stay bounded (ids, counts, errorFields); never
+   * pass error messages/stacks, provider stderr, prompt text or agent output.
+   */
+  private logRuntime(event: string, detail: string): void {
+    console.error(
+      `[upbotd] ${event}: agent=${this.agent.id} provider=${this.agent.provider} ${detail}`,
+    );
   }
 
   private hooks(tag: object): ProviderHooks {
@@ -281,6 +315,7 @@ export class AgentRuntime {
       this.closeTextItem();
       this.toolCallItems.clear();
       this.turnHops = next.hops ?? 0;
+      this.turnStartedAt = Date.now();
       this.turnChannelId = next.channel_id ?? null;
       this.turnBackground = Boolean(
         next.from_agent_id ||
@@ -308,9 +343,7 @@ export class AgentRuntime {
       this.emitQueue();
       const promptText = next.prompt ?? (sender ? wrapAgentMessage(sender, next.text) : next.text);
       this.runTurn(promptText, turnRow.id).catch((e) =>
-        console.error(
-          `[upbotd] turn failed unexpectedly: agent=${this.agent.id} turn=${turnRow.id} ${errorFields(e)}`,
-        ),
+        this.logRuntime("turn failed unexpectedly", `turn=${turnRow.id} ${errorFields(e)}`),
       );
     } finally {
       this.draining = false;
@@ -346,7 +379,7 @@ export class AgentRuntime {
       // if a dispose() replaced us while we were starting, drop this session
       if (this.sessionStarting !== started) {
         this.sessionTag = null;
-        await session.close().catch(() => {});
+        await session.close().catch((e) => this.logRuntime("session close failed", errorFields(e)));
         throw new Error("session disposed while starting");
       }
       this.session = session;
@@ -370,13 +403,11 @@ export class AgentRuntime {
     this.sessionConfigApplied = true;
     const opts = session.configOptions;
     let changed = false;
-    for (const o of opts) {
+    for (const [index, o] of opts.entries()) {
       const desired = this.agent.config[o.id];
       if (desired === undefined) continue;
       if (!o.options.some((v) => v.value === desired)) {
-        console.error(
-          `[upbotd] skipping invalid config ${o.id}=${desired} for ${this.agent.provider}`,
-        );
+        this.logRuntime("skipping invalid config", `option#${index}`);
         continue;
       }
       if (o.currentValue === desired) continue;
@@ -385,7 +416,7 @@ export class AgentRuntime {
         o.currentValue = desired;
         changed = true;
       } catch (e) {
-        console.error(`[upbotd] set_config_option ${o.id} failed:`, (e as Error).message);
+        this.logRuntime("set_config_option failed", `option#${index} ${errorFields(e)}`);
       }
     }
     // default mode when the user hasn't chosen one
@@ -398,7 +429,7 @@ export class AgentRuntime {
           modeOpt.currentValue = def;
           changed = true;
         } catch (e) {
-          console.error(`[upbotd] default mode ${def} failed:`, (e as Error).message);
+          this.logRuntime("default mode failed", `mode=${def} ${errorFields(e)}`);
         }
       }
     }
@@ -475,6 +506,10 @@ export class AgentRuntime {
         return;
       }
       const message = e instanceof Error ? e.message : String(e);
+      this.logRuntime(
+        "turn failed",
+        `turn=${turn.id} background=${this.turnBackground} durationMs=${Date.now() - this.turnStartedAt} ${errorFields(e)}`,
+      );
       this.dropSession();
       const errItem = this.store.createItem(this.agent.id, turn.id, "error", { message });
       this.broadcast("item.created", errItem);
@@ -501,15 +536,20 @@ export class AgentRuntime {
     if (this.status !== "error") this.setStatus("idle");
     // queue policy: user stop pauses the queue; failed turn auto-pauses it
     if ((status === "cancelled" && turn.byUser) || status === "failed") {
-      if (this.queue.queued(this.agent.id).length > 0) {
+      const queued = this.queue.queued(this.agent.id).length;
+      if (queued > 0) {
         this.agents.setQueuePaused(this.agent.id, true);
+        this.logRuntime(
+          "queue auto-paused",
+          `turn=${turn.id} reason=${status === "failed" ? "failed" : "user-cancel"} queued=${queued}`,
+        );
         this.emitQueue();
         return;
       }
     }
     if (status === "completed" && this.shouldAutoCompact()) {
       this.compact("auto").catch((e) =>
-        console.error(`[upbotd] auto-compaction failed: agent=${this.agent.id} ${errorFields(e)}`),
+        this.logRuntime("auto-compaction failed", `turn=${turn.id} ${errorFields(e)}`),
       );
       return;
     }
@@ -582,10 +622,16 @@ export class AgentRuntime {
     turn.cancelled = true;
     turn.byUser = true;
     this.cancelAllPending();
-    this.session?.cancel().catch(() => {});
+    this.session
+      ?.cancel()
+      .catch((e) => this.logRuntime("cancel request failed", `turn=${turn.id} ${errorFields(e)}`));
     if (this.cancelTimer) clearTimeout(this.cancelTimer);
     this.cancelTimer = setTimeout(() => {
       if (this.turn === turn && turn.cancelled) {
+        this.logRuntime(
+          "cancel grace expired; killing provider",
+          `turn=${turn.id} graceMs=${cancelGraceMs()}`,
+        );
         this.dropSession();
         this.finishTurn(turn, "cancelled", "cancelled", null);
       }
@@ -900,6 +946,7 @@ export class AgentRuntime {
     const turn = this.turn;
     if (turn && this.status !== "error") {
       const message = error ?? "provider process exited";
+      this.logRuntime("provider exited", `turn=${turn.id} ${providerExitFields(error)}`);
       const errItem = this.store.createItem(this.agent.id, turn.id, "error", { message });
       this.broadcast("item.created", errItem);
       this.finishTurn(turn, "failed", null, message);
@@ -913,7 +960,7 @@ export class AgentRuntime {
     this.session = null;
     this.sessionStarting = null;
     this.sessionTag = null;
-    s?.close().catch(() => {});
+    s?.close().catch((e) => this.logRuntime("session close failed", errorFields(e)));
   }
 
   /** Cancel any running turn and kill the provider process. */
@@ -934,7 +981,8 @@ export class AgentRuntime {
     this.session = null;
     this.sessionStarting = null;
     this.sessionTag = null;
-    if (session) await session.close().catch(() => {});
+    if (session)
+      await session.close().catch((e) => this.logRuntime("session close failed", errorFields(e)));
     if (starting) {
       try {
         const s = await starting;
