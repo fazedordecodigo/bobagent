@@ -449,6 +449,13 @@ export class Rpc {
         this.broadcast("memories.changed", { agentId: p.agentId });
         return m;
       }
+      case "memories.update": {
+        const p = params as { id: string; text: string };
+        const m = this.memories.update(p.id, p.text);
+        if (!m) throw new RpcError("not_found", "memory not found");
+        this.broadcast("memories.changed", { agentId: m.agentId });
+        return m;
+      }
       case "memories.delete": {
         const m = this.memories.get((params as MethodParsedParams<typeof method>).id);
         if (!m || !this.memories.delete(m.id)) throw new RpcError("not_found", "memory not found");
