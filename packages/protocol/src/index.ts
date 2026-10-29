@@ -624,7 +624,7 @@ const appToolOperations: [AppPermissionKind, RegExp][] = [
 export function toolOperationTokens(tool: string): string[] {
   return tool
     .slice(tool.indexOf("-") + 1)
-    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1_$2")
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
     .toLowerCase()
     .split(/[_-]+/)
