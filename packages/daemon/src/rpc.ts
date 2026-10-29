@@ -19,7 +19,7 @@ import { ProviderError } from "./providers/types";
 import type { VmCredentials } from "./remote/credentials";
 import type { HostStore } from "./remote/hosts";
 import type { RoutineService } from "./routines";
-import { RpcError } from "./runtime/agent-runtime";
+import { asBadRequest, RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
 import type { SkillLibrary } from "./skills";
 import type { SubagentService } from "./subagents";
@@ -244,16 +244,11 @@ export class Rpc {
       case "hosts.check": {
         const id = (params as { id: string }).id;
         if (!this.extras.hosts.get(id)) throw new RpcError("not_found", "host not found");
-        try {
-          const h =
-            method === "hosts.install"
-              ? await this.extras.hosts.install(id)
-              : await this.extras.hosts.check(id);
-          queueMicrotask(() => this.broadcast("hosts.changed", {}));
-          return h;
-        } catch (e) {
-          throw new RpcError("bad_request", (e as Error).message);
-        }
+        const h = await asBadRequest(() =>
+          method === "hosts.install" ? this.extras.hosts.install(id) : this.extras.hosts.check(id),
+        );
+        queueMicrotask(() => this.broadcast("hosts.changed", {}));
+        return h;
       }
       case "vmCredentials.list":
         return this.extras.vmCredentials.list();
@@ -282,12 +277,7 @@ export class Rpc {
           memMib?: number;
         };
         if (!this.agents.get(p.agentId)) throw new RpcError("not_found", "agent not found");
-        let placed: ReturnType<HostStore["setPlacement"]>;
-        try {
-          placed = this.extras.hosts.setPlacement(p);
-        } catch (e) {
-          throw new RpcError("bad_request", (e as Error).message);
-        }
+        const placed = asBadRequest(() => this.extras.hosts.setPlacement(p));
         await this.runtimes.restartSession(p.agentId);
         queueMicrotask(() => this.broadcast("placement.updated", placed));
         return placed;
@@ -312,13 +302,9 @@ export class Rpc {
         };
       case "marketplace.install": {
         const p = params as { source: string; id: string; provider?: string };
-        let r: Awaited<ReturnType<Marketplace["install"]>>;
-        try {
-          r = await this.extras.marketplace.install(p.source, p.id, p.provider);
-        } catch (e) {
-          if (e instanceof RpcError) throw e;
-          throw new RpcError("bad_request", (e as Error).message);
-        }
+        const r = await asBadRequest(() =>
+          this.extras.marketplace.install(p.source, p.id, p.provider),
+        );
         if (r.skills.length) this.broadcast("skills.changed", {});
         if (r.agent) {
           const agent = r.agent;
@@ -418,22 +404,16 @@ export class Rpc {
       case "voice.status":
         return this.extras.voice.status();
       case "voice.speak":
-        try {
-          await this.extras.voice.speak((params as { text: string }).text);
-        } catch (e) {
-          throw new RpcError("bad_request", (e as Error).message);
-        }
+        await asBadRequest(() => this.extras.voice.speak((params as { text: string }).text));
         return { ok: true };
       case "voice.stop":
         this.extras.voice.stop();
         return { ok: true };
       case "voice.transcribe": {
         const p = params as { audioBase64: string; mime: string };
-        try {
-          return { text: await this.extras.voice.transcribe(p.audioBase64, p.mime) };
-        } catch (e) {
-          throw new RpcError("bad_request", (e as Error).message);
-        }
+        return {
+          text: await asBadRequest(() => this.extras.voice.transcribe(p.audioBase64, p.mime)),
+        };
       }
       case "browser.status":
         return {
@@ -499,13 +479,11 @@ export class Rpc {
       }
       case "skills.save": {
         const p = params as { name: string; description: string; body: string };
-        try {
+        return asBadRequest(() => {
           const s = this.skills.save({ ...p, author: "user" }, "upsert");
           this.broadcast("skills.changed", {});
           return s;
-        } catch (e) {
-          throw new RpcError("bad_request", (e as Error).message);
-        }
+        });
       }
       case "skills.delete": {
         if (!this.skills.delete((params as { name: string }).name)) {
