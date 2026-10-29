@@ -37,7 +37,10 @@ export const PAGE_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'";
 
 function clampText(s: string, max: number): string {
-  return s.slice(0, max);
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max);
+  const last = cut.charCodeAt(max - 1);
+  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
 }
 
 function inside(root: string, p: string): boolean {
@@ -111,8 +114,9 @@ export class PageLibrary {
     me: Agent,
     p: { id?: string; title?: string; description?: string; html?: string; file?: string },
   ): Page {
-    const title = p.title?.trim().slice(0, MAX_TITLE);
-    const description = p.description?.slice(0, MAX_DESCRIPTION);
+    const title = p.title === undefined ? undefined : clampText(p.title.trim(), MAX_TITLE);
+    const description =
+      p.description === undefined ? undefined : clampText(p.description, MAX_DESCRIPTION);
     const html = p.file ? this.readSource(me, p.file) : (p.html ?? "");
     if (!html.trim()) throw new Error("pass `html` or `file`");
     if (Buffer.byteLength(html) > MAX_PAGE_BYTES) throw new Error(PAGE_SIZE_ERROR);

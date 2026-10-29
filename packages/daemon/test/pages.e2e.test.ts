@@ -158,4 +158,27 @@ describe("pages e2e", () => {
     expect(updated!.description).toBe("x".repeat(1000));
     expect(updated!.version).toBe(2);
   });
+
+  test("metadata limits never split a surrogate pair", async () => {
+    const out = await tool(a, "page_publish", {
+      title: `${"a".repeat(199)}😀`,
+      description: `${"d".repeat(999)}😀`,
+      html: "<p>1</p>",
+    });
+    const id = pageId(out);
+    expect(id).toBeDefined();
+    const created = await page(id!);
+    expect(created!.title).toBe("a".repeat(199));
+    expect(created!.description).toBe("d".repeat(999));
+
+    await tool(a, "page_publish", {
+      id: id!,
+      title: `${"b".repeat(199)}😀`,
+      description: `${"e".repeat(999)}😀`,
+      html: "<p>2</p>",
+    });
+    const updated = await page(id!);
+    expect(updated!.title).toBe("b".repeat(199));
+    expect(updated!.description).toBe("e".repeat(999));
+  });
 });
