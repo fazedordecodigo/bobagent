@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { timingSafeEqual } from "node:crypto";
 import type { Routine, RoutineRun, RoutineTrigger } from "@upbot/protocol";
 import type { AgentStore } from "./agents";
+import { envPositiveNumber } from "./env/vars";
 import type { Broadcast } from "./rpc";
 import { RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
@@ -281,9 +282,8 @@ export class RoutineService {
   }
 
   start(): void {
-    const n = Number(process.env.UPBOT_ROUTINE_TICK_MS);
     this.tick();
-    this.timer = setInterval(() => this.tick(), Number.isFinite(n) && n > 0 ? n : 30_000);
+    this.timer = setInterval(() => this.tick(), envPositiveNumber("UPBOT_ROUTINE_TICK_MS", 30_000));
   }
 
   stop(): void {

@@ -2,6 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import type { ProviderId } from "@upbot/protocol";
 import { resolveCommand, spawnEnv } from "../env/login-path";
 import { spawnChild, waitForChildSpawn } from "../env/spawn";
+import { envOverride } from "../env/vars";
 import { ProviderError, type RemoteLaunch } from "./types";
 
 export const STDERR_TAIL_LINES = 50;
@@ -64,18 +65,6 @@ export function vmCredentialRejectedMessage(
 ): string {
   const safeDetail = redactCredential(detail, credential).replace(/\s+/g, " ").trim().slice(0, 180);
   return `${provider}: the saved microVM credential was rejected${safeDetail ? ` (${safeDetail})` : ""}. Update it in Settings → Hosts.`;
-}
-
-function envOverride(name: string): string[] | null {
-  const raw = process.env[name];
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0 && parsed.every((s) => typeof s === "string")) {
-      return parsed;
-    }
-  } catch {}
-  return null;
 }
 
 /** Spawn command for a provider; `UPBOT_PROVIDER_COMMAND_<P>` (or the older

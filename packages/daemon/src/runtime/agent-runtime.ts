@@ -11,6 +11,7 @@ import type {
 } from "@upbot/protocol";
 import type { AgentStore } from "../agents";
 import type { ChatStore, QueueSource, QueueStore } from "../chat-store";
+import { envPositiveNumber } from "../env/vars";
 import { checkProviderAvailable, DEFAULT_MODE, getDriver } from "../providers";
 import { withTimeout } from "../providers/process";
 import type {
@@ -36,8 +37,7 @@ function compactThreshold(): number | null {
 }
 
 function compactTimeoutMs(): number {
-  const n = Number(process.env.UPBOT_COMPACT_TIMEOUT_MS);
-  return Number.isFinite(n) && n > 0 ? n : 180_000;
+  return envPositiveNumber("UPBOT_COMPACT_TIMEOUT_MS", 180_000);
 }
 
 export function xmlAttr(s: string): string {
