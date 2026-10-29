@@ -51,6 +51,7 @@ const VSOCK_EXEC_PORT = 1024;
 const VSOCK_BRIDGE_PORT = 5000;
 const VSOCK_PROXY_PORT = 3128;
 const PROVIDER_CLIS = ["claude", "codex", "devin", "agent", "grok", "opencode", "gemini"];
+const HOST_VERSION = "0.3.0";
 
 const die = (msg: string, code = 1): never => {
   process.stderr.write(`upbot-host: ${msg}\n`);
@@ -787,7 +788,7 @@ async function bridge() {
           result: {
             protocolVersion: v ?? "2025-06-18",
             capabilities: { tools: {} },
-            serverInfo: { name: "upbot", version: "0.3.0" },
+            serverInfo: { name: "upbot", version: HOST_VERSION },
           },
         });
       } else if (m.method === "ping") send({ jsonrpc: "2.0", id: m.id, result: {} });
@@ -858,6 +859,6 @@ if (import.meta.main) {
   else if (cmd === "run") await run();
   else if (cmd === "bridge") await bridge();
   else if (cmd === "guest-exec") await guestExec();
-  else if (cmd === "version") process.stdout.write("upbot-host 0.3.0\n");
+  else if (cmd === "version") process.stdout.write(`upbot-host ${HOST_VERSION}\n`);
   else die("usage: upbot-host preflight|run|bridge|guest-exec|version", 2);
 }

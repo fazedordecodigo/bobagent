@@ -10,7 +10,7 @@ import type {
   QueueState,
 } from "@upbot/protocol";
 import type { AgentStore } from "../agents";
-import type { ChatStore, QueueSource, QueueStore } from "../chat-store";
+import { type ChatStore, type QueueSource, type QueueStore, readQueueMeta } from "../chat-store";
 import { envPositiveNumber } from "../env/vars";
 import { checkProviderAvailable, DEFAULT_MODE, getDriver } from "../providers";
 import { withTimeout } from "../providers/process";
@@ -279,6 +279,9 @@ export class AgentRuntime {
     if (this.agents.queuePaused(this.agent.id)) return;
     const next = this.queue.peek(this.agent.id);
     if (!next) return;
+    const { meta, rejected } = readQueueMeta(next);
+    if (rejected.length)
+      console.error(`[upbotd] queue item ${next.id}: ignored invalid meta ${rejected.join(", ")}`);
     this.draining = true;
     try {
       const turnRow = this.store.createTurn(this.agent.id, next.id);
@@ -289,9 +292,13 @@ export class AgentRuntime {
       this.turnHops = next.hops ?? 0;
       this.turnStartedAt = Date.now();
       this.turnChannelId = next.channel_id ?? null;
-      const meta = next.meta_json ? (JSON.parse(next.meta_json) as Record<string, unknown>) : {};
       this.turnBackground = Boolean(
-        next.from_agent_id || next.channel_id || meta.routine || meta.gateway || meta.team,
+        next.from_agent_id ||
+          next.channel_id ||
+          meta.routine ||
+          meta.gateway ||
+          meta.team ||
+          rejected.some((key) => ["meta_json", "routine", "gateway", "team"].includes(key)),
       );
       const sender = next.from_agent_id
         ? {

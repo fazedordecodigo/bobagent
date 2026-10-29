@@ -133,7 +133,7 @@ describe("runtime failure logs e2e", () => {
     expect(stderr).not.toContain("COMPACTMARKER9b2c");
   }, 30000);
 
-  test("unexpected runTurn failures log bounded fields", async () => {
+  test("invalid queue meta logs bounded fields and the turn still runs", async () => {
     const agent = await newAgent("Run turn failure");
     const { queueId } = (await c.request("chat.send", {
       agentId: agent.id,
@@ -145,11 +145,17 @@ describe("runtime failure logs e2e", () => {
       10000,
     )) as Turn;
 
+    const badQueueId = crypto.randomUUID();
+    const badEnded = c.waitForEventWhere(
+      "turn.ended",
+      (event) => (event as Turn).queueId === badQueueId,
+      15000,
+    ) as Promise<Turn>;
     const db = new Database(join(dataDir, "upbot.db"));
     db.exec("PRAGMA busy_timeout=5000");
     db.query(
       "INSERT INTO queue (id, agent_id, text, status, created_at, meta_json) VALUES (?, ?, ?, 'queued', ?, ?)",
-    ).run(crypto.randomUUID(), agent.id, "echo:unused", Date.now(), '{"x": RUNTURNMARKER5d1e}');
+    ).run(badQueueId, agent.id, "echo:unused", Date.now(), '{"x": RUNTURNMARKER5d1e}');
     db.close();
 
     const ended = (await c.waitForEventWhere(
@@ -159,11 +165,10 @@ describe("runtime failure logs e2e", () => {
     )) as Turn;
     expect(ended.status).toBe("completed");
     await waitForStderr(
-      new RegExp(
-        `\\[upbotd\\] turn failed unexpectedly: agent=${agent.id} provider=devin turn=${started.id} errorType=SyntaxError`,
-      ),
+      new RegExp(`\\[upbotd\\] queue item ${badQueueId}: ignored invalid meta meta_json`),
       5000,
     );
     expect(stderr).not.toContain("RUNTURNMARKER5d1e");
+    expect((await badEnded).status).toBe("completed");
   }, 30000);
 });
