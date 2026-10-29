@@ -96,6 +96,7 @@ export class AgentRuntime {
   private configOptions: ConfigOption[] = [];
   private openTextItem: {
     id: string;
+    seq: number;
     kind: "agent_message" | "agent_thought";
     /** Accumulated text; the in-memory source of truth until flushed. */
     text: string;
@@ -729,13 +730,14 @@ export class AgentRuntime {
     } else {
       this.closeTextItem();
       const item = this.store.createItem(this.agent.id, turn.id, kind, { text });
-      this.openTextItem = { id: item.id, kind, text, pendingBytes: 0 };
+      this.openTextItem = { id: item.id, seq: item.seq, kind, text, pendingBytes: 0 };
       this.broadcast("item.created", item);
     }
   }
 
   /** Writes any pending streamed text now (e.g. before a history read). */
-  flushStreamText(): void {
+  flushStreamText(beforeSeq?: number): void {
+    if (beforeSeq !== undefined && this.openTextItem && this.openTextItem.seq >= beforeSeq) return;
     this.flushTextItem();
   }
 

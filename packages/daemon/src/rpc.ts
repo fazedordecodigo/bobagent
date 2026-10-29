@@ -131,7 +131,7 @@ export class Rpc {
       case "chat.history": {
         const p = params as { agentId: string; beforeSeq?: number; limit?: number };
         if (!this.agents.get(p.agentId)) throw new RpcError("not_found", "agent not found");
-        this.runtimes.flushStreamText(p.agentId);
+        this.runtimes.flushStreamText(p.agentId, p.beforeSeq);
         const { items, hasMore } = this.chat.history(p.agentId, p.beforeSeq, p.limit ?? 200);
         const turnIds = [...new Set(items.map((i) => i.turnId).filter((t): t is string => !!t))];
         return { items, turns: this.chat.turnsByIds(turnIds), hasMore };

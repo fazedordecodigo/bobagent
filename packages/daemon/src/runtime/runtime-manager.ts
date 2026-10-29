@@ -58,8 +58,8 @@ export class RuntimeManager {
   }
 
   /** Persists the runtime's pending streamed text so reads see every emitted chunk. */
-  flushStreamText(agentId: string): void {
-    this.runtimes.get(agentId)?.flushStreamText();
+  flushStreamText(agentId: string, beforeSeq?: number): void {
+    this.runtimes.get(agentId)?.flushStreamText(beforeSeq);
   }
 
   compact(agentId: string): Promise<void> {

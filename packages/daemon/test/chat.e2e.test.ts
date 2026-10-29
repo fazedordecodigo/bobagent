@@ -147,20 +147,14 @@ describe("chat e2e (fake acp agent)", () => {
   test("slow stream: timed flush persists chunks; mid-stream history is complete", async () => {
     const agent = await newAgent("StreamFlush", "devin");
     await send(agent.id, "slowseq");
-    const created = (await c.waitForEventWhere(
-      "item.created",
-      (d) => {
-        const item = d as ChatItem;
-        return item.agentId === agent.id && item.kind === "agent_message";
-      },
-    )) as ChatItem;
-    await c.waitForEventWhere(
-      "item.delta",
-      (d) => {
-        const delta = d as { agentId: string; itemId: string };
-        return delta.agentId === agent.id && delta.itemId === created.id;
-      },
-    );
+    const created = (await c.waitForEventWhere("item.created", (d) => {
+      const item = d as ChatItem;
+      return item.agentId === agent.id && item.kind === "agent_message";
+    })) as ChatItem;
+    await c.waitForEventWhere("item.delta", (d) => {
+      const delta = d as { agentId: string; itemId: string };
+      return delta.agentId === agent.id && delta.itemId === created.id;
+    });
     await Bun.sleep(350); // > TEXT_FLUSH_MS: the timed flush must have persisted emitted chunks
 
     // the background timer persisted without any RPC
@@ -200,6 +194,40 @@ describe("chat e2e (fake acp agent)", () => {
     expectSeqPrefix(emittedAtEnd);
     expectSeqPrefix(msg2.text);
     expect(msg2.text).toBe(emittedAtEnd);
+  });
+
+  test("history beforeSeq excludes an open stream item without hiding it from full history", async () => {
+    const agent = await newAgent("HistoryStream", "devin");
+    await send(agent.id, "slowseq");
+    const created = (await c.waitForEventWhere("item.created", (d) => {
+      const item = d as ChatItem;
+      return item.agentId === agent.id && item.kind === "agent_message";
+    })) as ChatItem;
+    await c.waitForEventWhere("item.delta", (d) => {
+      const delta = d as { agentId: string; itemId: string; text: string };
+      return delta.agentId === agent.id && delta.itemId === created.id && delta.text === "2|";
+    });
+
+    const older = (await c.request("chat.history", {
+      agentId: agent.id,
+      beforeSeq: created.seq,
+    })) as { items: ChatItem[] };
+    expect(older.items.every((item) => item.seq < created.seq)).toBe(true);
+    expect(older.items.some((item) => item.id === created.id)).toBe(false);
+
+    const emittedBeforeHistory = emittedAgentMessage(agent.id, created.id);
+    const full = await history(agent.id);
+    const message = full.items.find((item) => item.id === created.id) as { text: string };
+    expectSeqPrefix(message.text);
+    expect(message.text.startsWith(emittedBeforeHistory)).toBe(true);
+    const emittedAfterHistory = emittedAgentMessage(agent.id, created.id);
+    expectSeqPrefix(emittedAfterHistory);
+    expect(
+      message.text.startsWith(emittedAfterHistory) || emittedAfterHistory.startsWith(message.text),
+    ).toBe(true);
+
+    await c.request("chat.cancel", { agentId: agent.id });
+    expect((await waitTurnEnd(agent.id)).status).toBe("cancelled");
   });
 
   test("instructions prefix on first prompt of a new session only", async () => {
