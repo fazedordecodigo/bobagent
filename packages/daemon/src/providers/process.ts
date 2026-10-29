@@ -207,20 +207,24 @@ export function readJsonLines(
   onLine: (msg: Record<string, unknown>) => void,
 ): void {
   let buf = "";
+  let scanned = 0;
   stream.on("data", (d: Buffer) => {
     buf += d.toString("utf8");
-    let idx = buf.indexOf("\n");
+    let start = 0;
+    let idx = buf.indexOf("\n", scanned);
     while (idx >= 0) {
-      const line = buf.slice(0, idx).trim();
-      buf = buf.slice(idx + 1);
+      const line = buf.slice(start, idx).trim();
       if (line) {
         try {
           const msg = JSON.parse(line);
           if (msg && typeof msg === "object") onLine(msg as Record<string, unknown>);
         } catch {}
       }
-      idx = buf.indexOf("\n");
+      start = idx + 1;
+      idx = buf.indexOf("\n", start);
     }
+    buf = buf.slice(start);
+    scanned = buf.length;
   });
 }
 
