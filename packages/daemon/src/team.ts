@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import type { TeamMember, TeamMessage, TeamStatus, Turn } from "@upbot/protocol";
 import type { AgentStore } from "./agents";
 import type { ChatStore } from "./chat-store";
+import { deleteSetting, getSetting, setSetting } from "./db";
 import type { Broadcast } from "./rpc";
 import { RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
@@ -58,18 +59,12 @@ export class TeamClient {
   ) {}
 
   private config(): Config | null {
-    const r = this.db.query("SELECT value FROM settings WHERE key = 'team'").get() as {
-      value: string;
-    } | null;
-    return r ? (JSON.parse(r.value) as Config) : null;
+    return getSetting<Config | null>(this.db, "team", null);
   }
 
   private setConfig(c: Config | null) {
-    if (c)
-      this.db
-        .query("INSERT OR REPLACE INTO settings (key, value) VALUES ('team', ?)")
-        .run(JSON.stringify(c));
-    else this.db.query("DELETE FROM settings WHERE key = 'team'").run();
+    if (c) setSetting(this.db, "team", c);
+    else deleteSetting(this.db, "team");
   }
 
   status(): TeamStatus {

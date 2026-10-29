@@ -3,6 +3,7 @@ import type { Approval, ApprovalDecision, ApprovalRule } from "@upbot/protocol";
 import { isSensitivePermission } from "@upbot/protocol";
 import { classifyAppTool } from "./app-permissions";
 import type { AppsService } from "./apps";
+import { getSetting, setSetting } from "./db";
 import { RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
 import type { Vault } from "./vault";
@@ -47,16 +48,11 @@ export class ApprovalService {
   ) {}
 
   rules(): ApprovalRule[] {
-    const r = this.db.query("SELECT value FROM settings WHERE key = 'approval_rules'").get() as {
-      value: string;
-    } | null;
-    return r ? (JSON.parse(r.value) as ApprovalRule[]) : [];
+    return getSetting<ApprovalRule[]>(this.db, "approval_rules", []);
   }
 
   setRules(rules: ApprovalRule[]): ApprovalRule[] {
-    this.db
-      .query("INSERT OR REPLACE INTO settings (key, value) VALUES ('approval_rules', ?)")
-      .run(JSON.stringify(rules));
+    setSetting(this.db, "approval_rules", rules);
     this.broadcast("approvals.rulesChanged", {});
     return rules;
   }
