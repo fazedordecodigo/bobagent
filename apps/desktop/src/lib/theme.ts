@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { readStorage, writeStorage } from "./storage";
 
-type ThemePreference = "light" | "dark" | "auto";
+export type ThemePreference = "light" | "dark" | "auto";
 const changed = "upbot:theme-changed";
 
 function apply(preference: string | null) {
