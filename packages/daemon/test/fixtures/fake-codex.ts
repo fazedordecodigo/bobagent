@@ -6,6 +6,7 @@
 //
 // Prompt behaviors (text after any <conversation_history>/<agent_instructions> block):
 //   echo:<t>  -> agentMessage deltas, turn completed
+//   split:<t> -> agentMessage split inside a multi-byte UTF-8 character, turn completed
 //   think:<t> -> reasoning delta then text <t>
 //   tool      -> commandExecution + requestApproval -> "permission:<decision>"
 //   whoami    -> "sandbox=<type> approval=<p> model=<m> effort=<e> thread=<id>"
@@ -29,6 +30,13 @@ type J = Record<string, unknown>;
 const send = (m: unknown) => process.stdout.write(`${JSON.stringify(m)}\n`);
 const notify = (method: string, params: unknown) => send({ method, params });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+async function notifySplit(method: string, params: unknown) {
+  const line = Buffer.from(`${JSON.stringify({ method, params })}\n`);
+  const splitAt = line.findIndex((byte) => byte >= 0xc0) + 1;
+  process.stdout.write(line.subarray(0, splitAt));
+  await sleep(50);
+  process.stdout.write(line.subarray(splitAt));
+}
 const threads = (): string[] => {
   try {
     return JSON.parse(readFileSync(THREADS, "utf8"));
@@ -126,6 +134,19 @@ async function runTurn(threadId: string, turnId: string, params: J) {
   });
   if (text.startsWith("echo:")) {
     message(threadId, turnId, text.slice(5));
+    complete(threadId, turnId, "completed");
+  } else if (text.startsWith("split:")) {
+    const itemId = `msg-${crypto.randomUUID()}`;
+    notify("item/started", {
+      threadId,
+      turnId,
+      item: { type: "agentMessage", id: itemId, text: "" },
+    });
+    await notifySplit("item/completed", {
+      threadId,
+      turnId,
+      item: { type: "agentMessage", id: itemId, text: text.slice(6) },
+    });
     complete(threadId, turnId, "completed");
   } else if (text.startsWith("think:")) {
     notify("item/reasoning/summaryTextDelta", {

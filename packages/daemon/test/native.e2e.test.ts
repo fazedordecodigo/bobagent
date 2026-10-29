@@ -134,6 +134,15 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
     }
   });
 
+  test("multi-byte UTF-8 split across stdout chunks is decoded intact", async () => {
+    const a = await newAgent("UTF-8 split");
+    const t = await turn(a.id, "split:olá 🎉 ünïcödé");
+    const text = await lastAgentText(a.id);
+    expect(t.status).toBe("completed");
+    expect(text).toBe("olá 🎉 ünïcödé");
+    expect(text).not.toContain("\uFFFD");
+  });
+
   for (const [label, pick, reply] of [
     ["allow", (x: Case) => x.allow, (x: Case) => x.allowReply],
     ["deny", (x: Case) => x.deny, (x: Case) => x.denyReply],
