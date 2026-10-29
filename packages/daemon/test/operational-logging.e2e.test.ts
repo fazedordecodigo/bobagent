@@ -157,5 +157,4 @@ describe("daemon operational logging", () => {
     expect(stderr).toContain("shutting down");
     expect(stderr).toContain("SIGTERM");
   });
-
 });
