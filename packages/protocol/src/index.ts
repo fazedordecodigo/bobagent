@@ -1113,6 +1113,10 @@ export const methodMap = {
     params: z.object({ agentId: z.string(), text: MemoryText }).strict(),
     result: Memory,
   },
+  "memories.update": {
+    params: z.object({ id: z.string(), text: MemoryText }).strict(),
+    result: Memory,
+  },
   "memories.delete": {
     params: z.object({ id: z.string() }).strict(),
     result: z.object({ ok: z.literal(true) }),
