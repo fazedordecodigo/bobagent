@@ -672,6 +672,12 @@ describe("chat e2e (fake acp agent)", () => {
     const agent = await newAgent("Killed", "devin");
     await send(agent.id, "slow");
     await c.waitForEventWhere("item.delta", (d) => (d as { agentId: string }).agentId === agent.id);
+    const emitted = c.events
+      .filter(
+        (e) => e.event === "item.delta" && (e.data as { agentId: string }).agentId === agent.id,
+      )
+      .map((e) => (e.data as { text: string }).text)
+      .join("");
     const orphanPid = readPids(stateDir)[readPids(stateDir).length - 1]!;
 
     daemon.proc.kill("SIGKILL");
@@ -691,6 +697,12 @@ describe("chat e2e (fake acp agent)", () => {
     const h = await history(agent.id);
     const interrupted = h.turns.find((t) => t.status === "interrupted");
     expect(interrupted).toBeTruthy();
+
+    // whatever the last flush persisted is an intact prefix of the emitted
+    // stream — a kill loses only the unflushed tail, never corrupts chunks
+    const msg = h.items.find((i) => i.kind === "agent_message") as { text: string };
+    expect(msg.text.length).toBeGreaterThan(0);
+    expect(emitted.startsWith(msg.text) || msg.text.startsWith(emitted)).toBe(true);
   });
 
   test("provider_unavailable: openai-compatible unsupported, missing CLI binary", async () => {
