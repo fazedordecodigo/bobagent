@@ -23,10 +23,15 @@ export const ProviderId = z.enum([
 ]);
 export type ProviderId = z.infer<typeof ProviderId>;
 
-export const AgentAvatar = z.object({
-  emoji: z.string().min(1).max(16),
-  color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-});
+export const AgentIconId = z.enum(["sym", "mail", "receipt", "plane", "chart", "cal", "sheet"]);
+export type AgentIconId = z.infer<typeof AgentIconId>;
+export const AgentAvatar = z.union([
+  z.object({
+    emoji: z.string().min(1).max(16),
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  }),
+  z.object({ icon: AgentIconId }).strict(),
+]);
 export type AgentAvatar = z.infer<typeof AgentAvatar>;
 
 export const GatewayKind = z.enum(["telegram", "slack", "discord"]);
@@ -54,39 +59,6 @@ export const Agent = z.object({
   updatedAt: z.number(),
 });
 export type Agent = z.infer<typeof Agent>;
-
-// ---- Wire envelopes ----
-
-export const RequestEnvelope = z.object({
-  id: z.string(),
-  method: z.string(),
-  params: z.unknown().optional(),
-});
-export type RequestEnvelope = z.infer<typeof RequestEnvelope>;
-
-export const ErrorCode = z.enum([
-  "bad_request",
-  "not_found",
-  "internal",
-  "busy",
-  "provider_unavailable",
-]);
-export type ErrorCode = z.infer<typeof ErrorCode>;
-
-export const ResponseEnvelope = z.union([
-  z.object({ id: z.string(), result: z.unknown() }),
-  z.object({
-    id: z.string(),
-    error: z.object({ code: ErrorCode, message: z.string() }),
-  }),
-]);
-export type ResponseEnvelope = z.infer<typeof ResponseEnvelope>;
-
-export const EventEnvelope = z.object({
-  event: z.string(),
-  data: z.unknown(),
-});
-export type EventEnvelope = z.infer<typeof EventEnvelope>;
 
 // ---- Method params/results ----
 
@@ -117,8 +89,9 @@ export type AgentsUpdateParams = z.infer<typeof AgentsUpdateParams>;
 export const AgentsUpdateResult = Agent;
 
 export const AgentsDeleteParams = z.object({ id: z.string() }).strict();
-export type AgentsDeleteParams = z.infer<typeof AgentsDeleteParams>;
 export const AgentsDeleteResult = z.object({ ok: z.literal(true) });
+export const AgentsRestoreParams = z.object({ id: z.string() }).strict();
+export const AgentsRestoreResult = Agent;
 
 // ---- Chat types ----
 
@@ -152,8 +125,6 @@ export const PermissionOptionKind = z.enum([
   "reject_once",
   "reject_always",
 ]);
-export type PermissionOptionKind = z.infer<typeof PermissionOptionKind>;
-
 export const PermissionOption = z.object({
   optionId: z.string(),
   name: z.string(),
@@ -248,7 +219,6 @@ export const ChatHistoryParams = z
     limit: z.number().int().min(1).max(500).optional(),
   })
   .strict();
-export type ChatHistoryParams = z.infer<typeof ChatHistoryParams>;
 export const ChatHistoryResult = z.object({
   items: z.array(ChatItem),
   turns: z.array(Turn),
@@ -271,7 +241,6 @@ export const ChatSendParams = z
       .optional(),
   })
   .strict();
-export type ChatSendParams = z.infer<typeof ChatSendParams>;
 export const ChatSendResult = z.object({ queueId: z.string() });
 
 // ---- Queue + config types ----
@@ -294,8 +263,6 @@ export const QueueItem = z.object({
   createdAt: z.number(),
   fromAgentId: z.string().nullable().optional(),
 });
-export type QueueItem = z.infer<typeof QueueItem>;
-
 export const QueueState = z.object({
   agentId: z.string(),
   paused: z.boolean(),
@@ -316,9 +283,8 @@ export const AgentsConfigOptionsResult = z.object({
   configOptions: z.array(ConfigOption),
 });
 export const AgentsSetConfigParams = z
-  .object({ agentId: z.string(), configId: z.string(), value: z.string() })
+  .object({ agentId: z.string(), configId: z.string(), value: z.string().nullable() })
   .strict();
-export type AgentsSetConfigParams = z.infer<typeof AgentsSetConfigParams>;
 export const AgentsSetConfigResult = z.object({
   configOptions: z.array(ConfigOption),
 });
@@ -335,7 +301,6 @@ export const PermissionsListResult = z.array(PendingPermission);
 export const PermissionsRespondParams = z
   .object({ requestId: z.string(), optionId: z.string().nullable() })
   .strict();
-export type PermissionsRespondParams = z.infer<typeof PermissionsRespondParams>;
 export const PermissionsRespondResult = z.object({ ok: z.literal(true) });
 
 // ---- Memories + skills ----
@@ -753,7 +718,6 @@ export const AgentsCompactParams = z.object({ agentId: z.string() }).strict();
 // ---- Channels ----
 
 export const ChannelStatus = z.enum(["active", "stopped", "archived"]);
-export type ChannelStatus = z.infer<typeof ChannelStatus>;
 export const Channel = z.object({
   id: z.string(),
   name: z.string(),
@@ -802,19 +766,6 @@ export const ChannelsPostParams = z
 export const ChannelsReassignParams = z
   .object({ channelId: z.string(), ownerId: z.string() })
   .strict();
-export const ChannelsSetMembersParams = z
-  .object({ channelId: z.string(), memberIds: z.array(z.string()).min(1).max(20) })
-  .strict();
-
-// ---- Events ----
-
-export const AgentCreatedEvent = z.object({ event: z.literal("agent.created"), data: Agent });
-export const AgentUpdatedEvent = z.object({ event: z.literal("agent.updated"), data: Agent });
-export const AgentDeletedEvent = z.object({
-  event: z.literal("agent.deleted"),
-  data: z.object({ id: z.string() }),
-});
-
 // ---- Typed method map ----
 
 export const methodMap = {
@@ -822,6 +773,7 @@ export const methodMap = {
   "agents.create": { params: AgentsCreateParams, result: AgentsCreateResult },
   "agents.update": { params: AgentsUpdateParams, result: AgentsUpdateResult },
   "agents.delete": { params: AgentsDeleteParams, result: AgentsDeleteResult },
+  "agents.restore": { params: AgentsRestoreParams, result: AgentsRestoreResult },
   "chat.history": { params: ChatHistoryParams, result: ChatHistoryResult },
   "chat.send": { params: ChatSendParams, result: ChatSendResult },
   "chat.cancel": { params: ChatCancelParams, result: ChatCancelResult },
@@ -858,18 +810,6 @@ export const methodMap = {
       .object({
         name: z.string().trim().min(1).max(80),
         target: SshTarget,
-        port: z.number().int().min(1).max(65535).optional(),
-        identityFile: IdentityFile.optional(),
-      })
-      .strict(),
-    result: RemoteHost,
-  },
-  "hosts.update": {
-    params: z
-      .object({
-        id: z.string(),
-        name: z.string().trim().min(1).max(80).optional(),
-        target: SshTarget.optional(),
         port: z.number().int().min(1).max(65535).optional(),
         identityFile: IdentityFile.optional(),
       })
@@ -1116,7 +1056,6 @@ export const methodMap = {
     result: z.object({ tts: z.boolean(), stt: z.boolean() }),
   },
   "voice.speak": { params: z.object({ text: z.string().min(1).max(20_000) }).strict(), result: Ok },
-  "voice.stop": { params: z.object({}).strict(), result: Ok },
   "voice.transcribe": {
     params: z
       .object({ audioBase64: z.string().min(1).max(36_000_000), mime: z.string().max(100) })
@@ -1199,7 +1138,6 @@ export const methodMap = {
   "channels.archive": { params: ChannelIdParams, result: Channel },
   "channels.restore": { params: ChannelIdParams, result: Channel },
   "channels.reassign": { params: ChannelsReassignParams, result: Channel },
-  "channels.setMembers": { params: ChannelsSetMembersParams, result: Channel },
 } as const;
 
 export type MethodName = keyof typeof methodMap;
@@ -1245,4 +1183,3 @@ export type DaemonEventMap = {
   "channel.updated": Channel;
   "channel.message": ChannelMessage;
 };
-export type DaemonEventName = keyof DaemonEventMap;

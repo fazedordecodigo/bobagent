@@ -134,6 +134,15 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
     }
   });
 
+  test("multi-byte UTF-8 split across stdout chunks is decoded intact", async () => {
+    const a = await newAgent("UTF-8 split");
+    const t = await turn(a.id, "split:olá 🎉 ünïcödé");
+    const text = await lastAgentText(a.id);
+    expect(t.status).toBe("completed");
+    expect(text).toBe("olá 🎉 ünïcödé");
+    expect(text).not.toContain("\uFFFD");
+  });
+
   for (const [label, pick, reply] of [
     ["allow", (x: Case) => x.allow, (x: Case) => x.allowReply],
     ["deny", (x: Case) => x.deny, (x: Case) => x.denyReply],
@@ -199,6 +208,47 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
     const who = await lastAgentText(a.id);
     expect(who).toContain(`model=${cs.model.to}`);
     expect(who).toContain(cs.provider === "claude" ? "mode=acceptEdits" : "sandbox=readOnly");
+  });
+
+  test("clearing a model config starts a fresh provider session", async () => {
+    const a = await newAgent("Clear model");
+    const { configOptions } = (await c.request("agents.configOptions", {
+      agentId: a.id,
+    })) as { configOptions: ConfigOption[] };
+    const model = configOptions.find((option) => option.id === "model");
+    expect(model?.options.some((option) => option.value === cs.model.to)).toBe(true);
+    await c.request("agents.setConfig", {
+      agentId: a.id,
+      configId: "model",
+      value: cs.model.to,
+    });
+    await turn(a.id, "echo:before clear");
+    const beforeClear = readLog(stateDir);
+    await c.request("agents.setConfig", {
+      agentId: a.id,
+      configId: "model",
+      value: null,
+    });
+    const afterClear = readLog(stateDir);
+    if (cs.provider === "claude") {
+      const beforeCount = beforeClear.filter((item) => item.method === "argv").length;
+      const argvs = afterClear
+        .filter((item) => item.method === "argv")
+        .map((item) => item.params as string[]);
+      const nextArgs = argvs.slice(beforeCount);
+      expect(nextArgs.length).toBeGreaterThan(0);
+      expect(nextArgs.at(-1)).not.toContain("--resume");
+    } else {
+      const startsBefore = beforeClear.filter((item) => item.method === "thread/start").length;
+      const resumesBefore = beforeClear.filter((item) => item.method === "thread/resume").length;
+      expect(afterClear.filter((item) => item.method === "thread/start").length).toBeGreaterThan(
+        startsBefore,
+      );
+      expect(afterClear.filter((item) => item.method === "thread/resume").length).toBe(
+        resumesBefore,
+      );
+    }
+    expect((await turn(a.id, "echo:after clear")).status).toBe("completed");
   });
 
   test("session resumes across a daemon restart", async () => {
