@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentPlacement, RemoteHost } from "@upbot/protocol";
@@ -94,4 +94,53 @@ describe("microVM credentials", () => {
       expect(proc.launch.credentials).toEqual({});
     },
   );
+
+  test("logs and reads corrupt or undecryptable stored entries as absent", () => {
+    const err = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(creds.env("codex")).toEqual({});
+      expect(err).not.toHaveBeenCalled();
+
+      vault.set("vmcred.codex", "corrupt-json-secret-sentinel", []);
+      expect(creds.env("codex")).toEqual({});
+      expect(creds.list().map((c) => c.provider)).not.toContain("codex");
+      expect(err.mock.calls).toEqual([
+        [
+          "UpBot could not read a stored microVM credential",
+          { provider: "codex", reason: "invalid_entry" },
+        ],
+        [
+          "UpBot could not read a stored microVM credential",
+          { provider: "codex", reason: "invalid_entry" },
+        ],
+      ]);
+      err.mockClear();
+
+      vault.set(
+        "vmcred.codex",
+        JSON.stringify({ kind: "corrupt-kind-secret-sentinel", value: "x" }),
+        [],
+      );
+      expect(creds.env("codex")).toEqual({});
+      expect(err.mock.calls).toEqual([
+        [
+          "UpBot could not read a stored microVM credential",
+          { provider: "codex", reason: "invalid_entry" },
+        ],
+      ]);
+      err.mockClear();
+
+      db.query("UPDATE vault SET data = ? WHERE name = ?").run("AAAA", "vmcred.codex");
+      expect(creds.env("codex")).toEqual({});
+      expect(err.mock.calls).toEqual([
+        [
+          "UpBot could not read a stored microVM credential",
+          { provider: "codex", reason: "invalid_entry" },
+        ],
+      ]);
+    } finally {
+      err.mockRestore();
+      creds.delete("codex");
+    }
+  });
 });
