@@ -78,6 +78,9 @@ type PendingEntry = {
 const cancelGraceMs = () =>
   Math.max(0, Number.parseInt(process.env.UPBOT_CANCEL_GRACE_MS ?? "", 10) || 10_000);
 
+/** How often the in-memory streamed text is flushed to SQLite mid-stream. */
+const TEXT_FLUSH_MS = 150;
+
 export class AgentRuntime {
   status: AgentStatus = "idle";
   statusError: string | null = null;
@@ -88,7 +91,14 @@ export class AgentRuntime {
   private sessionPromptCount = 0;
   private sessionConfigApplied = false;
   private configOptions: ConfigOption[] = [];
-  private openTextItem: { id: string; kind: "agent_message" | "agent_thought" } | null = null;
+  private openTextItem: {
+    id: string;
+    kind: "agent_message" | "agent_thought";
+    /** Accumulated text; the in-memory source of truth until flushed. */
+    text: string;
+    dirty: boolean;
+  } | null = null;
+  private textFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private pending = new Map<string, PendingEntry>();
   private cancelTimer: ReturnType<typeof setTimeout> | null = null;
   private draining = false;
@@ -206,7 +216,7 @@ export class AgentRuntime {
       const turnRow = this.store.createTurn(this.agent.id, next.id);
       this.queue.markStarted(next.id, turnRow.id);
       this.turn = { id: turnRow.id, cancelled: false, byUser: false };
-      this.openTextItem = null;
+      this.closeTextItem();
       this.turnHops = next.hops ?? 0;
       this.turnChannelId = next.channel_id ?? null;
       const meta = next.meta_json ? (JSON.parse(next.meta_json) as Record<string, unknown>) : {};
@@ -409,7 +419,7 @@ export class AgentRuntime {
     const ended = this.store.endTurn(turn.id, status, stopReason, error);
     this.broadcast("turn.ended", ended);
     if (this.turn === turn) this.turn = null;
-    this.openTextItem = null;
+    this.closeTextItem();
     if (this.status !== "error") this.setStatus("idle");
     // queue policy: user stop pauses the queue; failed turn auto-pauses it
     if ((status === "cancelled" && turn.byUser) || status === "failed") {
@@ -670,7 +680,7 @@ export class AgentRuntime {
         this.appendChunk("agent_thought", u.text);
         break;
       case "tool_call": {
-        this.openTextItem = null;
+        this.closeTextItem();
         const item = this.store.createItem(this.agent.id, turn.id, "tool_call", {
           toolCallId: u.toolCallId,
           title: u.title,
@@ -703,13 +713,44 @@ export class AgentRuntime {
     const turn = this.turn;
     if (!turn) return;
     if (this.openTextItem && this.openTextItem.kind === kind) {
-      const item = this.store.appendItemText(this.openTextItem.id, text);
+      const item = this.openTextItem;
+      item.text += text;
+      item.dirty = true;
+      this.scheduleTextFlush();
       this.broadcast("item.delta", { agentId: this.agent.id, itemId: item.id, text });
     } else {
+      this.closeTextItem();
       const item = this.store.createItem(this.agent.id, turn.id, kind, { text });
-      this.openTextItem = { id: item.id, kind };
+      this.openTextItem = { id: item.id, kind, text, dirty: false };
       this.broadcast("item.created", item);
     }
+  }
+
+  private scheduleTextFlush(): void {
+    if (this.textFlushTimer) return;
+    this.textFlushTimer = setTimeout(() => {
+      this.textFlushTimer = null;
+      this.flushTextItem();
+    }, TEXT_FLUSH_MS);
+    this.textFlushTimer.unref?.();
+  }
+
+  /** Persists the open streaming item's accumulated text, if chunks are pending. */
+  private flushTextItem(): void {
+    const item = this.openTextItem;
+    if (!item?.dirty) return;
+    this.store.setItemText(item.id, item.text);
+    item.dirty = false;
+  }
+
+  /** Flushes and closes the open streaming item (kind change, tool call, turn end, dispose). */
+  private closeTextItem(): void {
+    if (this.textFlushTimer) {
+      clearTimeout(this.textFlushTimer);
+      this.textFlushTimer = null;
+    }
+    this.flushTextItem();
+    this.openTextItem = null;
   }
 
   private onProcessExit(error: string | null): void {
@@ -743,6 +784,7 @@ export class AgentRuntime {
       this.cancelTimer = null;
     }
     const turn = this.turn;
+    if (!turn) this.closeTextItem();
     if (turn) {
       turn.cancelled = true;
       this.finishTurn(turn, "cancelled", "cancelled", null);
