@@ -64,6 +64,35 @@ export class RpcError extends Error {
   }
 }
 
+const ERROR_TYPE_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+const ERRNO_RE = /^E[A-Z]{2,15}$/;
+
+/** Bounded diagnostics for an untrusted error: never its message, stack or payload. */
+export function errorFields(e: unknown): string {
+  let type = e === null ? "null" : typeof e;
+  try {
+    const ctor =
+      typeof e === "object" && e !== null
+        ? (Object.getPrototypeOf(e) as { constructor?: { name?: unknown } } | null)?.constructor
+            ?.name
+        : undefined;
+    if (typeof ctor === "string" && ERROR_TYPE_RE.test(ctor)) type = ctor;
+  } catch {}
+
+  let code: string | undefined;
+  try {
+    if (e instanceof RpcError) {
+      if (/^[a-z_]{1,32}$/.test(e.code)) code = e.code;
+    } else if (e instanceof ProviderError) {
+      code = e.code;
+    } else {
+      const c = (e as { code?: unknown } | null)?.code;
+      if (typeof c === "string" && ERRNO_RE.test(c)) code = c;
+    }
+  } catch {}
+  return code ? `errorType=${type} code=${code}` : `errorType=${type}`;
+}
+
 type PendingEntry = {
   requestId: string;
   turnId: string;
@@ -247,7 +276,11 @@ export class AgentRuntime {
       this.broadcast("item.created", userItem);
       this.emitQueue();
       const promptText = next.prompt ?? (sender ? wrapAgentMessage(sender, next.text) : next.text);
-      this.runTurn(promptText, turnRow.id).catch(() => {});
+      this.runTurn(promptText, turnRow.id).catch((e) =>
+        console.error(
+          `[upbotd] turn failed unexpectedly: agent=${this.agent.id} turn=${turnRow.id} ${errorFields(e)}`,
+        ),
+      );
     } finally {
       this.draining = false;
     }
@@ -388,7 +421,11 @@ export class AgentRuntime {
           const { writeFileSync, mkdirSync } = await import("node:fs");
           mkdirSync(dbgDir, { recursive: true });
           writeFileSync(join(dbgDir, `${this.agent.id}-${turn.id}.txt`), promptText);
-        } catch {}
+        } catch (e) {
+          console.error(
+            `[upbotd] failed to write debug prompt: agent=${this.agent.id} turn=${turn.id} ${errorFields(e)}`,
+          );
+        }
       }
       const { stopReason } = await session.prompt(promptText);
       if (this.turn !== turn) return;
@@ -398,7 +435,10 @@ export class AgentRuntime {
         this.finishTurn(turn, "completed", stopReason, null);
       }
     } catch (e) {
-      if (this.turn !== turn) return;
+      if (this.turn !== turn) {
+        if (!turn.cancelled) throw e;
+        return;
+      }
       if (turn.cancelled) {
         this.finishTurn(turn, "cancelled", "cancelled", null);
         return;
@@ -437,7 +477,9 @@ export class AgentRuntime {
       }
     }
     if (status === "completed" && this.shouldAutoCompact()) {
-      this.compact("auto").catch(() => {});
+      this.compact("auto").catch((e) =>
+        console.error(`[upbotd] auto-compaction failed: agent=${this.agent.id} ${errorFields(e)}`),
+      );
       return;
     }
     this.drain();
