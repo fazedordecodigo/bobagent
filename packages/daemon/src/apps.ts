@@ -16,6 +16,7 @@ import type {
 import { AppPermissions, defaultAppPermissions } from "@upbot/protocol";
 import { RpcError } from "./runtime/agent-runtime";
 import { APP_PREFIX, type Vault } from "./vault";
+import { VERSION } from "./version";
 
 // Connected apps: MCP servers the daemon runs (stdio) or talks to (streamable HTTP) on behalf
 // of the bots. Secrets live in the vault as app.<id>.<KEY> and only reach the server process
@@ -469,7 +470,7 @@ export class AppsService {
       if (transport instanceof StdioClientTransport) {
         transport.stderr?.on("data", (d: Buffer) => stderr.push(d));
       }
-      const client = new Client({ name: "upbot", version: "0.3.0" });
+      const client = new Client({ name: "upbot", version: VERSION });
       timeout = AbortSignal.timeout(Number(process.env.UPBOT_APP_START_TIMEOUT_MS) || 60_000);
       phase = "transport initialization";
       await client.connect(transport as Transport, { signal: timeout });

@@ -2,6 +2,7 @@ import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import type { ConfigOption, ProviderId } from "@upbot/protocol";
 import { envPositiveNumber } from "../env/vars";
+import { VERSION } from "../version";
 import {
   authMessage,
   classifyStartupError,
@@ -619,7 +620,7 @@ export class AcpDriver implements ProviderDriver {
                 fs: { readTextFile: false, writeTextFile: false },
                 terminal: false,
               },
-              clientInfo: { name: "upbot", version: "0.3.0" },
+              clientInfo: { name: "upbot", version: VERSION },
             } as never),
           ),
         )) as {
