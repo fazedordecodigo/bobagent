@@ -165,6 +165,7 @@ export class ApprovalService {
         const existing = this.vault.get(name);
         const agentIds = existing ? [...new Set([...existing.agentIds, a.agentId])] : [a.agentId];
         this.vault.set(name, p.value, agentIds);
+        this.broadcast("vault.changed", {});
         return this.finish(a.id, "approved")!;
       }
       if (a.kind === "takeover")

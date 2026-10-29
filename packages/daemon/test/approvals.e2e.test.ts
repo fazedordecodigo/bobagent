@@ -369,6 +369,63 @@ describe("approvals e2e", () => {
     expect(entries.find((e) => e.name === name)?.agentIds.sort()).toEqual([reader.id, a.id].sort());
   });
 
+  test("secret approvals notify vault subscribers once per save without exposing values", async () => {
+    const subscriber = await DaemonClient.connect(daemon.port, TOKEN);
+    const name = "notifications.key";
+    try {
+      for (const value of ["first-private-value", "second-private-value"]) {
+        const start = subscriber.events.length;
+        await withApproval("request_secret", { name, reason: "need access" }, (ap) =>
+          c.request("approvals.respond", { id: ap.id, decision: "approve", value }),
+        );
+        const entries = (await subscriber.request("vault.list", {})) as VaultEntry[];
+        const events = subscriber.events.slice(start);
+        expect(events.filter((event) => event.event === "vault.changed")).toEqual([
+          { event: "vault.changed", data: {} },
+        ]);
+        expect(entries.find((entry) => entry.name === name)?.agentIds).toEqual([a.id]);
+        expect(JSON.stringify({ events, entries })).not.toContain(value);
+      }
+    } finally {
+      subscriber.close();
+    }
+  });
+
+  for (const failure of ["deny", "write-failure"] as const) {
+    test(`secret approvals do not notify vault subscribers or change storage on ${failure}`, async () => {
+      const name = "unchanged.key";
+      await c.request("vault.set", { name, value: "original", agentIds: [a.id] });
+      const db = new Database(join(dataDir, "upbot.db"));
+      try {
+        if (failure === "write-failure") {
+          db.exec(`CREATE TRIGGER reject_secret_update BEFORE UPDATE ON vault
+            WHEN NEW.name = 'unchanged.key'
+            BEGIN SELECT RAISE(ABORT, 'test vault write failure'); END`);
+        }
+        const before = db.query("SELECT * FROM vault WHERE name = ?").get(name);
+        const start = c.events.length;
+        const r = await withApproval("request_secret", { name, reason: "rotate" }, async (ap) => {
+          const response = c.request("approvals.respond", {
+            id: ap.id,
+            decision: failure === "deny" ? "deny" : "approve",
+            value: "replacement",
+          });
+          if (failure === "deny") expect(await response).toMatchObject({ status: "denied" });
+          else await expect(response).rejects.toMatchObject({ code: "internal" });
+        });
+        expect(r.text).toContain(`did not provide ${name} (denied)`);
+        expect(db.query("SELECT * FROM vault WHERE name = ?").get(name)).toEqual(before);
+        expect(c.events.slice(start).filter((event) => event.event === "vault.changed")).toEqual(
+          [],
+        );
+      } finally {
+        db.exec("DROP TRIGGER IF EXISTS reject_secret_update");
+        db.close();
+      }
+      expect(await tool(a, "vault_get", { name })).toBe("tool-ok:original");
+    });
+  }
+
   test("a secret vault read failure rejects the RPC, denies the bridge request and preserves storage", async () => {
     const name = "unreadable.key";
     await c.request("vault.set", { name, value: "original", agentIds: [a.id] });
@@ -376,6 +433,7 @@ describe("approvals e2e", () => {
     try {
       db.query("UPDATE vault SET agent_ids = ? WHERE name = ?").run("[", name);
       const before = db.query("SELECT * FROM vault WHERE name = ?").get(name);
+      const start = c.events.length;
       const r = await withApproval("request_secret", { name, reason: "rotate" }, async (ap) => {
         await expect(
           c.request("approvals.respond", { id: ap.id, decision: "approve", value: "replacement" }),
@@ -386,6 +444,7 @@ describe("approvals e2e", () => {
       expect(r.text).toContain(`did not provide ${name} (denied)`);
       expect(r.text).not.toContain("replacement");
       expect(db.query("SELECT * FROM vault WHERE name = ?").get(name)).toEqual(before);
+      expect(c.events.slice(start).filter((event) => event.event === "vault.changed")).toEqual([]);
     } finally {
       db.query("UPDATE vault SET agent_ids = ? WHERE name = ?").run(JSON.stringify([a.id]), name);
       db.close();
