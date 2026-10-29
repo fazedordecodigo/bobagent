@@ -207,19 +207,43 @@ export class GatewayService {
     t.start();
   }
 
+  /**
+   * Posts a message through the gateway's transport. Send failures are logged and stored
+   * on the gateway's status (surfaced via `gateway.updated`) instead of being dropped;
+   * a later successful send clears the recorded error.
+   */
+  private async deliver(id: string, chatId: string, text: string, replyTo?: string) {
+    const t = this.transports.get(id);
+    if (!t) return;
+    try {
+      await t.send(chatId, text, replyTo);
+    } catch (e) {
+      const message = (e as Error).message;
+      console.error(`[upbotd] gateway ${id} send failed:`, message);
+      if (this.transports.get(id) !== t) return;
+      this.status.set(id, { status: this.status.get(id)?.status ?? "error", error: message });
+      this.emit(id);
+      return;
+    }
+    if (this.transports.get(id) !== t) return;
+    const s = this.status.get(id);
+    if (s?.error) {
+      this.status.set(id, { status: s.status, error: null });
+      this.emit(id);
+    }
+  }
+
   private onInbound(id: string, m: Inbound) {
     const r = this.row(id);
-    const t = this.transports.get(id);
-    if (!r || !t || r.enabled !== 1) return;
+    if (!r || !this.transports.has(id) || r.enabled !== 1) return;
     const allowed = JSON.parse(r.allowed_users) as string[];
     if (!allowed.includes(m.userId)) {
-      void t
-        .send(
-          m.chatId,
-          `This UpBot gateway doesn't know you yet. Ask its owner to allow user id ${m.userId}.`,
-          m.replyTo,
-        )
-        .catch(() => {});
+      void this.deliver(
+        id,
+        m.chatId,
+        `This UpBot gateway doesn't know you yet. Ask its owner to allow user id ${m.userId}.`,
+        m.replyTo,
+      );
       return;
     }
     // "@AgentName message" routes to another agent; otherwise the gateway's default agent
@@ -253,9 +277,12 @@ export class GatewayService {
         meta: { gateway: { ...source, ...(m.replyTo ? { replyTo: m.replyTo } : {}) } },
       });
     } catch (e) {
-      void t
-        .send(m.chatId, `UpBot could not deliver this: ${(e as Error).message}`, m.replyTo)
-        .catch(() => {});
+      void this.deliver(
+        id,
+        m.chatId,
+        `UpBot could not deliver this: ${(e as Error).message}`,
+        m.replyTo,
+      );
     }
   }
 
@@ -266,8 +293,6 @@ export class GatewayService {
       gateway?: { id: string; chatId: string; replyTo?: string };
     };
     if (!meta.gateway) return;
-    const t = this.transports.get(meta.gateway.id);
-    if (!t) return;
     let reply: string;
     if (turn.status === "completed") {
       reply = this.chat
@@ -282,9 +307,12 @@ export class GatewayService {
     } else {
       reply = "The agent stopped before replying.";
     }
-    void t
-      .send(meta.gateway.chatId, reply.slice(0, MAX_REPLY), meta.gateway.replyTo)
-      .catch(() => {});
+    void this.deliver(
+      meta.gateway.id,
+      meta.gateway.chatId,
+      reply.slice(0, MAX_REPLY),
+      meta.gateway.replyTo,
+    );
   }
 
   private emit(id: string): Gateway {
