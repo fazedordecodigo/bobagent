@@ -84,9 +84,7 @@ export class Voice {
   }
 
   stop(): void {
-    try {
-      this.speaking?.kill();
-    } catch {}
+    this.speaking?.kill();
     this.speaking = null;
   }
 

@@ -1,23 +1,15 @@
 import type {
   Agent,
   AgentAvatar,
-  BrowserState,
   Gateway,
   GatewayKind,
   MarketplaceItem,
-  Memory,
-  MobileStatus,
   ProviderId,
-  Routine,
-  Skill,
-  TeamMessage,
-  TeamStatus,
-  VaultEntry,
 } from "@upbot/protocol";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { DaemonClient } from "../lib/daemon";
 import { errorMessage } from "../lib/errors";
-import { errorFields, type LogFields, logWarn } from "../lib/log";
 import { btnCls, inputCls, PROVIDERS } from "./AgentSettings";
 import { Markdown } from "./Markdown";
 
@@ -98,25 +90,15 @@ export function AvatarEditor({
 }
 
 export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agentId: string }) {
-  const [items, setItems] = useState<Memory[]>([]);
+  const { data: items = [], error: loadError } = useDaemonQuery(
+    client,
+    "memories.list",
+    { agentId },
+    { events: { "memories.changed": (d) => d.agentId === agentId } },
+  );
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("memories.list", { agentId })
-      .then(setItems)
-      .catch((e: unknown) => logWarn("memories.list_failed", { agentId, ...errorFields(e) }));
-  }, [client, agentId]);
-  const fail = (scope: string, fields?: LogFields) => (e: unknown) => {
-    logWarn(scope, { ...fields, ...errorFields(e) });
-    setError(errorMessage(e));
-  };
-  useEffect(() => {
-    load();
-    return client.on("memories.changed", (d) => {
-      if (d.agentId === agentId) load();
-    });
-  }, [client, agentId, load]);
+  const fail = (e: unknown) => setError(errorMessage(e));
   return (
     <section className="mx-auto max-w-lg space-y-2 px-6 pb-6">
       <h3 className="text-sm font-semibold text-zinc-300">Memories</h3>
@@ -128,11 +110,7 @@ export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agent
             <button
               type="button"
               className="text-xs text-zinc-500 hover:text-red-400"
-              onClick={() =>
-                client
-                  .request("memories.delete", { id: m.id })
-                  .catch(fail("memories.delete_failed", { id: m.id }))
-              }
+              onClick={() => client.request("memories.delete", { id: m.id }).catch(fail)}
             >
               Delete
             </button>
@@ -140,6 +118,7 @@ export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agent
         ))}
         {items.length === 0 && <li className="text-xs text-zinc-600">No memories yet.</li>}
       </ul>
+      {(error || loadError) && <p className="text-xs text-red-400">{error ?? loadError}</p>}
       <form
         className="flex gap-2"
         onSubmit={(e) => {
@@ -148,7 +127,7 @@ export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agent
           client
             .request("memories.add", { agentId, text })
             .then(() => setText(""))
-            .catch(fail("memories.add_failed", { agentId }));
+            .catch(fail);
         }}
       >
         <input
@@ -161,31 +140,24 @@ export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agent
           Add
         </button>
       </form>
-      {error && <p className="text-xs text-red-400">{error}</p>}
     </section>
   );
 }
 
 export function SkillsView({ client }: { client: DaemonClient }) {
-  const [skills, setSkills] = useState<Skill[]>([]);
   const [edit, setEdit] = useState<{ name: string; description: string; body: string } | null>(
     null,
   );
+  const { data: skills = [], error: loadError } = useDaemonQuery(
+    client,
+    "skills.list",
+    {},
+    {
+      events: { "skills.changed": true },
+    },
+  );
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("skills.list", {})
-      .then(setSkills)
-      .catch((e: unknown) => logWarn("skills.list_failed", errorFields(e)));
-  }, [client]);
-  const fail = (scope: string, fields?: LogFields) => (e: unknown) => {
-    logWarn(scope, { ...fields, ...errorFields(e) });
-    setError(errorMessage(e));
-  };
-  useEffect(() => {
-    load();
-    return client.on("skills.changed", load);
-  }, [client, load]);
+  const fail = (e: unknown) => setError(errorMessage(e));
 
   if (edit) {
     return (
@@ -267,11 +239,7 @@ export function SkillsView({ client }: { client: DaemonClient }) {
               <button
                 type="button"
                 className="text-xs text-zinc-500 hover:text-red-400"
-                onClick={() =>
-                  client
-                    .request("skills.delete", { name: s.name })
-                    .catch(fail("skills.delete_failed", { name: s.name }))
-                }
+                onClick={() => client.request("skills.delete", { name: s.name }).catch(fail)}
               >
                 Delete
               </button>
@@ -281,32 +249,25 @@ export function SkillsView({ client }: { client: DaemonClient }) {
         ))}
         {skills.length === 0 && <li className="text-sm text-zinc-500">No skills yet.</li>}
       </ul>
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {(error || loadError) && <p className="text-xs text-red-400">{error ?? loadError}</p>}
     </div>
   );
 }
 
 export function RoutinesPanel({ client, agentId }: { client: DaemonClient; agentId: string }) {
-  const [items, setItems] = useState<Routine[]>([]);
+  const { data: items = [], error: loadError } = useDaemonQuery(
+    client,
+    "routines.list",
+    { agentId },
+    {
+      events: {
+        "routine.updated": (r) => r.agentId === agentId,
+        "routine.deleted": true,
+      },
+    },
+  );
   const [form, setForm] = useState({ name: "", prompt: "", schedule: "", webhook: false });
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("routines.list", { agentId })
-      .then(setItems)
-      .catch((e: unknown) => logWarn("routines.list_failed", { agentId, ...errorFields(e) }));
-  }, [client, agentId]);
-  useEffect(() => {
-    load();
-    const offU = client.on("routine.updated", (r) => {
-      if (r.agentId === agentId) load();
-    });
-    const offD = client.on("routine.deleted", load);
-    return () => {
-      offU();
-      offD();
-    };
-  }, [client, agentId, load]);
   const fail = (e: unknown) => setError(errorMessage(e));
   return (
     <section className="mx-auto max-w-lg space-y-2 px-6 pb-6">
@@ -362,6 +323,7 @@ export function RoutinesPanel({ client, agentId }: { client: DaemonClient; agent
           </li>
         ))}
       </ul>
+      {loadError && <p className="text-xs text-red-400">{loadError}</p>}
       <form
         className="space-y-2"
         onSubmit={(e) => {
@@ -421,23 +383,23 @@ export function RoutinesPanel({ client, agentId }: { client: DaemonClient; agent
 }
 
 export function BrowserView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
-  const [state, setState] = useState<BrowserState | null>(null);
+  const { data: state, error: loadError } = useDaemonQuery(
+    client,
+    "browser.status",
+    {},
+    {
+      events: { "browser.updated": true },
+    },
+  );
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("browser.status", {})
-      .then(setState)
-      .catch((e: unknown) => logWarn("browser.status_failed", errorFields(e)));
-  }, [client]);
-  const fail = (scope: string, fields?: LogFields) => (e: unknown) => {
-    logWarn(scope, { ...fields, ...errorFields(e) });
-    setError(errorMessage(e));
-  };
-  useEffect(() => {
-    load();
-    return client.on("browser.updated", load);
-  }, [client, load]);
-  if (!state) return null;
+  const fail = (e: unknown) => setError(errorMessage(e));
+  if (!state) {
+    return loadError ? (
+      <div className="mx-auto max-w-2xl p-6">
+        <p className="text-xs text-red-400">{loadError}</p>
+      </div>
+    ) : null;
+  }
   const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? "deleted bot";
   return (
     <div className="mx-auto max-w-2xl space-y-3 p-6">
@@ -447,7 +409,7 @@ export function BrowserView({ client, agents }: { client: DaemonClient; agents: 
           <button
             type="button"
             className={`${btnCls} ml-auto bg-zinc-700 hover:bg-zinc-600`}
-            onClick={() => client.request("browser.close", {}).catch(fail("browser.close_failed"))}
+            onClick={() => client.request("browser.close", {}).catch(fail)}
           >
             Close browser
           </button>
@@ -472,11 +434,7 @@ export function BrowserView({ client, agents }: { client: DaemonClient; agents: 
             <button
               type="button"
               className="text-xs text-zinc-500 hover:text-red-400"
-              onClick={() =>
-                client
-                  .request("browser.closeTab", { agentId: t.agentId })
-                  .catch(fail("browser.closeTab_failed", { agentId: t.agentId }))
-              }
+              onClick={() => client.request("browser.closeTab", { agentId: t.agentId }).catch(fail)}
             >
               Close tab
             </button>
@@ -484,7 +442,7 @@ export function BrowserView({ client, agents }: { client: DaemonClient; agents: 
         ))}
         {state.tabs.length === 0 && <li className="text-sm text-zinc-500">No open tabs.</li>}
       </ul>
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-xs text-red-400">{error}</p>}
     </div>
   );
 }
@@ -499,19 +457,16 @@ const CONNECTORS = [
 ] as const;
 
 export function VaultView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
-  const [entries, setEntries] = useState<VaultEntry[]>([]);
+  const { data: entries = [], error: loadError } = useDaemonQuery(
+    client,
+    "vault.list",
+    {},
+    {
+      events: { "vault.changed": true },
+    },
+  );
   const [form, setForm] = useState({ name: "", value: "", agentIds: [] as string[] });
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("vault.list", {})
-      .then(setEntries)
-      .catch((e: unknown) => logWarn("vault.list_failed", errorFields(e)));
-  }, [client]);
-  useEffect(() => {
-    load();
-    return client.on("vault.changed", load);
-  }, [client, load]);
   const toggle = (ids: string[], id: string) =>
     ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id];
   const fail = (e: unknown) => setError(errorMessage(e));
@@ -615,7 +570,7 @@ export function VaultView({ client, agents }: { client: DaemonClient; agents: Ag
             </li>
           ))}
         </ul>
-        {error && <p className="text-xs text-red-400">{error}</p>}
+        {(error || loadError) && <p className="text-xs text-red-400">{error ?? loadError}</p>}
         <button type="submit" className={`${btnCls} bg-sky-600 hover:bg-sky-500`}>
           Save secret
         </button>
@@ -625,19 +580,19 @@ export function VaultView({ client, agents }: { client: DaemonClient; agents: Ag
 }
 
 export function ComputerUsePanel({ client, agentId }: { client: DaemonClient; agentId: string }) {
-  const [state, setState] = useState<{ available: boolean; agentIds: string[] } | null>(null);
+  const { data: state, error: loadError } = useDaemonQuery(
+    client,
+    "computer.access",
+    {},
+    {
+      events: { "computer.changed": true },
+    },
+  );
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("computer.access", {})
-      .then(setState)
-      .catch((e: unknown) => logWarn("computer.access_failed", errorFields(e)));
-  }, [client]);
-  useEffect(() => {
-    load();
-    return client.on("computer.changed", load);
-  }, [client, load]);
-  if (!state?.available) return null;
+  const fail = (e: unknown) => setError(errorMessage(e));
+  if (!state?.available) {
+    return loadError ? <p className="text-xs text-red-400">{loadError}</p> : null;
+  }
   const on = state.agentIds.includes(agentId);
   return (
     <section className="mx-auto max-w-lg space-y-1 px-6 pb-6">
@@ -653,18 +608,15 @@ export function ComputerUsePanel({ client, agentId }: { client: DaemonClient; ag
                   ? state.agentIds.filter((x) => x !== agentId)
                   : [...state.agentIds, agentId],
               })
-              .catch((e: unknown) => {
-                logWarn("computer.setAccess_failed", { agentId, ...errorFields(e) });
-                setError(errorMessage(e));
-              })
+              .catch(fail)
           }
         />
         Let this bot see the screen and control the mouse and keyboard
       </label>
+      {error && <p className="text-xs text-red-400">{error}</p>}
       <p className="text-xs text-zinc-500">
         macOS asks for Screen Recording and Accessibility permission the first time.
       </p>
-      {error && <p className="text-xs text-red-400">{error}</p>}
     </section>
   );
 }
@@ -688,7 +640,6 @@ const GATEWAY_HELP: Record<GatewayKind, { fields: [string, string][]; help: stri
 };
 
 export function GatewaysView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
-  const [items, setItems] = useState<Gateway[]>([]);
   const [kind, setKind] = useState<GatewayKind>("telegram");
   const [form, setForm] = useState({
     name: "",
@@ -696,22 +647,15 @@ export function GatewaysView({ client, agents }: { client: DaemonClient; agents:
     users: "",
     tokens: {} as Record<string, string>,
   });
+  const { data: items = [], error: loadError } = useDaemonQuery(
+    client,
+    "gateways.list",
+    {},
+    {
+      events: { "gateway.updated": true, "gateway.deleted": true },
+    },
+  );
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("gateways.list", {})
-      .then(setItems)
-      .catch((e: unknown) => logWarn("gateways.list_failed", errorFields(e)));
-  }, [client]);
-  useEffect(() => {
-    load();
-    const a = client.on("gateway.updated", load);
-    const b = client.on("gateway.deleted", load);
-    return () => {
-      a();
-      b();
-    };
-  }, [client, load]);
   const fail = (e: unknown) => setError(errorMessage(e));
   const users = (s: string) =>
     s
@@ -792,6 +736,7 @@ export function GatewaysView({ client, agents }: { client: DaemonClient; agents:
         ))}
         {items.length === 0 && <li className="text-sm text-zinc-500">No gateways yet.</li>}
       </ul>
+      {loadError && <p className="text-xs text-red-400">{loadError}</p>}
       <form
         className="space-y-2 rounded border border-zinc-800 p-3"
         onSubmit={(e) => {
@@ -873,27 +818,14 @@ export function GatewaysView({ client, agents }: { client: DaemonClient; agents:
 }
 
 export function MarketplaceView({ client }: { client: DaemonClient }) {
-  const [data, setData] = useState<{
-    sources: string[];
-    items: MarketplaceItem[];
-    errors: { source: string; error: string }[];
-  } | null>(null);
+  const { data, error: loadError, reload } = useDaemonQuery(client, "marketplace.list", {});
   const [sources, setSources] = useState("");
   const [provider, setProvider] = useState<ProviderId>("claude");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("marketplace.list", {})
-      .then((d) => {
-        setData(d);
-        setSources(d.sources.join("\n"));
-      })
-      .catch((e) => setError(errorMessage(e)));
-  }, [client]);
   useEffect(() => {
-    load();
-  }, [load]);
+    if (data) setSources(data.sources.join("\n"));
+  }, [data]);
   const install = (i: MarketplaceItem) => {
     setBusy(`${i.source}#${i.id}`);
     setError(null);
@@ -903,7 +835,7 @@ export function MarketplaceView({ client }: { client: DaemonClient }) {
         id: i.id,
         ...(i.kind === "agent" ? { provider } : {}),
       })
-      .then(load)
+      .then(reload)
       .catch((e) => setError(errorMessage(e)))
       .finally(() => setBusy(null));
   };
@@ -926,7 +858,7 @@ export function MarketplaceView({ client }: { client: DaemonClient }) {
           </select>
         </label>
       </div>
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {(error || loadError) && <p className="text-sm text-red-400">{error ?? loadError}</p>}
       {data?.errors.map((e) => (
         <p key={e.source} className="text-xs text-amber-400">
           {e.source}: {e.error}
@@ -975,7 +907,7 @@ export function MarketplaceView({ client }: { client: DaemonClient }) {
                 .map((s) => s.trim())
                 .filter(Boolean),
             })
-            .then(load)
+            .then(reload)
             .catch((err) => setError(errorMessage(err)));
         }}
       >
@@ -997,22 +929,21 @@ export function MarketplaceView({ client }: { client: DaemonClient }) {
 }
 
 export function MobileView({ client }: { client: DaemonClient }) {
-  const [st, setSt] = useState<MobileStatus | null>(null);
+  const { data: st, error: loadError, reload } = useDaemonQuery(client, "mobile.status", {});
   const [pair, setPair] = useState<{ code: string; expiresAt: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("mobile.status", {})
-      .then(setSt)
-      .catch((e: unknown) => logWarn("mobile.status_failed", errorFields(e)));
-  }, [client]);
   useEffect(() => {
-    load();
-    const t = setInterval(load, 5000);
+    const t = setInterval(reload, 5000);
     return () => clearInterval(t);
-  }, [load]);
+  }, [reload]);
   const fail = (e: unknown) => setError(errorMessage(e));
-  if (!st) return null;
+  if (!st) {
+    return loadError ? (
+      <div className="mx-auto max-w-lg p-6">
+        <p className="text-xs text-red-400">{loadError}</p>
+      </div>
+    ) : null;
+  }
   return (
     <div className="mx-auto max-w-lg space-y-4 p-6">
       <h2 className="text-lg font-semibold">Mobile</h2>
@@ -1027,7 +958,7 @@ export function MobileView({ client }: { client: DaemonClient }) {
           checked={st.enabled}
           onChange={(e) => {
             setPair(null);
-            client.request("mobile.enable", { enabled: e.target.checked }).then(setSt).catch(fail);
+            client.request("mobile.enable", { enabled: e.target.checked }).then(reload).catch(fail);
           }}
         />
         Allow mobile access on this network
@@ -1063,7 +994,7 @@ export function MobileView({ client }: { client: DaemonClient }) {
           </div>
         </>
       )}
-      {error && <p className="text-xs text-red-400">{error}</p>}
+      {(error || loadError) && <p className="text-xs text-red-400">{error ?? loadError}</p>}
       <h3 className="text-sm font-semibold text-zinc-300">Paired devices</h3>
       <ul className="space-y-1">
         {st.devices.map((d) => (
@@ -1075,7 +1006,7 @@ export function MobileView({ client }: { client: DaemonClient }) {
             <button
               type="button"
               className="ml-auto text-xs text-zinc-500 hover:text-red-400"
-              onClick={() => client.request("mobile.revoke", { id: d.id }).then(load).catch(fail)}
+              onClick={() => client.request("mobile.revoke", { id: d.id }).then(reload).catch(fail)}
             >
               Revoke
             </button>
@@ -1088,35 +1019,32 @@ export function MobileView({ client }: { client: DaemonClient }) {
 }
 
 export function TeamView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
-  const [st, setSt] = useState<TeamStatus | null>(null);
-  const [msgs, setMsgs] = useState<TeamMessage[]>([]);
+  const {
+    data: st,
+    error: statusError,
+    reload: reloadStatus,
+  } = useDaemonQuery(client, "team.status", {}, { events: { "team.updated": true } });
+  const { data: msgs = [], error: msgsError } = useDaemonQuery(
+    client,
+    "team.messages",
+    {},
+    {
+      events: { "team.message": true },
+    },
+  );
   const [join, setJoin] = useState({ url: "", token: "" });
   const [target, setTarget] = useState("");
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    client
-      .request("team.status", {})
-      .then(setSt)
-      .catch((e: unknown) => logWarn("team.status_failed", errorFields(e)));
-    client
-      .request("team.messages", {})
-      .then(setMsgs)
-      .catch((e: unknown) => logWarn("team.messages_failed", errorFields(e)));
-    const a = client.on("team.updated", setSt);
-    const b = client.on("team.message", (m) =>
-      setMsgs((prev) => {
-        const i = prev.findIndex((x) => x.id === m.id);
-        return i >= 0 ? prev.map((x, j) => (j === i ? m : x)) : [...prev, m];
-      }),
-    );
-    return () => {
-      a();
-      b();
-    };
-  }, [client]);
   const fail = (e: unknown) => setError(errorMessage(e));
-  if (!st) return null;
+  const shownError = error ?? statusError ?? msgsError;
+  if (!st) {
+    return shownError ? (
+      <div className="mx-auto max-w-lg p-6">
+        <p className="text-xs text-red-400">{shownError}</p>
+      </div>
+    ) : null;
+  }
   if (!st.configured) {
     return (
       <form
@@ -1124,7 +1052,7 @@ export function TeamView({ client, agents }: { client: DaemonClient; agents: Age
         onSubmit={(e) => {
           e.preventDefault();
           setError(null);
-          client.request("team.connect", join).then(setSt).catch(fail);
+          client.request("team.connect", join).then(reloadStatus).catch(fail);
         }}
       >
         <h2 className="text-lg font-semibold">Team</h2>
@@ -1147,7 +1075,7 @@ export function TeamView({ client, agents }: { client: DaemonClient; agents: Age
           onChange={(e) => setJoin({ ...join, token: e.target.value })}
           required
         />
-        {error && <p className="text-xs text-red-400">{error}</p>}
+        {shownError && <p className="text-xs text-red-400">{shownError}</p>}
         <button type="submit" className={`${btnCls} bg-sky-600 hover:bg-sky-500`}>
           Join team
         </button>
@@ -1167,12 +1095,7 @@ export function TeamView({ client, agents }: { client: DaemonClient; agents: Age
         <button
           type="button"
           className="ml-auto text-xs text-zinc-500 hover:text-red-400"
-          onClick={() =>
-            client
-              .request("team.disconnect", {})
-              .then(() => client.request("team.status", {}).then(setSt))
-              .catch(fail)
-          }
+          onClick={() => client.request("team.disconnect", {}).then(reloadStatus).catch(fail)}
         >
           Leave
         </button>
@@ -1192,7 +1115,7 @@ export function TeamView({ client, agents }: { client: DaemonClient; agents: Age
                         ? st.sharedAgentIds.filter((x) => x !== a.id)
                         : [...st.sharedAgentIds, a.id],
                     })
-                    .then(setSt)
+                    .then(reloadStatus)
                     .catch(fail)
                 }
               />
@@ -1272,7 +1195,7 @@ export function TeamView({ client, agents }: { client: DaemonClient; agents: Age
           Send
         </button>
       </form>
-      {error && <p className="text-xs text-red-400">{error}</p>}
+      {shownError && <p className="text-xs text-red-400">{shownError}</p>}
     </div>
   );
 }

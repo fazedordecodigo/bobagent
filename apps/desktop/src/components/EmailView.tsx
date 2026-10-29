@@ -1,8 +1,8 @@
 import type { Agent, EmailAccount, EmailDraft, EmailProvider } from "@upbot/protocol";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { DaemonClient } from "../lib/daemon";
 import { errorMessage } from "../lib/errors";
-import { errorFields, logWarn } from "../lib/log";
 import { btnCls, inputCls } from "./AgentSettings";
 
 const PROVIDER_HINTS: Record<EmailProvider, string> = {
@@ -21,27 +21,14 @@ const splitList = (s: string) =>
     .filter(Boolean);
 
 function useDrafts(client: DaemonClient, agentId?: string) {
-  const [drafts, setDrafts] = useState<EmailDraft[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("email.drafts.list", agentId ? { agentId, pendingOnly: true } : {})
-      .then((d) => {
-        setDrafts(d);
-        setError(null);
-      })
-      .catch((e: unknown) => {
-        logWarn("email.drafts.list_failed", { agentId, ...errorFields(e) });
-        setError(errorMessage(e));
-      });
-  }, [client, agentId]);
-  useEffect(() => {
-    load();
-    return client.on("email.draft.updated", (d) => {
-      if (!agentId || d.agentId === agentId) load();
-    });
-  }, [client, agentId, load]);
-  return { drafts, error };
+  return useDaemonQuery(
+    client,
+    "email.drafts.list",
+    agentId ? { agentId, pendingOnly: true } : {},
+    {
+      events: { "email.draft.updated": (d) => !agentId || d.agentId === agentId },
+    },
+  );
 }
 
 export function DraftCard({
@@ -152,37 +139,23 @@ export function DraftCard({
 }
 
 function useAccounts(client: DaemonClient) {
-  const [accounts, setAccounts] = useState<EmailAccount[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("email.accounts.list", {})
-      .then((a) => {
-        setAccounts(a);
-        setError(null);
-      })
-      .catch((e: unknown) => {
-        logWarn("email.accounts.list_failed", errorFields(e));
-        setError(errorMessage(e));
-      });
-  }, [client]);
-  useEffect(() => {
-    load();
-    return client.on("email.accounts.changed", load);
-  }, [client, load]);
-  return { accounts, error };
+  return useDaemonQuery(
+    client,
+    "email.accounts.list",
+    {},
+    {
+      events: { "email.accounts.changed": true },
+    },
+  );
 }
 
 /** Pending drafts of one bot, shown above the composer. */
 export function DraftCards({ client, agentId }: { client: DaemonClient; agentId: string }) {
-  const { drafts, error } = useDrafts(client, agentId);
-  const { accounts } = useAccounts(client);
-  if (error && !drafts.length)
-    return <div className="border-t border-zinc-800 px-4 py-2 text-xs text-red-400">{error}</div>;
+  const { data: drafts = [] } = useDrafts(client, agentId);
+  const { data: accounts = [] } = useAccounts(client);
   if (!drafts.length) return null;
   return (
     <div className="max-h-[50vh] space-y-2 overflow-y-auto border-t border-zinc-800 px-4 py-2">
-      {error && <p className="px-4 py-1 text-xs text-red-400">{error}</p>}
       {drafts.map((d) => (
         <DraftCard key={`${d.id}:${d.updatedAt}`} client={client} draft={d} accounts={accounts} />
       ))}
@@ -191,8 +164,8 @@ export function DraftCards({ client, agentId }: { client: DaemonClient; agentId:
 }
 
 export function EmailView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
-  const { accounts, error: accountsError } = useAccounts(client);
-  const { drafts, error: draftsError } = useDrafts(client);
+  const { data: accounts = [], error: accountsError } = useAccounts(client);
+  const { data: drafts = [], error: draftsError } = useDrafts(client);
   const [provider, setProvider] = useState<EmailProvider>("gmail");
   const [form, setForm] = useState({
     address: "",
@@ -381,15 +354,14 @@ export function EmailView({ client, agents }: { client: DaemonClient; agents: Ag
           </div>
         )}
         <p className="text-xs text-zinc-500">{PROVIDER_HINTS[provider]}</p>
-        {error && <div className="text-xs text-red-400">{error}</div>}
+        {(error || accountsError || draftsError) && (
+          <div className="text-xs text-red-400">{error ?? accountsError ?? draftsError}</div>
+        )}
         <button type="submit" className={`${btnCls} bg-sky-600 hover:bg-sky-500`}>
           Connect
         </button>
       </form>
       <h3 className="text-sm font-semibold text-zinc-300">Drafts</h3>
-      {(accountsError || draftsError) && (
-        <p className="text-xs text-red-400">{accountsError ?? draftsError}</p>
-      )}
       <div className="space-y-2">
         {drafts.map((d) => (
           <DraftCard

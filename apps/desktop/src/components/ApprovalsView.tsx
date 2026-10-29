@@ -5,7 +5,8 @@ import {
   type ApprovalRule,
   isSensitivePermission,
 } from "@upbot/protocol";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import { permissionActions, permissionLabels } from "../lib/app-permissions";
 import { approvalAction, decideApproval } from "../lib/approval-decisions";
 import {
@@ -13,36 +14,19 @@ import {
   fullApprovalArguments,
   requiresFullReview,
 } from "../lib/approval-description";
+import { nextApprovalRules } from "../lib/approval-rules";
 import type { DaemonClient } from "../lib/daemon";
 import { errorMessage } from "../lib/errors";
-import { errorFields, logWarn } from "../lib/log";
 import { btnCls, inputCls } from "./AgentSettings";
 import { useApprovalFeedback } from "./ApprovalFeedback";
 import s from "./Approvals.module.css";
 import { Button, Field, StatusPill } from "./ds/controls";
 
 function useApprovals(client: DaemonClient, agentId?: string) {
-  const [items, setItems] = useState<Approval[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("approvals.list", agentId ? { agentId } : {})
-      .then((list) => {
-        setItems(list);
-        setError(null);
-      })
-      .catch((e: unknown) => {
-        logWarn("approvals.list_failed", { agentId, ...errorFields(e) });
-        setError("Não foi possível carregar aprovações");
-      });
-  }, [client, agentId]);
-  useEffect(() => {
-    load();
-    return client.on("approval.updated", (a) => {
-      if (!agentId || a.agentId === agentId) load();
-    });
-  }, [client, agentId, load]);
-  return { items, error };
+  const { data } = useDaemonQuery(client, "approvals.list", agentId ? { agentId } : {}, {
+    events: { "approval.updated": (a) => !agentId || a.agentId === agentId },
+  });
+  return data ?? [];
 }
 
 function Countdown({ until }: { until: number }) {
@@ -240,18 +224,10 @@ export function ApprovalCards({
   agentId: string;
   botName: string;
 }) {
-  const { items, error } = useApprovals(client, agentId);
-  const pending = items.filter((a) => a.status === "pending");
-  if (error && !pending.length)
-    return (
-      <div className={s.cards}>
-        <p className="px-4 py-1 text-xs text-red-400">{error}</p>
-      </div>
-    );
+  const pending = useApprovals(client, agentId).filter((a) => a.status === "pending");
   if (!pending.length) return null;
   return (
     <div className={s.cards}>
-      {error && <p className="px-4 py-1 text-xs text-red-400">{error}</p>}
       {pending.map((a, index) => (
         <ApprovalCard
           key={a.id}
@@ -274,20 +250,12 @@ export function AppApprovalCards({
   agents: Agent[];
   primary?: boolean;
 }) {
-  const { items, error } = useApprovals(client);
-  const pending = items.filter(
+  const pending = useApprovals(client).filter(
     (a) => a.status === "pending" && a.kind === "tool" && Boolean(a.appId),
   );
-  if (error && !pending.length)
-    return (
-      <section aria-label="Pedidos de apps conectados" className={s.cards}>
-        <p className="px-4 py-1 text-xs text-red-400">{error}</p>
-      </section>
-    );
   if (!pending.length) return null;
   return (
     <section aria-label="Pedidos de apps conectados" className={s.cards}>
-      {error && <p className="px-4 py-1 text-xs text-red-400">{error}</p>}
       <h3>Pedidos pendentes</h3>
       {pending.map((a, index) => (
         <ApprovalCard
@@ -303,28 +271,33 @@ export function AppApprovalCards({
 }
 
 export function ApprovalsView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
-  const { items, error: listError } = useApprovals(client);
-  const [rules, setRules] = useState<ApprovalRule[]>([]);
+  const items = useApprovals(client);
+  const {
+    data: rules = [],
+    error: rulesLoadError,
+    loaded: rulesLoaded,
+    reload: reloadRules,
+  } = useDaemonQuery(
+    client,
+    "approvals.rules",
+    {},
+    {
+      events: { "approvals.rulesChanged": true },
+    },
+  );
+  // Mutations write the whole list via approvals.setRules, so they stay closed
+  // until the current list is known — a failed or pending load must not send a
+  // partial list that would wipe unseen rules.
+  const rulesReady = rulesLoaded && !rulesLoadError;
+  const knownRules = rulesReady ? rules : null;
   const [form, setForm] = useState({ pattern: "", action: "ask" as "ask" | "allow", agentId: "" });
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("approvals.rules", {})
-      .then(setRules)
-      .catch((e: unknown) => {
-        logWarn("approvals.rules_failed", errorFields(e));
-        setError(errorMessage(e));
-      });
-  }, [client]);
-  useEffect(() => {
-    load();
-    return client.on("approvals.rulesChanged", load);
-  }, [client, load]);
-  const save = (next: ApprovalRule[]) =>
-    client
+  const save = (next: ApprovalRule[] | null) => {
+    if (next === null) return Promise.resolve();
+    return client
       .request("approvals.setRules", { rules: next })
-      .then(setRules)
       .catch((e) => setError(errorMessage(e)));
+  };
   const nameOf = (id: string | null) =>
     id ? (agents.find((a) => a.id === id)?.name ?? "Bot removido") : "Todos os bots";
   return (
@@ -348,29 +321,39 @@ export function ApprovalsView({ client, agents }: { client: DaemonClient; agents
             <span className="text-xs text-zinc-500">{nameOf(r.agentId)}</span>
             <button
               type="button"
-              className="ml-auto text-xs text-zinc-500 hover:text-red-400"
-              onClick={() => save(rules.filter((x) => x.id !== r.id))}
+              className="ml-auto text-xs text-zinc-500 hover:text-red-400 disabled:opacity-40"
+              disabled={!rulesReady}
+              onClick={() =>
+                save(nextApprovalRules(knownRules, (all) => all.filter((x) => x.id !== r.id)))
+              }
             >
               Remover
             </button>
           </li>
         ))}
-        {rules.length === 0 && <li className="text-sm text-zinc-500">Nenhuma regra ainda.</li>}
+        {rulesReady && rules.length === 0 && (
+          <li className="text-sm text-zinc-500">Nenhuma regra ainda.</li>
+        )}
+        {!rulesLoaded && !rulesLoadError && (
+          <li className="text-sm text-zinc-500">Carregando regras…</li>
+        )}
       </ul>
       <form
         className="flex flex-wrap gap-2"
         onSubmit={(e) => {
           e.preventDefault();
           setError(null);
-          void save([
-            ...rules,
-            {
-              id: crypto.randomUUID(),
-              pattern: form.pattern.trim(),
-              action: form.action,
-              agentId: form.agentId || null,
-            },
-          ]).then(() => setForm({ ...form, pattern: "" }));
+          void save(
+            nextApprovalRules(knownRules, (all) => [
+              ...all,
+              {
+                id: crypto.randomUUID(),
+                pattern: form.pattern.trim(),
+                action: form.action,
+                agentId: form.agentId || null,
+              },
+            ]),
+          ).then(() => setForm({ ...form, pattern: "" }));
         }}
       >
         <select
@@ -403,13 +386,24 @@ export function ApprovalsView({ client, agents }: { client: DaemonClient; agents
             </option>
           ))}
         </select>
-        <button type="submit" className={`${btnCls} bg-zinc-700 hover:bg-zinc-600`}>
+        <button
+          type="submit"
+          className={`${btnCls} bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40`}
+          disabled={!rulesReady}
+        >
           Adicionar
         </button>
       </form>
+      {rulesLoadError && (
+        <div className="text-xs text-red-400">
+          Não foi possível carregar as regras.{" "}
+          <button type="button" className="underline" onClick={reloadRules}>
+            Tentar novamente
+          </button>
+        </div>
+      )}
       {error && <div className="text-xs text-red-400">{error}</div>}
       <h3 className="text-sm font-semibold text-zinc-300">Pedidos</h3>
-      {listError && <p className="text-xs text-red-400">{listError}</p>}
       <div className="space-y-2">
         {items.map((a) => (
           <ApprovalCard
