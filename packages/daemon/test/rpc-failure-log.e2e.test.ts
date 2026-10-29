@@ -86,7 +86,11 @@ describe("RPC failure logs", () => {
       method: string;
       code: string;
       durationMs: number;
-      error: { type: string; code?: string; cause?: { type: string } };
+      error: {
+        type: string;
+        code?: string;
+        cause?: { type: string; code?: string; status?: number };
+      };
     };
 
     expect(log.method).toBe("marketplace.install");
@@ -96,7 +100,11 @@ describe("RPC failure logs", () => {
     expect(log.error).toMatchObject({
       type: "RpcError",
       code: "bad_request",
-      cause: { type: "Error" },
+    });
+    expect(log.error.cause).toEqual({
+      type: "MarketplaceFetchError",
+      code: "http_status",
+      status: 500,
     });
     expect(log).not.toHaveProperty("message");
     expect(log).not.toHaveProperty("stack");
