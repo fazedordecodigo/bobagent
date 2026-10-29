@@ -2,7 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import type { ProviderId } from "@upbot/protocol";
 import { resolveCommand, spawnEnv } from "../env/login-path";
 import { spawnChild, waitForChildSpawn } from "../env/spawn";
-import { ProviderError, type RemoteLaunch } from "./types";
+import { ProviderError, type ProviderHooks, type RemoteLaunch } from "./types";
 
 export const STDERR_TAIL_LINES = 50;
 
@@ -51,6 +51,24 @@ export function redactSecrets(s: string): string {
 
 export function redactCredential(detail: string, credential: string | null): string {
   return redactSecrets(credential ? detail.replaceAll(credential, "<redacted>") : detail);
+}
+
+/** A resume fell back to a fresh session: clear the saved session via the hook
+ * and leave a redacted trace (the reason is otherwise invisible). */
+export function reportResumeFailed(
+  hooks: ProviderHooks,
+  provider: ProviderId,
+  resumeSessionId: string,
+  error: unknown,
+  credential: string | null,
+): void {
+  hooks.onResumeFailed?.();
+  const detail = error instanceof Error ? error.message : String(error);
+  console.error("[upbotd] provider.resume_failed", {
+    provider,
+    resumeSessionId,
+    error: redactCredential(detail, credential),
+  });
 }
 
 export function isVmCredentialRejection(detail: string): boolean {

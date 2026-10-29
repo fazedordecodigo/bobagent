@@ -7,6 +7,7 @@ import {
   providerCommand,
   readJsonLines,
   redactCredential,
+  reportResumeFailed,
   spawnProvider,
   truncate,
   vmCredentialRejectedMessage,
@@ -564,8 +565,9 @@ export class CodexDriver implements ProviderDriver {
             excludeTurns: true,
           });
           session.resumed = true;
-        } catch {
+        } catch (e) {
           res = null;
+          reportResumeFailed(hooks, "codex", resumeSessionId, e, vmKey);
         }
       }
       res ??= await session.request("thread/start", threadParams);
@@ -576,7 +578,12 @@ export class CodexDriver implements ProviderDriver {
       try {
         const list = await session.request("model/list", {});
         models = Array.isArray(list.data) ? (list.data as Json[]) : [];
-      } catch {}
+      } catch (e) {
+        console.error(
+          "[upbotd] codex model/list failed:",
+          redactCredential((e as Error).message, vmKey),
+        );
+      }
       session.configOptions = buildConfigOptions(models, str(res.model), str(res.reasoningEffort));
       return session;
     } catch (e) {

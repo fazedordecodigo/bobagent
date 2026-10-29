@@ -7,6 +7,7 @@ import {
   providerCommand,
   readJsonLines,
   redactCredential,
+  reportResumeFailed,
   spawnProvider,
   truncate,
   vmCredentialRejectedMessage,
@@ -420,14 +421,21 @@ function modelOptions(models: unknown): ConfigOption | null {
   };
 }
 
+function claudeCredential(remote?: RemoteLaunch): string | null {
+  return (
+    remote?.credentials.ANTHROPIC_API_KEY ?? remote?.credentials.CLAUDE_CODE_OAUTH_TOKEN ?? null
+  );
+}
+
 export class ClaudeDriver implements ProviderDriver {
   async start(opts: StartOpts): Promise<ProviderSession> {
     const mcp = opts.mcpServers ?? [];
-    if (opts.resumeSessionId) {
+    const resumeSessionId = opts.resumeSessionId;
+    if (resumeSessionId) {
       try {
         return await this.launch(
           opts.cwd,
-          opts.resumeSessionId,
+          resumeSessionId,
           opts.hooks,
           mcp,
           opts.remote,
@@ -436,6 +444,7 @@ export class ClaudeDriver implements ProviderDriver {
       } catch (e) {
         if (e instanceof ProviderError && e.code !== "internal") throw e;
         // stale/unknown session: fall back to a fresh one
+        reportResumeFailed(opts.hooks, "claude", resumeSessionId, e, claudeCredential(opts.remote));
       }
     }
     return this.launch(opts.cwd, null, opts.hooks, mcp, opts.remote, opts.extraDirs);
@@ -465,8 +474,7 @@ export class ClaudeDriver implements ProviderDriver {
         : [];
     const { bin, args } = providerCommand("claude", remote);
     const sessionId = resumeSessionId ?? crypto.randomUUID();
-    const vmCredential =
-      remote?.credentials.ANTHROPIC_API_KEY ?? remote?.credentials.CLAUDE_CODE_OAUTH_TOKEN ?? null;
+    const vmCredential = claudeCredential(remote);
     const proc = spawnProvider(
       bin,
       [

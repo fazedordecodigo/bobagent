@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
@@ -232,6 +233,67 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
         .threadId;
       expect(who).toContain(`thread=${tid}`);
     }
+  });
+
+  test("unknown saved session falls back to a fresh one and logs provider.resume_failed", async () => {
+    const a = await newAgent("ResumeFail");
+    await turn(a.id, "echo:first");
+    const db = new Database(join(dataDir, "upbot.db"), { readonly: true });
+    const oldSessionId = (
+      db.query("SELECT session_id FROM agent_sessions WHERE agent_id = ?").get(a.id) as {
+        session_id: string;
+      }
+    ).session_id;
+    db.close();
+    const before = readPids(stateDir);
+    daemon.proc.kill("SIGKILL");
+    await daemon.proc.exited;
+    for (const pid of before) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {}
+      await waitForPidDead(pid).catch(() => {});
+    }
+    c.close();
+    // the fake CLI no longer knows the saved session/thread
+    rmSync(join(stateDir, cs.provider === "claude" ? "sessions.json" : "threads.json"));
+    daemon = await startDaemon(dataDir, agentsRoot, TOKEN, env());
+    const stderrChunks: string[] = [];
+    void (async () => {
+      const reader = (daemon.proc.stderr as ReadableStream<Uint8Array>).getReader();
+      const dec = new TextDecoder();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        stderrChunks.push(dec.decode(value));
+      }
+    })();
+    c = await DaemonClient.connect(daemon.port, TOKEN);
+    const t = await turn(a.id, "whoami");
+    expect(t.status).toBe("completed");
+    const who = await lastAgentText(a.id);
+    expect(who).not.toContain(`=${oldSessionId}`);
+    const log = readLog(stateDir);
+    if (cs.provider === "claude") {
+      const argvs = log.filter((l) => l.method === "argv").map((l) => l.params as string[]);
+      const last = argvs[argvs.length - 1]!;
+      expect(last).toContain("--session-id");
+      expect(last).not.toContain("--resume");
+    } else {
+      const resumes = log
+        .filter((l) => l.method === "thread/resume")
+        .map((l) => (l.params as { params: { threadId: string } }).params.threadId);
+      expect(resumes.filter((id) => id === oldSessionId)).toHaveLength(1);
+      expect(log.filter((l) => l.method === "thread/start").length).toBeGreaterThan(0);
+    }
+    const deadline = Date.now() + 5000;
+    let stderr = stderrChunks.join("");
+    while (!stderr.includes("provider.resume_failed") && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 50));
+      stderr = stderrChunks.join("");
+    }
+    expect(stderr).toContain("provider.resume_failed");
+    expect(stderr).toContain(oldSessionId);
   });
 
   test("provider crash fails the turn and the next turn respawns", async () => {
