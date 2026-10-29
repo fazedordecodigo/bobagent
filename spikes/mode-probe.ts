@@ -3,13 +3,12 @@
 // requests when the client always answers allow_once.
 // Usage: bun spikes/mode-probe.ts -> spikes/out/mode-probe.json
 
-import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { Readable, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import * as acp from "@agentclientprotocol/sdk";
+import { fmtErr, spawnAcp, withTimeout } from "./acp-util";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const TIMEOUT = 180_000;
@@ -25,13 +24,6 @@ const PROMPT =
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
-  return Promise.race([
-    p,
-    new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`timeout ${label}`)), ms)),
-  ]);
-}
-
 async function probe(provider: string, cmd: string[], mode: string | null) {
   const rec: Record<string, unknown> = {
     provider,
@@ -44,18 +36,7 @@ async function probe(provider: string, cmd: string[], mode: string | null) {
     errors: [] as string[],
   };
   const cwd = mkdtempSync(join(tmpdir(), `mode-probe-${provider}-${mode ?? "none"}-`));
-  const child: ChildProcess = spawn(cmd[0]!, cmd.slice(1), {
-    cwd,
-    stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, NO_COLOR: "1" },
-  });
-  const stderrLines: string[] = [];
-  child.stderr?.on("data", (d: Buffer) => stderrLines.push(...d.toString().split("\n")));
-
-  const stream = acp.ndJsonStream(
-    Writable.toWeb(child.stdin!) as WritableStream<Uint8Array>,
-    Readable.toWeb(child.stdout!) as unknown as ReadableStream<Uint8Array>,
-  );
+  const proc = spawnAcp(cmd, cwd);
   let lastPerm: { title?: string; kind?: string } | null = null;
   const app = acp
     .client({ name: "mode-probe" })
@@ -91,7 +72,7 @@ async function probe(provider: string, cmd: string[], mode: string | null) {
         if (c?.type === "text" && c.text) rec.agentText = (rec.agentText as string) + c.text;
       }
     });
-  const conn = app.connect(stream);
+  const conn = app.connect(proc.stream);
   conn.closed.catch(() => {});
   try {
     await withTimeout(
@@ -129,18 +110,16 @@ async function probe(provider: string, cmd: string[], mode: string | null) {
     )) as { stopReason?: string };
     rec.stopReason = pr.stopReason ?? null;
   } catch (e) {
-    (rec.errors as string[]).push(e instanceof Error ? e.message : String(e));
+    (rec.errors as string[]).push(fmtErr(e));
   }
   await sleep(300);
   rec.fileCreated = existsSync(join(cwd, "probe.txt"));
   rec.agentText = (rec.agentText as string).trim().slice(0, 500);
-  rec.stderrTail = stderrLines.slice(-10).join("\n").slice(0, 500);
+  rec.stderrTail = proc.stderrLines.slice(-10).join("\n").slice(0, 500);
   try {
     conn.close();
   } catch {}
-  try {
-    child.kill("SIGKILL");
-  } catch {}
+  proc.kill();
   return rec;
 }
 
@@ -149,18 +128,10 @@ async function main() {
   for (const [provider, cmd] of Object.entries(PROVIDERS)) {
     // discover mode options from a quick session/new
     const cwd = mkdtempSync(join(tmpdir(), `mode-probe-disc-${provider}-`));
-    const child = spawn(cmd[0]!, cmd.slice(1), {
-      cwd,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, NO_COLOR: "1" },
-    });
-    const stream = acp.ndJsonStream(
-      Writable.toWeb(child.stdin!) as WritableStream<Uint8Array>,
-      Readable.toWeb(child.stdout!) as unknown as ReadableStream<Uint8Array>,
-    );
-    const conn = acp.client({ name: "mode-probe-disc" }).connect(stream);
+    const proc = spawnAcp(cmd, cwd);
+    const conn = acp.client({ name: "mode-probe-disc" }).connect(proc.stream);
     conn.closed.catch(() => {});
-    let modes: string[] = [];
+    let modes: (string | null)[] = [];
     let defaultMode: string | null = null;
     try {
       await withTimeout(
@@ -199,14 +170,14 @@ async function main() {
         defaultMode = modeOpt.currentValue ?? null;
       }
     } catch (e) {
-      results.push({ provider, mode: null, errors: [`discovery: ${String(e)}`] });
+      results.push({ provider, mode: null, errors: [`discovery: ${fmtErr(e)}`] });
     }
     try {
       conn.close();
     } catch {}
-    child.kill("SIGKILL");
+    proc.kill();
 
-    if (modes.length === 0) modes = [null as unknown as string];
+    if (modes.length === 0) modes = [null];
     for (const mode of modes) {
       const r = await probe(provider, cmd, mode);
       (r as Record<string, unknown>).providerDefault = defaultMode;
