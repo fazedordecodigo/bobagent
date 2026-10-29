@@ -20,6 +20,7 @@ import type {
   ProviderSession,
   RemoteLaunch,
 } from "../providers/types";
+import { ProviderError } from "../providers/types";
 import { buildHandoff } from "./handoff";
 
 const COMPACT_PROMPT = `<compaction_request>
