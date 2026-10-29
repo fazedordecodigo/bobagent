@@ -158,20 +158,27 @@ describe("host preflight RPC validation", () => {
   test.each(["not-json", '["ssh",42]', "[]", '{"command":"ssh"}'])(
     "invalid UPBOT_SSH_COMMAND %s falls back to ssh on PATH through RPC",
     async (override) => {
-      const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
-      writeFileSync(
-        join(root, process.platform === "win32" ? "ssh.cmd" : "ssh"),
-        process.platform === "win32"
-          ? `@"${process.execPath}" "${FAKE_SSH}" %*\r\n`
-          : `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(FAKE_SSH)} "$@"\n`,
-        { mode: 0o700 },
-      );
+      const compiled = Bun.spawnSync([
+        process.execPath,
+        "build",
+        FAKE_SSH,
+        "--compile",
+        "--outfile",
+        join(root, process.platform === "win32" ? "ssh.exe" : "ssh"),
+      ]);
+      expect(compiled.exitCode).toBe(0);
+      const shell = join(root, "login-shell");
+      if (process.platform !== "win32") {
+        writeFileSync(shell, '#!/bin/sh\nprintf "__OA_PATH__%s__OA_PATH__" "$PATH"\n', {
+          mode: 0o700,
+        });
+      }
       const pathKey =
         Object.keys(process.env).find((key) => key.toLowerCase() === "path") ?? "PATH";
       const client = await connect({
         UPBOT_SSH_COMMAND: override,
         [pathKey]: `${root}${delimiter}${process.env[pathKey] ?? ""}`,
-        ...(process.platform === "win32" ? {} : { SHELL: "/bin/false" }),
+        ...(process.platform === "win32" ? {} : { SHELL: shell }),
       });
       const host = RemoteHost.parse(
         await client.request("hosts.create", { name: "fallback", target: "fixture.invalid" }),
