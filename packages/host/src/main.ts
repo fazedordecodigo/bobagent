@@ -330,7 +330,7 @@ export function appendProxyLog(path: string, destination: string, decision: stri
 }
 
 /** Minimal HTTP CONNECT proxy for the guest (public destinations only). */
-export function proxyServer(logPath?: string): Server {
+export function proxyServer(logPath?: string, resolveTarget = proxyTarget): Server {
   const log = (destination: string, decision: string) => {
     if (logPath) appendProxyLog(logPath, destination, decision);
   };
@@ -353,7 +353,7 @@ export function proxyServer(logPath?: string): Server {
         return;
       }
       const destination = `${m[1]}:${m[2]}`;
-      const target = await proxyTarget(m[1]!);
+      const target = await resolveTarget(m[1]!);
       if (!target) {
         log(destination, "denied blocked or unresolved destination");
         conn.end("HTTP/1.1 403 Forbidden\r\n\r\n");
@@ -365,12 +365,16 @@ export function proxyServer(logPath?: string): Server {
         port: Number(m[2]),
       });
       upstream.once("connect", () => {
+        log(destination, `connected ${target}`);
         conn.write("HTTP/1.1 200 Connection Established\r\n\r\n");
         const extra = head.subarray(end + 4);
         if (extra.length) upstream.write(extra);
         conn.pipe(upstream).pipe(conn);
       });
-      upstream.on("error", () => conn.end("HTTP/1.1 502 Bad Gateway\r\n\r\n"));
+      upstream.on("error", (e) => {
+        log(destination, `upstream error ${(e as NodeJS.ErrnoException).code ?? e.message}`);
+        conn.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+      });
       conn.on("error", () => upstream.destroy());
     };
     conn.on("data", onData);
@@ -379,10 +383,28 @@ export function proxyServer(logPath?: string): Server {
 }
 
 function relayServer(targetPath: string): Server {
+  let lastErrorLog = 0;
+  let suppressedErrors = 0;
+  const logRelayError = (error: NodeJS.ErrnoException) => {
+    const now = Date.now();
+    if (now - lastErrorLog < 10_000) {
+      suppressedErrors++;
+      return;
+    }
+    lastErrorLog = now;
+    const extra = suppressedErrors ? ` (+${suppressedErrors} more)` : "";
+    suppressedErrors = 0;
+    process.stderr.write(
+      `upbot-host bridge relay: cannot reach ${targetPath}: ${error.code ?? error.message}${extra}\n`,
+    );
+  };
   return createServer((conn) => {
     const up = createConnection({ path: targetPath });
     conn.pipe(up).pipe(conn);
-    up.on("error", () => conn.destroy());
+    up.on("error", (e) => {
+      logRelayError(e);
+      conn.destroy();
+    });
     conn.on("error", () => up.destroy());
   });
 }
@@ -560,6 +582,7 @@ async function runFirecracker(spec: RunSpec, rest: Buffer) {
   const configPath = join(vmDir, "vm.json");
   writeFileSync(configPath, JSON.stringify(vmConfig(spec, disk, uds, workspaceDisk), null, 2));
   const logPath = join(vmDir, "console.log");
+  const consoleTail = () => (existsSync(logPath) ? readFileSync(logPath, "utf8").slice(-1500) : "");
   const log = openSync(logPath, "w");
   const vmArgs = ["--no-api", "--config-file", configPath, "--id", id];
   const setpriv = which("setpriv");
@@ -587,7 +610,7 @@ async function runFirecracker(spec: RunSpec, rest: Buffer) {
   };
   const onVmExit = (code: number | null, signal: NodeJS.Signals | null) => {
     vmAlive = false;
-    const tail = existsSync(logPath) ? readFileSync(logPath, "utf8").slice(-1500) : "";
+    const tail = consoleTail();
     cleanup();
     die(
       `microVM exited (code ${code}${signal ? `, signal ${signal}` : ""})${tail ? `\n${tail}` : ""}`,
@@ -625,6 +648,7 @@ async function runFirecracker(spec: RunSpec, rest: Buffer) {
   process.stdout.once("close", onHostDisconnect);
   process.stdout.once("error", onHostDisconnect);
   let guest: Socket;
+  const bootStart = Date.now();
   try {
     guest = await connectGuest(
       uds,
@@ -632,8 +656,11 @@ async function runFirecracker(spec: RunSpec, rest: Buffer) {
       () => vmAlive,
     );
   } catch (e) {
+    const tail = consoleTail();
     cleanup();
-    return die(`cannot reach the guest: ${(e as Error).message}`);
+    return die(
+      `cannot reach the guest: ${(e as Error).message} (agent ${id}, after ${Date.now() - bootStart}ms)${tail ? `\n${tail}` : ""}`,
+    );
   }
   guest.write(`${JSON.stringify({ cmd: spec.cmd, env: spec.env ?? {}, cwd: "/workspace" })}\n`);
   guest.pipe(process.stdout);
@@ -746,14 +773,25 @@ async function bridge() {
           error: { code: -32601, message: `method not found: ${m.method}` },
         });
     } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      const status =
+        /daemon returned (\d+)/.exec(err.message)?.[1] ??
+        (err as NodeJS.ErrnoException).code ??
+        "-";
+      const tool =
+        m.method === "tools/call"
+          ? String((m.params as { name?: unknown } | undefined)?.name ?? "-")
+          : "-";
+      process.stderr.write(
+        `upbot-host bridge: method=${m.method ?? "-"} tool=${tool} status=${status} error=${err.message.replace(/\s+/g, " ")}\n`,
+      );
       if (m.method === "tools/call")
         send({
           jsonrpc: "2.0",
           id: m.id,
-          result: { content: [{ type: "text", text: (e as Error).message }], isError: true },
+          result: { content: [{ type: "text", text: err.message }], isError: true },
         });
-      else
-        send({ jsonrpc: "2.0", id: m.id, error: { code: -32603, message: (e as Error).message } });
+      else send({ jsonrpc: "2.0", id: m.id, error: { code: -32603, message: err.message } });
     }
   });
   await new Promise<void>((r) => rl.on("close", () => r()));

@@ -248,6 +248,7 @@ async function main() {
     return null;
   }
 
+  let lastBridgeAuthLog = 0;
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -269,8 +270,18 @@ async function main() {
           return new Response("forbidden", { status: 403 });
         }
         const auth = req.headers.get("authorization") ?? "";
-        const agentId = bridge.agentForToken(auth.startsWith("Bearer ") ? auth.slice(7) : "");
-        if (!agentId) return new Response("unauthorized", { status: 401 });
+        const presented = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+        const agentId = bridge.agentForToken(presented);
+        if (!agentId) {
+          if (Date.now() - lastBridgeAuthLog > 10_000) {
+            lastBridgeAuthLog = Date.now();
+            const fp = presented
+              ? createHash("sha256").update(presented).digest("hex").slice(0, 8)
+              : "none";
+            log(`bridge: rejected /bridge request (unauthorized; token fp ${fp})`);
+          }
+          return new Response("unauthorized", { status: 401 });
+        }
         return req
           .json()
           .then((body) => bridge.handle(agentId, body as Record<string, unknown>))

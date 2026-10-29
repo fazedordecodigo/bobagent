@@ -133,6 +133,74 @@ describe("upbot-host", () => {
     }
   });
 
+  test("proxy logs upstream connection failures and successes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "proxy-test-"));
+    const socketPath = join(dir, "proxy.sock");
+    const logPath = join(dir, "proxy.log");
+    const dead = createServer();
+    await new Promise<void>((resolve) => dead.listen(0, "127.0.0.1", resolve));
+    const deadPort = (dead.address() as { port: number }).port;
+    await new Promise<void>((resolve) => dead.close(() => resolve()));
+    const alive = createServer((conn) => conn.resume());
+    await new Promise<void>((resolve) => alive.listen(0, "127.0.0.1", resolve));
+    const alivePort = (alive.address() as { port: number }).port;
+    const proxy = proxyServer(logPath, async () => "127.0.0.1");
+    await new Promise<void>((resolve) => proxy.listen(socketPath, resolve));
+    const connect = (port: number) =>
+      new Promise<string>((resolve, reject) => {
+        const client = createConnection({ path: socketPath });
+        let text = "";
+        client.setTimeout(3000, () => client.destroy(new Error("proxy response timeout")));
+        client.on("data", (data) => {
+          text += data.toString();
+          if (text.includes("\r\n\r\n")) {
+            client.destroy();
+            resolve(text);
+          }
+        });
+        client.on("end", () => resolve(text));
+        client.on("error", reject);
+        client.on("connect", () =>
+          client.write(`CONNECT example.com:${port} HTTP/1.1\r\nHost: proxy\r\n\r\n`),
+        );
+      });
+    try {
+      const failed = await connect(deadPort);
+      expect(failed).toStartWith("HTTP/1.1 502 Bad Gateway");
+      const ok = await connect(alivePort);
+      expect(ok).toStartWith("HTTP/1.1 200 Connection Established");
+      const text = readFileSync(logPath, "utf8");
+      expect(text).toContain(`example.com:${deadPort} upstream error ECONNREFUSED`);
+      expect(text).toContain(`example.com:${alivePort} connected 127.0.0.1`);
+    } finally {
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+      await new Promise<void>((resolve) => alive.close(() => resolve()));
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+
+  test("bridge reports daemon failures on stderr without the token", () => {
+    const dir = mkdtempSync(join(tmpdir(), "bridge-test-"));
+    try {
+      const r = spawnSync("bun", [MAIN, "bridge"], {
+        input:
+          '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_agents","arguments":{}}}\n',
+        env: {
+          ...process.env,
+          UPBOT_BRIDGE_SOCKET: join(dir, "missing.sock"),
+          UPBOT_BRIDGE_TOKEN: "sentinel-token",
+        },
+        encoding: "utf8",
+        timeout: 15000,
+      });
+      expect(r.stdout).toContain('"isError":true');
+      expect(r.stderr).toContain("upbot-host bridge: method=tools/call tool=list_agents");
+      expect(r.stderr).not.toContain("sentinel-token");
+    } finally {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+
   test("vm config clamps resources and wires vsock", () => {
     const spec: RunSpec = {
       agentId: "a",

@@ -61,10 +61,22 @@ export async function runMcpBridge(): Promise<void> {
           fail(m.id, -32601, `method not found: ${m.method}`);
       }
     } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      const status =
+        /daemon returned (\d+)/.exec(err.message)?.[1] ??
+        (err as NodeJS.ErrnoException).code ??
+        "-";
+      const tool =
+        m.method === "tools/call"
+          ? String((m.params as { name?: unknown } | undefined)?.name ?? "-")
+          : "-";
+      console.error(
+        `upbotd mcp-bridge: method=${m.method ?? "-"} tool=${tool} status=${status} error=${err.message.replace(/\s+/g, " ")}`,
+      );
       if (m.method === "tools/call") {
-        reply(m.id, { content: [{ type: "text", text: (e as Error).message }], isError: true });
+        reply(m.id, { content: [{ type: "text", text: err.message }], isError: true });
       } else {
-        fail(m.id, -32603, (e as Error).message);
+        fail(m.id, -32603, err.message);
       }
     }
   });
