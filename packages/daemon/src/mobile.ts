@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { networkInterfaces } from "node:os";
-import type { MobileDevice, MobileStatus } from "@upbot/protocol";
+import { type MobileDevice, type MobileStatus, methodMap } from "@upbot/protocol";
 import { getSetting, setSetting } from "./db";
 import { MOBILE_HTML } from "./mobile-app";
 import { RpcError } from "./runtime/agent-runtime";
@@ -39,6 +39,18 @@ const FORWARDED_EVENTS = new Set([
 ]);
 const PAIR_TTL = 5 * 60_000;
 const PAIR_ATTEMPTS = 5;
+const AUDIT_PATHS = new Set(["/", "/manifest.webmanifest", "/api/pair", "/api/rpc", "/api/events"]);
+const AUDIT_HTTP_METHODS = new Set([
+  "GET",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "HEAD",
+  "OPTIONS",
+  "CONNECT",
+  "TRACE",
+]);
 
 type DeviceRow = {
   id: string;
@@ -50,6 +62,10 @@ type DeviceRow = {
 type Stream = { deviceId: string; ctrl: ReadableStreamDefaultController<string> };
 
 const hash = (t: string) => createHash("sha256").update(t).digest("hex");
+
+// Audit trail for the LAN-exposed surface: event name + JSON metadata, never tokens/codes.
+const emit = (event: string, data: Record<string, unknown>) =>
+  console.error(`[upbotd] ${event}`, JSON.stringify(data));
 
 export class MobileServer {
   rpc: ((raw: string) => Promise<string>) | null = null;
@@ -158,11 +174,13 @@ export class MobileServer {
     this.usedFallbackPort = false;
   }
 
-  private device(req: Request, url: URL): DeviceRow | null {
+  private requestToken(req: Request, url: URL): string {
     const auth = req.headers.get("authorization") ?? "";
-    const token = auth.startsWith("Bearer ")
-      ? auth.slice(7)
-      : (url.searchParams.get("token") ?? "");
+    return auth.startsWith("Bearer ") ? auth.slice(7) : (url.searchParams.get("token") ?? "");
+  }
+
+  private device(req: Request, url: URL): DeviceRow | null {
+    const token = this.requestToken(req, url);
     if (!token) return null;
     const h = Buffer.from(hash(token));
     const d = this.devices().find((x) => {
@@ -182,25 +200,31 @@ export class MobileServer {
     const opts = {
       hostname: process.env.UPBOT_MOBILE_HOST ?? "0.0.0.0",
       idleTimeout: 0,
-      fetch: (req: Request) => this.handle(req),
+      fetch: (req: Request, server: ReturnType<typeof Bun.serve>) => this.handle(req, server),
     };
     try {
       this.server = Bun.serve({ ...opts, port });
     } catch (e) {
-      console.error(
-        `[upbotd] mobile port ${port} unavailable, falling back:`,
-        (e as Error).message,
-      );
+      const code = (e as { code?: unknown } | null)?.code;
+      emit("mobile.port_fallback", {
+        port,
+        error: code === "EADDRINUSE" ? "EADDRINUSE" : "listen_failed",
+      });
       this.usedFallbackPort = true;
       this.server = Bun.serve({ ...opts, port: 0 });
     }
   }
 
-  private async handle(req: Request): Promise<Response> {
+  private async handle(req: Request, server: ReturnType<typeof Bun.serve>): Promise<Response> {
+    const ip = server.requestIP(req)?.address ?? null;
     const url = new URL(req.url);
+    const path = AUDIT_PATHS.has(url.pathname) ? url.pathname : "unknown";
+    const httpMethod = AUDIT_HTTP_METHODS.has(req.method) ? req.method : "unknown";
     const origin = req.headers.get("origin");
-    if (origin !== null && origin !== url.origin)
+    if (origin !== null && origin !== url.origin) {
+      emit("mobile.origin_denied", { path, method: httpMethod, ip });
       return new Response("forbidden origin", { status: 403 });
+    }
     const headers = { "cache-control": "no-store", "x-content-type-options": "nosniff" };
     if (req.method === "GET" && url.pathname === "/") {
       return new Response(MOBILE_HTML, {
@@ -229,14 +253,21 @@ export class MobileServer {
       const body = (await req.json().catch(() => ({}))) as { code?: unknown; name?: unknown };
       const p = this.pairing;
       if (!p || Date.now() > p.expiresAt || p.attempts >= PAIR_ATTEMPTS) {
+        emit("mobile.pair_failed", {
+          reason: !p ? "inactive" : p.attempts >= PAIR_ATTEMPTS ? "exhausted" : "expired",
+          attempts: p?.attempts ?? 0,
+          ip,
+        });
         return Response.json(
           { error: "no active pairing code; create one on the desktop" },
           { status: 401, headers },
         );
       }
       p.attempts++;
-      if (String(body.code ?? "") !== p.code)
+      if (String(body.code ?? "") !== p.code) {
+        emit("mobile.pair_failed", { reason: "wrong_code", attempts: p.attempts, ip });
         return Response.json({ error: "wrong code" }, { status: 401, headers });
+      }
       this.pairing = null;
       const token = randomBytes(32).toString("hex");
       const id = crypto.randomUUID().slice(0, 8);
@@ -244,11 +275,19 @@ export class MobileServer {
       this.db
         .query("INSERT INTO mobile_devices (id, name, token_hash, created_at) VALUES (?, ?, ?, ?)")
         .run(id, name, hash(token), Date.now());
+      emit("mobile.paired", { deviceId: id, ip });
       return Response.json({ token, deviceId: id }, { headers });
     }
     const device = this.device(req, url);
-    if (url.pathname.startsWith("/api/") && !device)
+    if (url.pathname.startsWith("/api/") && !device) {
+      emit("mobile.unauthorized", {
+        path,
+        method: httpMethod,
+        reason: this.requestToken(req, url) ? "bad_token" : "missing_token",
+        ip,
+      });
       return Response.json({ error: "unauthorized" }, { status: 401, headers });
+    }
     if (req.method === "GET" && url.pathname === "/api/events" && device) {
       let stream: Stream;
       const body = new ReadableStream<string>({
@@ -266,8 +305,14 @@ export class MobileServer {
     if (req.method === "POST" && url.pathname === "/api/rpc" && device) {
       const body = (await req.json().catch(() => ({}))) as { method?: unknown; params?: unknown };
       const method = String(body.method ?? "");
-      if (!ALLOWED_METHODS.has(method))
+      if (!ALLOWED_METHODS.has(method)) {
+        emit("mobile.method_denied", {
+          deviceId: device.id,
+          method: Object.hasOwn(methodMap, method) ? method : "unknown",
+          ip,
+        });
         return Response.json({ error: "method not allowed" }, { status: 403, headers });
+      }
       const params = (body.params ?? {}) as Record<string, unknown>;
       if (method === "chat.send" && "attachments" in params) {
         return Response.json(
