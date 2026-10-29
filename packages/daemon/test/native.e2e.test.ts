@@ -286,18 +286,23 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
     const who = await lastAgentText(a.id);
     expect(who).not.toContain(`=${oldSessionId}`);
     const log = readLog(stateDir);
+    let freshSessionId: string;
     if (cs.provider === "claude") {
       const argvs = log.filter((l) => l.method === "argv").map((l) => l.params as string[]);
       const last = argvs[argvs.length - 1]!;
       expect(last).toContain("--session-id");
       expect(last).not.toContain("--resume");
+      freshSessionId = last[last.indexOf("--session-id") + 1]!;
     } else {
       const resumes = log
         .filter((l) => l.method === "thread/resume")
         .map((l) => (l.params as { params: { threadId: string } }).params.threadId);
       expect(resumes.filter((id) => id === oldSessionId)).toHaveLength(1);
       expect(log.filter((l) => l.method === "thread/start").length).toBeGreaterThan(0);
+      freshSessionId = who.match(/thread=([^\s]+)/)?.[1]!;
     }
+    expect(persistedSessionId(a.id)).not.toBe(oldSessionId);
+    expect(persistedSessionId(a.id)).toBe(freshSessionId);
     const deadline = Date.now() + 5000;
     let stderr = stderrChunks.join("");
     while (!stderr.includes("provider.resume_failed") && Date.now() < deadline) {
