@@ -66,7 +66,7 @@ export function vmCredentialRejectedMessage(
   return `${provider}: the saved microVM credential was rejected${safeDetail ? ` (${safeDetail})` : ""}. Update it in Settings → Hosts.`;
 }
 
-function envOverride(name: string): string[] | null {
+export function envOverride(name: string): string[] | null {
   const raw = process.env[name];
   if (!raw) return null;
   try {

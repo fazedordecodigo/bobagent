@@ -6,11 +6,17 @@ import type { Database } from "bun:sqlite";
 import type { ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
-import type { AgentPlacement, HostPreflight, Isolation, RemoteHost } from "@upbot/protocol";
+import {
+  type AgentPlacement,
+  HostPreflight,
+  type Isolation,
+  type RemoteHost,
+} from "@upbot/protocol";
 // @ts-expect-error -- Bun text import of the helper source (uploaded verbatim to hosts)
 import helperSource from "../../../host/src/main.ts" with { type: "text" };
 import { spawnEnv } from "../env/login-path";
 import { spawnChild } from "../env/spawn";
+import { envOverride } from "../providers/process";
 import type { McpServerSpec, RemoteLaunch } from "../providers/types";
 import { ProviderError } from "../providers/types";
 
@@ -34,12 +40,7 @@ export const shq = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
 const expandHome = (p: string) => (p.startsWith("~/") ? `${homedir()}${p.slice(1)}` : p);
 
 export function sshArgs(host: RemoteHost, extra: string[], remoteCmd: string): [string, string[]] {
-  let base = ["ssh"];
-  const override = process.env.UPBOT_SSH_COMMAND;
-  if (override) {
-    const parsed = JSON.parse(override);
-    if (Array.isArray(parsed) && parsed.length) base = parsed.map(String);
-  }
+  const base = envOverride("UPBOT_SSH_COMMAND") ?? ["ssh"];
   const [bin, ...pre] = base as [string, ...string[]];
   return [
     bin,
@@ -122,7 +123,7 @@ export class HostStore {
       port: r.port,
       identityFile: r.identity_file,
       root: r.root,
-      preflight: r.preflight_json ? (JSON.parse(r.preflight_json) as HostPreflight) : null,
+      preflight: r.preflight_json ? parsePreflight(r.preflight_json) : null,
       createdAt: r.created_at,
     };
   }
@@ -204,7 +205,7 @@ export class HostStore {
     const line = r.stdout.trim().split("\n").pop() ?? "";
     let pre: HostPreflight;
     try {
-      pre = JSON.parse(line);
+      pre = HostPreflight.parse(JSON.parse(line));
     } catch {
       throw new Error(`unexpected preflight output: ${line.slice(0, 200)}`);
     }
@@ -303,6 +304,16 @@ export class HostStore {
     const credentials =
       p.isolation === "firecracker" && agent ? this.credentialEnv(agent.provider) : {};
     return remoteLaunch(h, p, bridgePort, credentials);
+  }
+}
+
+/** Stored preflight JSON, or null when it no longer matches the current schema. */
+function parsePreflight(json: string): HostPreflight | null {
+  try {
+    const parsed = HostPreflight.safeParse(JSON.parse(json));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
   }
 }
 
