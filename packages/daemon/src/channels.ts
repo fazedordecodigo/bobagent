@@ -425,17 +425,6 @@ ${text}`;
     return out;
   }
 
-  setMembers(channelId: string, memberIds: string[]): Channel {
-    const ch = this.get(channelId);
-    const ids = [...new Set(memberIds)];
-    const ownerId = ch.ownerId && ids.includes(ch.ownerId) ? ch.ownerId : (ids[0] ?? null);
-    this.checkMembers(ids, ownerId);
-    this.db.query("DELETE FROM channel_members WHERE channel_id = ?").run(channelId);
-    const ins = this.db.query("INSERT INTO channel_members (channel_id, agent_id) VALUES (?, ?)");
-    for (const m of ids) ins.run(channelId, m);
-    return this.update(channelId, { ownerId });
-  }
-
   archive(channelId: string): Channel {
     const ch = this.get(channelId);
     this.halt(ch);

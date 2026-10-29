@@ -230,6 +230,7 @@ export class RoutineService {
   run(id: string, trigger: RoutineTrigger, payload?: string): RoutineRun {
     const r = this.row(id);
     if (!r) throw new RpcError("not_found", "routine not found");
+    if (!this.agents.get(r.agent_id)) throw new RpcError("not_found", "agent not found");
     const body = payload
       ? `\n<webhook_payload>\n${payload.slice(0, PAYLOAD_LIMIT)}${payload.length > PAYLOAD_LIMIT ? "\n[truncated]" : ""}\n</webhook_payload>`
       : "";
@@ -259,18 +260,19 @@ export class RoutineService {
   }
 
   /** Routine id for a webhook call, or null when the token does not match. */
-  webhookRoutine(id: string, token: string): string | null {
+  webhookRoutine(id: string, token: string): string | { notFound: true } | null {
     const r = this.row(id);
     if (!r?.webhook_token || !r.enabled) return null;
     const a = Buffer.from(r.webhook_token);
     const b = Buffer.from(token);
-    return a.length === b.length && timingSafeEqual(a, b) ? r.id : null;
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+    return this.agents.get(r.agent_id) ? r.id : { notFound: true };
   }
 
   tick(now = Date.now()): void {
     const due = this.db
       .query(
-        "SELECT * FROM routines WHERE deleted_at IS NULL AND enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?",
+        "SELECT routines.* FROM routines JOIN agents ON agents.id = routines.agent_id WHERE routines.deleted_at IS NULL AND agents.deleted_at IS NULL AND routines.enabled = 1 AND routines.next_run_at IS NOT NULL AND routines.next_run_at <= ?",
       )
       .all(now) as Row[];
     for (const r of due) {

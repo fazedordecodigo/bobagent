@@ -43,13 +43,6 @@ export class MemoryStore {
     return this.get(id)!;
   }
 
-  update(id: string, text: string): Memory | null {
-    this.db
-      .query("UPDATE memories SET text = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL")
-      .run(text.trim(), Date.now(), id);
-    return this.get(id);
-  }
-
   delete(id: string): boolean {
     const r = this.db
       .query("UPDATE memories SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL")

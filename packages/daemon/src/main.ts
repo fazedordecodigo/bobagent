@@ -111,11 +111,15 @@ let shuttingDown = false;
 let dbRef: { close(): void } | null = null;
 let serverRef: { stop(): void } | null = null;
 let runtimesRef: { closeAll(): Promise<void> } | null = null;
+let gatewaysRef: { stopAll(): void } | null = null;
 
 function shutdown(code: number, reason: string) {
   if (shuttingDown) return;
   shuttingDown = true;
   log("shutting down", { reason, code });
+  try {
+    gatewaysRef?.stopAll();
+  } catch {}
   const done = () => {
     try {
       serverRef?.stop();
@@ -227,6 +231,7 @@ async function main() {
   const mobile = new MobileServer(db);
   const team = new TeamClient(db, store, chat, () => runtimes, vault, broadcast);
   const gateways = new GatewayService(db, store, chat, () => runtimes, vault, broadcast);
+  gatewaysRef = gateways;
   const rpc = new Rpc(
     store,
     chat,
@@ -335,6 +340,7 @@ async function main() {
           routineId,
           auth.startsWith("Bearer ") ? auth.slice(7) : "",
         );
+        if (id && typeof id === "object") return new Response("not found", { status: 404 });
         if (!id) {
           logLimited("auth.rejected", `/hooks/:id:401:${known ? routineId : "unknown"}`, {
             route: "/hooks/:id",
