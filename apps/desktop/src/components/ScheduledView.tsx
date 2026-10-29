@@ -1,7 +1,6 @@
 import type { Agent } from "@upbot/protocol";
 import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { DaemonClient } from "../lib/daemon";
-import { errorMessage } from "../lib/errors";
 
 export function ScheduledView({
   client,
