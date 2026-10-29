@@ -257,6 +257,9 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
   }
 
   if (text.includes("<compaction_request>")) {
+    if (process.env.FAKE_ACP_COMPACT_ERROR) {
+      throw new acp.RequestError(-32603, process.env.FAKE_ACP_COMPACT_ERROR);
+    }
     await say(
       "agent_message_chunk",
       `SUMMARY: ${sessions[sessionId].prompts.length - 1} earlier prompts`,

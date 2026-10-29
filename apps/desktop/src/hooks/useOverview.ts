@@ -1,7 +1,6 @@
 import type {
   Agent,
   AgentStatusInfo,
-  Approval,
   ChatItem,
   ConnectedApp,
   EmailAccount,
@@ -12,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
 import { errorFields, logWarn } from "../lib/log";
 import { fmtTime, status, type UiStatus } from "../lib/ui";
+import { useDaemonQuery } from "./useDaemonQuery";
 
 export type AgentOverview = {
   task: string | null;
@@ -47,9 +47,39 @@ export function useOverview(
     Record<string, { items: ChatItem[]; turn: Turn | null }>
   >({});
   const [queues, setQueues] = useState<Record<string, QueueState>>({});
-  const [approvals, setApprovals] = useState<Approval[]>([]);
-  const [apps, setApps] = useState<ConnectedApp[]>([]);
-  const [emailAccounts, setEmailAccounts] = useState<EmailAccount[]>([]);
+  const { data: approvalsData, setData: setApprovals } = useDaemonQuery(
+    client,
+    "approvals.list",
+    {},
+    {
+      events: { "approvals.rulesChanged": true },
+      enabled,
+      onError: (e) => logWarn("overview.approvals_failed", errorFields(e)),
+    },
+  );
+  const approvals = approvalsData ?? [];
+  const { data: appsData } = useDaemonQuery(
+    client,
+    "apps.list",
+    {},
+    {
+      events: { "apps.changed": true },
+      enabled,
+      onError: (e) => logWarn("overview.apps_failed", errorFields(e)),
+    },
+  );
+  const apps = appsData ?? [];
+  const { data: emailAccountsData } = useDaemonQuery(
+    client,
+    "email.accounts.list",
+    {},
+    {
+      events: { "email.accounts.changed": true },
+      enabled,
+      onError: (e) => logWarn("overview.email_failed", errorFields(e)),
+    },
+  );
+  const emailAccounts = emailAccountsData ?? [];
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const loadAgent = useCallback(
@@ -76,31 +106,9 @@ export function useOverview(
     [client],
   );
 
-  const refreshApprovals = useCallback(() => {
-    client
-      .request("approvals.list", {})
-      .then(setApprovals)
-      .catch((e: unknown) => logWarn("overview.approvals_failed", errorFields(e)));
-  }, [client]);
-  const refreshApps = useCallback(() => {
-    client
-      .request("apps.list", {})
-      .then(setApps)
-      .catch((e: unknown) => logWarn("overview.apps_failed", errorFields(e)));
-  }, [client]);
-  const refreshEmail = useCallback(() => {
-    client
-      .request("email.accounts.list", {})
-      .then(setEmailAccounts)
-      .catch((e: unknown) => logWarn("overview.email_failed", errorFields(e)));
-  }, [client]);
-
   useEffect(() => {
     if (!enabled) return;
     for (const agent of agents) void loadAgent(agent.id);
-    refreshApprovals();
-    refreshApps();
-    refreshEmail();
     const schedule = (agentId: string) => {
       const old = timers.current.get(agentId);
       if (old) clearTimeout(old);
@@ -124,20 +132,15 @@ export function useOverview(
       }),
       client.on("approval.updated", (approval) =>
         setApprovals((prev) => {
-          const found = prev.some((item) => item.id === approval.id);
+          const list = prev ?? [];
+          const found = list.some((item) => item.id === approval.id);
           return found
-            ? prev.map((item) => (item.id === approval.id ? approval : item))
-            : [...prev, approval];
+            ? list.map((item) => (item.id === approval.id ? approval : item))
+            : [...list, approval];
         }),
       ),
-      client.on("apps.changed", refreshApps),
-      client.on("email.accounts.changed", refreshEmail),
-      client.on("approvals.rulesChanged", refreshApprovals),
       client.onReconnect(() => {
         for (const agent of agents) void loadAgent(agent.id);
-        refreshApprovals();
-        refreshApps();
-        refreshEmail();
       }),
     ];
     return () => {
@@ -145,7 +148,7 @@ export function useOverview(
       for (const timer of timers.current.values()) clearTimeout(timer);
       timers.current.clear();
     };
-  }, [agents, client, enabled, loadAgent, refreshApprovals, refreshApps, refreshEmail]);
+  }, [agents, client, enabled, loadAgent, setApprovals]);
 
   return useMemo(() => {
     const pendingByAgent = new Map<string, number>();

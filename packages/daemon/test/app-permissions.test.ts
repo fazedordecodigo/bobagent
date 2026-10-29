@@ -3,9 +3,9 @@ import { expect, test } from "bun:test";
 import {
   type AppPermissionKind,
   type AppPermissions,
+  classifyAppTool,
   defaultAppPermissions,
 } from "@upbot/protocol";
-import { classifyAppTool } from "../src/app-permissions";
 import { AppsService } from "../src/apps";
 import { migrations } from "../src/db/migrations";
 import { Vault } from "../src/vault";

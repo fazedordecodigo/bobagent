@@ -171,4 +171,32 @@ describe("daemon e2e", () => {
     (d.proc.stdin as { end: () => void }).end();
     await waitForExit(d.proc, 5000);
   });
+
+  test("logs auth rejections and the shutdown reason to stderr", async () => {
+    const d = await startDaemon(
+      mkdtempSync(join(tmpdir(), "upbotd-data3-")),
+      mkdtempSync(join(tmpdir(), "upbotd-agents3-")),
+      TOKEN,
+      {},
+      true,
+    );
+    const stderrText = d.stderrText;
+    if (!stderrText) throw new Error("stderr capture was not enabled");
+
+    const rejected = await fetch(`http://127.0.0.1:${d.port}/health`, {
+      headers: { Authorization: "Bearer wrong-token" },
+    });
+    expect(rejected.status).toBe(401);
+
+    // stdin EOF (not SIGTERM): Windows can't deliver signals to the child handler
+    (d.proc.stdin as { end: () => void }).end();
+    await waitForExit(d.proc, 5000);
+
+    const stderr = await stderrText;
+    expect(stderr).toContain("auth.rejected");
+    expect(stderr).toContain("/health");
+    expect(stderr).toContain("shutting down");
+    expect(stderr).toContain("stdin EOF");
+    expect(stderr).not.toContain("wrong-token");
+  });
 });

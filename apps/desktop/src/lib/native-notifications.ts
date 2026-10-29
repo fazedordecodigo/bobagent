@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import type { Agent } from "@upbot/protocol";
 import { useEffect, useRef } from "react";
 import type { DaemonClient } from "./daemon";
+import { errorMessage } from "./errors";
 import { errorFields, logWarn } from "./log";
 import {
   ApprovalNotifications,
@@ -37,7 +38,7 @@ export function useNativeNotifications(
             })
             .catch((e) => {
               logWarn("notifications.drain_failed", errorFields(e));
-              onError(String(e));
+              onError(errorMessage(e));
             });
         };
         const off = await listen("upbot://notification-actions", drain);
@@ -58,7 +59,7 @@ export function useNativeNotifications(
     );
     void notifications.start().catch((e) => {
       logWarn("notifications.start_failed", errorFields(e));
-      onError(String(e));
+      onError(errorMessage(e));
     });
     return () => notifications.stop();
   }, [client, ready, review, onError]);

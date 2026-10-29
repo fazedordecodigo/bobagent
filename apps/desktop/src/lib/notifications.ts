@@ -1,4 +1,4 @@
-import type { Approval, ApprovalDecision } from "@upbot/protocol";
+import { type Approval, type ApprovalDecision, classifyToolOperation } from "@upbot/protocol";
 import { type ApprovalResult, decideApproval } from "./approval-decisions";
 import { describeApproval } from "./approval-description";
 import type { DaemonClient } from "./daemon";
@@ -117,17 +117,10 @@ export function decisionNotification(
       ? describeApproval(approval, botName).description
       : `${botName} precisa de você no UpBot.`;
   const details = notificationDetails(approval.detail);
-  const tool = approval.tool ?? "";
-  const operation = /^[a-z]+(?:[_-][a-z]+)?$/i.test(tool)
-    ? tool.split(/[_-]/)[0]?.toLowerCase()
-    : null;
-  const kind =
-    approval.permission ??
-    (operation && /^(send|post|publish|reply|dispatch|deliver)$/.test(operation)
-      ? "send"
-      : operation && /^(get|read|list|search|create|update|edit|write)$/.test(operation)
-        ? "write"
-        : null);
+  const detected = approval.permission ?? classifyToolOperation(approval.tool ?? "");
+  // Non-app read tools are treated as writes: they get the same inline approval
+  // as a write. Unknown operations stay null and open the app instead.
+  const kind = detected === "read" ? "write" : detected;
   const fits = title.length <= limits.title && details.complete && approval.kind === "tool";
   const inline =
     fits &&

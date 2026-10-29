@@ -1,11 +1,11 @@
 import type { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
-import type { EmailAccount, EmailDraft, EmailProvider } from "@upbot/protocol";
+import type { EmailAccount, EmailDraft, EmailProvider, MethodParsedParams } from "@upbot/protocol";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import nodemailer from "nodemailer";
 import { RpcError } from "./runtime/agent-runtime";
-import type { Vault } from "./vault";
+import { EMAIL_PREFIX, type Vault } from "./vault";
 
 // Email over IMAP (search/read) + SMTP (send). Passwords (app passwords) live in the vault as
 // email.<id>.password and never reach bots. Bots can only create drafts; a draft is sent only
@@ -110,7 +110,7 @@ export class EmailService {
   // ---- accounts ----
 
   private passwordName(id: string) {
-    return `email.${id}.password`;
+    return `${EMAIL_PREFIX}${id}.password`;
   }
 
   private rowToAccount(r: { id: string; config_json: string; created_at: number }): EmailAccount {
@@ -143,14 +143,7 @@ export class EmailService {
     return this.rowToAccount(r);
   }
 
-  saveAccount(
-    p: Partial<Config> & {
-      id?: string;
-      provider: EmailProvider;
-      address: string;
-      password?: string;
-    },
-  ): EmailAccount {
+  saveAccount(p: MethodParsedParams<"email.accounts.save">): EmailAccount {
     const prev = p.id ? this.account(p.id) : null;
     const preset = p.provider === "custom" ? null : EMAIL_PRESETS[p.provider];
     const pick = <K extends keyof Config>(k: K, fallback: Config[K]): Config[K] =>
@@ -366,7 +359,7 @@ export class EmailService {
     return this.rowToDraft(r);
   }
 
-  listDrafts(p: { agentId?: string; pendingOnly?: boolean }): EmailDraft[] {
+  listDrafts(p: { agentId?: string | undefined; pendingOnly?: boolean | undefined }): EmailDraft[] {
     const rows = this.db
       .query(
         `SELECT * FROM email_drafts WHERE (?1 IS NULL OR agent_id = ?1) AND (?2 = 0 OR status IN ('pending','sending','failed')) ORDER BY created_at DESC LIMIT 200`,
@@ -419,10 +412,10 @@ export class EmailService {
 
   updateDraft(p: {
     id: string;
-    to?: string[];
-    cc?: string[];
-    subject?: string;
-    body?: string;
+    to?: string[] | undefined;
+    cc?: string[] | undefined;
+    subject?: string | undefined;
+    body?: string | undefined;
   }): EmailDraft {
     const d = this.editable(p.id);
     return this.write({

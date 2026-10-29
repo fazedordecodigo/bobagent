@@ -109,7 +109,7 @@ export function ChatView({
   );
 
   const retry = useCallback(() => {
-    if (latestUser?.kind === "user_message") void send(latestUser.text, []);
+    if (latestUser?.kind === "user_message") void send(latestUser.text, []).catch(() => {});
   }, [latestUser, send]);
 
   const respondPermission = useCallback(

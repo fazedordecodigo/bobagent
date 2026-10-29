@@ -3,21 +3,11 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { resolveCommandIn, spawnEnv } from "./env/login-path";
 import { spawnChild } from "./env/spawn";
+import { envOverride } from "./env/vars";
 
 // Voice: text-to-speech with macOS `say` (or UPBOT_TTS_COMMAND, text on stdin) and
 // speech-to-text with UPBOT_STT_COMMAND (JSON array, "{file}" = recorded audio path,
 // transcript on stdout) or the `whisper` CLI when it is on PATH.
-
-function jsonCommand(name: string): string[] | null {
-  const raw = process.env[name];
-  if (!raw) return null;
-  try {
-    const v = JSON.parse(raw);
-    return Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === "string") ? v : null;
-  } catch {
-    return null;
-  }
-}
 
 const EXT: Record<string, string> = {
   "audio/webm": "webm",
@@ -36,7 +26,7 @@ export class Voice {
   ) {}
 
   private tts(): string[] | null {
-    return jsonCommand("UPBOT_TTS_COMMAND") ?? (process.platform === "darwin" ? ["say"] : null);
+    return envOverride("UPBOT_TTS_COMMAND") ?? (process.platform === "darwin" ? ["say"] : null);
   }
 
   private resolve(cmd: string): string | null {
@@ -53,7 +43,7 @@ export class Voice {
   status() {
     return {
       tts: this.tts() !== null,
-      stt: jsonCommand("UPBOT_STT_COMMAND") !== null || this.whisper() !== null,
+      stt: envOverride("UPBOT_STT_COMMAND") !== null || this.whisper() !== null,
     };
   }
 
@@ -95,7 +85,7 @@ export class Voice {
     const file = join(work, `audio.${EXT[mime.split(";")[0]!.trim()] ?? "webm"}`);
     writeFileSync(file, Buffer.from(audioBase64, "base64"));
     try {
-      const custom = jsonCommand("UPBOT_STT_COMMAND");
+      const custom = envOverride("UPBOT_STT_COMMAND");
       const whisper = custom ? null : this.whisper();
       if (!custom && !whisper)
         throw new Error(
