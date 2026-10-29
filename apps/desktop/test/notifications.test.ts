@@ -101,13 +101,7 @@ test("oversized titles and unknown operations fail closed to review, malformed d
   expect(notification({ detail: "not JSON" })?.body).toBe("Revise os detalhes no UpBot.");
   expect(notification({ detail: '{"password":"secret"}' })?.body).not.toContain("secret");
   const { appId, permission, ...nonApp } = pending;
-  for (const tool of [
-    "get_and_delete",
-    "fetch_then_send",
-    "read_or_archive",
-    "pay_invoice",
-    "book_room",
-  ]) {
+  for (const tool of ["get_and_delete", "fetch_then_send", "pay_invoice", "book_room"]) {
     expect(
       decisionNotification({ ...nonApp, tool, detail: "{}" }, "UpBot", false, 1000)?.actions.map(
         (a) => a.id,
@@ -122,6 +116,24 @@ test("oversized titles and unknown operations fail closed to review, malformed d
       1000,
     )?.actions.map((a) => a.id),
   ).toEqual(["review"]);
+});
+
+test("non-app reads and writes share the taxonomy and approve inline", () => {
+  const { appId, permission, appName, ...nonApp } = pending;
+  // Reads count as writes; share_file is send, so it needs a recipient and content.
+  for (const [tool, detail] of [
+    ["read_file", "{}"],
+    ["get_user", "{}"],
+    ["read_or_archive", "{}"],
+    ["create_note", "{}"],
+    ["share_file", '{"to":"Ana","text":"Oi"}'],
+  ] as const) {
+    expect(
+      decisionNotification({ ...nonApp, tool, detail }, "UpBot", false, 1000)?.actions.map(
+        (a) => a.id,
+      ),
+    ).toEqual(["approve", "review"]);
+  }
 });
 
 function preferences() {

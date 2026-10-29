@@ -1,18 +1,23 @@
 import { useState } from "react";
 import type { Status } from "./controls";
 import {
+  Box,
   Button,
   Chip,
   Counter,
+  Dialog,
   Field,
   IconButton,
   KeyboardShortcut,
   ScopeTag,
   SegmentedControl,
+  Select,
   StatusDot,
   StatusPill,
   Switch,
   statusLabels,
+  Tag,
+  Toast,
 } from "./controls";
 import * as icons from "./icons";
 import s from "./Kit.module.css";
@@ -27,6 +32,7 @@ const iconLabels: Record<string, string> = {
   FileIcon: "Arquivo",
   GearIcon: "Ajustes",
   HomeIcon: "Início",
+  HookIcon: "Webhook",
   LockIcon: "Cadeado",
   MailIcon: "E-mail",
   MoonIcon: "Lua",
@@ -51,6 +57,8 @@ export default function Kit() {
   const [daily, setDaily] = useState(false);
   const [pressed, setPressed] = useState(true);
   const [message, setMessage] = useState("Nenhuma ação realizada.");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [toastOpen, setToastOpen] = useState(false);
   const changeTheme = (value: string) => {
     document.documentElement.dataset.themePref = value;
     document.documentElement.dataset.theme = value;
@@ -85,6 +93,59 @@ export default function Kit() {
         <a href="/">Voltar ao app</a>
       </div>
       <div className={s.grid}>
+        <section className={s.card}>
+          <h2>Configurações do agente</h2>
+          <div className={s.row}>
+            <Button variant="danger" onClick={() => setMessage("Confirmação de exclusão.")}>
+              Excluir agente
+            </Button>
+            <Select aria-label="Modelo">
+              <optgroup label="Devin">
+                <option>Modelo padrão</option>
+              </optgroup>
+              <optgroup label="Claude">
+                <option>Modelo padrão</option>
+              </optgroup>
+            </Select>
+            <Tag>Todo dia, 09:00</Tag>
+          </div>
+          <div className={s.row}>
+            <Button variant="danger">Excluir agente</Button>
+            <Button variant="danger" disabled>
+              Exclusão indisponível
+            </Button>
+            <Button onClick={() => setDialogOpen(true)}>Abrir diálogo</Button>
+            <Button onClick={() => setToastOpen(true)}>Mostrar toast</Button>
+          </div>
+          <Box>
+            <div className={s.setting}>
+              <div>
+                <b>Alterações não salvas</b>
+                <p>As mudanças ficam no rascunho.</p>
+              </div>
+              <Button variant="primary">Salvar</Button>
+            </div>
+          </Box>
+          {toastOpen && (
+            <Toast
+              action="Desfazer"
+              onAction={() => {
+                setMessage("Ação desfeita.");
+                setToastOpen(false);
+              }}
+            >
+              Configurações salvas.
+            </Toast>
+          )}
+          <Dialog open={dialogOpen} title="Excluir agente?" onClose={() => setDialogOpen(false)}>
+            <h2>Excluir agente?</h2>
+            <p>A pasta de trabalho e as conversas continuam guardadas.</p>
+            <Button onClick={() => setDialogOpen(false)}>Cancelar</Button>
+            <Button variant="danger" onClick={() => setDialogOpen(false)}>
+              Excluir agente
+            </Button>
+          </Dialog>
+        </section>
         <section className={s.card}>
           <h2>Botões</h2>
           <div className={s.row}>

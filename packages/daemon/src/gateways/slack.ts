@@ -1,4 +1,10 @@
-import { splitText, type Transport, type TransportHooks } from "./common";
+import {
+  closeDetail,
+  ReconnectBackoff,
+  splitText,
+  type Transport,
+  type TransportHooks,
+} from "./common";
 
 type Envelope = {
   envelope_id?: string;
@@ -23,6 +29,7 @@ const api = () => process.env.UPBOT_SLACK_API ?? "https://slack.com/api";
 export class SlackTransport implements Transport {
   private ws: WebSocket | null = null;
   private running = false;
+  private backoff = new ReconnectBackoff();
   private botUserId = "";
 
   constructor(
@@ -51,7 +58,7 @@ export class SlackTransport implements Transport {
 
   start() {
     this.running = true;
-    void this.connect(1000);
+    void this.connect();
   }
 
   stop() {
@@ -59,7 +66,7 @@ export class SlackTransport implements Transport {
     this.ws?.close();
   }
 
-  private async connect(backoff: number) {
+  private async connect() {
     if (!this.running) return;
     try {
       const auth = await this.call<{ user_id: string }>("auth.test", this.botToken);
@@ -67,17 +74,26 @@ export class SlackTransport implements Transport {
       const { url } = await this.call<{ url: string }>("apps.connections.open", this.appToken);
       const ws = new WebSocket(url);
       this.ws = ws;
-      ws.onopen = () => this.hooks.onStatus("connected");
-      ws.onmessage = (ev) => this.onFrame(ws, String(ev.data));
-      ws.onclose = () => {
-        if (this.ws !== ws || !this.running) return;
-        this.hooks.onStatus("connecting");
-        setTimeout(() => void this.connect(1000), 1000);
+      ws.onopen = () => {
+        this.backoff.markHealthy();
+        this.hooks.onStatus("connected");
       };
+      ws.onmessage = (ev) => this.onFrame(ws, String(ev.data));
+      ws.onclose = (ev) => this.onClose(ws, ev);
     } catch (e) {
       this.hooks.onStatus("error", (e as Error).message);
-      setTimeout(() => void this.connect(Math.min(backoff * 2, 30_000)), backoff);
+      this.scheduleReconnect();
     }
+  }
+
+  private scheduleReconnect() {
+    setTimeout(() => void this.connect(), this.backoff.next());
+  }
+
+  private onClose(ws: WebSocket, ev: CloseEvent) {
+    if (this.ws !== ws || !this.running) return;
+    this.hooks.onStatus("connecting", closeDetail(ev));
+    this.scheduleReconnect();
   }
 
   private onFrame(ws: WebSocket, raw: string) {
