@@ -4,6 +4,7 @@ import { useChat } from "../hooks/useChat";
 import type { AgentOverview } from "../hooks/useOverview";
 import type { DaemonClient } from "../lib/daemon";
 import { moveControlFocus } from "../lib/keyboard";
+import { errorFields, errorMessage, logWarn } from "../lib/log";
 import { MonoAv, Pill, role } from "../lib/ui";
 import { PermissionNotice } from "./AgentSettings";
 import { ApprovalCards } from "./ApprovalsView";
@@ -35,6 +36,7 @@ export function ChatView({
     runningTurn,
     loaded,
     queue,
+    error: chatError,
     loadEarlier,
     queuePause,
     queueResume,
@@ -50,7 +52,7 @@ export function ChatView({
     client
       .request("voice.status", {})
       .then(setVoice)
-      .catch(() => {});
+      .catch((e: unknown) => logWarn("voice.status_failed", errorFields(e)));
   }, [client]);
 
   const isClaude = agent.provider === "claude";
@@ -169,6 +171,7 @@ export function ChatView({
         </button>
       </header>
       {modeError && <div className="notice is-err">{modeError}</div>}
+      {chatError && <div className="notice is-err">{chatError}</div>}
       <MessageList
         agent={agent}
         status={displayStatus}
@@ -177,7 +180,11 @@ export function ChatView({
         loaded={loaded}
         emptyNotice={<PermissionNotice provider={agent.provider} />}
         running={runningTurn !== null || displayStatus === "run"}
-        onLoadEarlier={() => void loadEarlier().catch(() => {})}
+        onLoadEarlier={() =>
+          void loadEarlier().catch((e: unknown) =>
+            logWarn("chat.history_earlier_failed", { agentId: agent.id, ...errorFields(e) }),
+          )
+        }
         onPermissionRespond={(requestId, optionId) => {
           void client.request("permissions.respond", { requestId, optionId }).catch((e) => {
             setSendError(e instanceof Error ? e.message : String(e));
@@ -185,7 +192,10 @@ export function ChatView({
         }}
         onSpeak={
           voice.tts
-            ? (text) => void client.request("voice.speak", { text }).catch(() => {})
+            ? (text) =>
+                void client
+                  .request("voice.speak", { text })
+                  .catch((e: unknown) => logWarn("voice.speak_failed", errorFields(e)))
             : undefined
         }
         onRetry={retry}
@@ -201,7 +211,12 @@ export function ChatView({
         hint={hint}
         hintError={sendError}
         onSend={send}
-        onStop={() => void client.request("chat.cancel", { agentId: agent.id }).catch(() => {})}
+        onStop={() =>
+          void client.request("chat.cancel", { agentId: agent.id }).catch((e: unknown) => {
+            logWarn("chat.cancel_failed", { agentId: agent.id, ...errorFields(e) });
+            setSendError(`Não foi possível parar: ${errorMessage(e)}`);
+          })
+        }
         onTranscribe={
           voice.stt
             ? async (audioBase64, mime) =>

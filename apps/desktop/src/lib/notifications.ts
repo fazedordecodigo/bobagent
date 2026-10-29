@@ -2,6 +2,7 @@ import type { Approval, ApprovalDecision } from "@upbot/protocol";
 import { type ApprovalResult, decideApproval } from "./approval-decisions";
 import { describeApproval } from "./approval-description";
 import type { DaemonClient } from "./daemon";
+import { errorFields, logWarn } from "./log";
 
 export type NotificationAction = "approve" | "deny" | "task" | "review" | "undo";
 export type DecisionNotification = {
@@ -184,13 +185,20 @@ export class ApprovalNotifications {
     } catch {}
   }
 
-  private fail(error: unknown) {
+  private fail(error: unknown, context?: { op: string; approvalId?: string; action?: string }) {
+    logWarn(`notifications.${context?.op ?? "pipeline"}_failed`, {
+      approvalId: context?.approvalId,
+      action: context?.action,
+      ...errorFields(error),
+    });
     if (!this.stopped) this.error(error instanceof Error ? error.message : String(error));
   }
 
   async start() {
     const off = await this.bridge.listen((response) => {
-      void this.respond(response).catch((e) => this.fail(e));
+      void this.respond(response).catch((e) =>
+        this.fail(e, { op: "decide", approvalId: response.id, action: response.action }),
+      );
     });
     if (this.stopped) {
       off();
@@ -200,7 +208,9 @@ export class ApprovalNotifications {
     if (!(await this.bridge.initialize())) return;
     if (this.stopped) return;
     const update = (approval: Approval) => {
-      this.events = this.events.then(() => this.update(approval)).catch((e) => this.fail(e));
+      this.events = this.events
+        .then(() => this.update(approval))
+        .catch((e) => this.fail(e, { op: "post", approvalId: approval.id }));
     };
     this.off.push(this.client.on("approval.updated", update));
     const sync = async () => {
@@ -218,7 +228,7 @@ export class ApprovalNotifications {
     };
     this.off.push(
       this.client.onReconnect(() => {
-        void sync().catch((e) => this.fail(e));
+        void sync().catch((e) => this.fail(e, { op: "sync" }));
       }),
     );
     await sync();
@@ -245,7 +255,9 @@ export class ApprovalNotifications {
           () => {
             this.active.delete(approval.id);
             if (!this.local.has(approval.id))
-              void this.bridge.remove(approval.id).catch((e) => this.fail(e));
+              void this.bridge
+                .remove(approval.id)
+                .catch((e) => this.fail(e, { op: "remove", approvalId: approval.id }));
           },
           Math.max(0, approval.expiresAt - this.now()),
         ),
@@ -257,7 +269,9 @@ export class ApprovalNotifications {
     this.seen.add(approval.id);
     try {
       this.preferences.setItem(SEEN_KEY, JSON.stringify([...this.seen].slice(-1000)));
-    } catch {}
+    } catch (e) {
+      logWarn("notifications.seen_persist_failed", errorFields(e));
+    }
   }
 
   async respond({ id, action }: NotificationResponse) {
@@ -341,7 +355,7 @@ export class ApprovalNotifications {
         id,
         setTimeout(() => {
           this.results.delete(id);
-          void this.bridge.remove(id).catch((e) => this.fail(e));
+          void this.bridge.remove(id).catch((e) => this.fail(e, { op: "remove", approvalId: id }));
         }, 6000),
       );
     } finally {

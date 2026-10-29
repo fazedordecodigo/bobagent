@@ -167,7 +167,8 @@ pub async fn notifications_initialize(app: AppHandle) -> Result<bool, String> {
 pub async fn notifications_post(app: AppHandle, notification: Notification) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     let native_app = app.clone();
-    on_main(app, move |done| {
+    let id = notification.id.clone();
+    let result = on_main(app, move |done| {
         #[cfg(target_os = "macos")]
         platform::post(notification, done);
         #[cfg(target_os = "windows")]
@@ -178,14 +179,19 @@ pub async fn notifications_post(app: AppHandle, notification: Notification) -> R
             done(Ok(()));
         }
     })
-    .await
+    .await;
+    if let Err(error) = &result {
+        log::warn!("could not post notification {id}: {error}");
+    }
+    result
 }
 
 #[tauri::command]
 pub async fn notifications_remove(app: AppHandle, id: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     let native_app = app.clone();
-    on_main(app, move |done| {
+    let log_id = id.clone();
+    let result = on_main(app, move |done| {
         #[cfg(target_os = "macos")]
         platform::remove(&id);
         #[cfg(target_os = "windows")]
@@ -197,7 +203,11 @@ pub async fn notifications_remove(app: AppHandle, id: String) -> Result<(), Stri
         #[cfg(not(target_os = "windows"))]
         done(Ok(()));
     })
-    .await
+    .await;
+    if let Err(error) = &result {
+        log::warn!("could not remove notification {log_id}: {error}");
+    }
+    result
 }
 
 #[tauri::command]

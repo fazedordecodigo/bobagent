@@ -1,6 +1,7 @@
 import type { AgentStatusInfo, ChatItem, QueueState, Turn } from "@upbot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
+import { errorFields, errorMessage, logWarn } from "../lib/log";
 
 export type ChatState = {
   queue: QueueState | null;
@@ -10,6 +11,7 @@ export type ChatState = {
   runningTurn: Turn | null;
   status: AgentStatusInfo;
   loaded: boolean;
+  error: string | null;
 };
 
 export function useChat(client: DaemonClient, agentId: string | null) {
@@ -20,6 +22,7 @@ export function useChat(client: DaemonClient, agentId: string | null) {
     runningTurn: null,
     status: { status: "idle", error: null },
     loaded: false,
+    error: null,
     queue: null as QueueState | null,
   });
   const seqCursor = useRef<number | null>(null);
@@ -33,7 +36,10 @@ export function useChat(client: DaemonClient, agentId: string | null) {
     if (activeAgent.current !== forAgent) return; // stale load after switching agents
     seqCursor.current = res.items[0]?.seq ?? null;
     const running = res.turns.find((t) => t.status === "running") ?? null;
-    const queue = await client.request("queue.get", { agentId: forAgent }).catch(() => null);
+    const queue = await client.request("queue.get", { agentId: forAgent }).catch((e: unknown) => {
+      logWarn("queue.get_failed", { agentId: forAgent, ...errorFields(e) });
+      return null;
+    });
     if (activeAgent.current !== forAgent) return;
     setState((s) => ({
       ...s,
@@ -43,6 +49,7 @@ export function useChat(client: DaemonClient, agentId: string | null) {
       runningTurn: running,
       queue,
       loaded: true,
+      error: null,
     }));
   }, [client, agentId]);
 
@@ -55,17 +62,21 @@ export function useChat(client: DaemonClient, agentId: string | null) {
       runningTurn: null,
       status: { status: "idle", error: null },
       loaded: false,
+      error: null,
     });
     seqCursor.current = null;
     if (!agentId) return;
-    load().catch(() => {});
+    load().catch((e: unknown) => {
+      logWarn("chat.history_failed", { agentId, ...errorFields(e) });
+      setState((s) => ({ ...s, error: errorMessage(e) }));
+    });
     client
       .request("agents.statuses", {})
       .then((st) => {
         const info = st[agentId];
         if (info) setState((s) => ({ ...s, status: info }));
       })
-      .catch(() => {});
+      .catch((e: unknown) => logWarn("agents.statuses_failed", { agentId, ...errorFields(e) }));
 
     const matches = (id: string | undefined | null) => id === agentId;
     const offs = [
@@ -118,14 +129,17 @@ export function useChat(client: DaemonClient, agentId: string | null) {
         setState((s) => ({ ...s, queue: q }));
       }),
       client.onReconnect(() => {
-        load().catch(() => {});
+        load().catch((e: unknown) => {
+          logWarn("chat.history_failed", { agentId, ...errorFields(e) });
+          setState((s) => ({ ...s, error: errorMessage(e) }));
+        });
         client
           .request("agents.statuses", {})
           .then((st) => {
             const info = st[agentId];
             if (info) setState((s) => ({ ...s, status: info }));
           })
-          .catch(() => {});
+          .catch((e: unknown) => logWarn("agents.statuses_failed", { agentId, ...errorFields(e) }));
       }),
     ];
     return () => {
@@ -148,17 +162,26 @@ export function useChat(client: DaemonClient, agentId: string | null) {
     }));
   }, [client, agentId]);
 
+  const queueFail = useCallback(
+    (method: string, fields: Record<string, unknown>) => (e: unknown) => {
+      logWarn(`${method}_failed`, { ...fields, ...errorFields(e) });
+      setState((s) => ({ ...s, error: errorMessage(e) }));
+    },
+    [],
+  );
   const queuePause = useCallback(() => {
-    if (agentId) client.request("queue.pause", { agentId }).catch(() => {});
-  }, [client, agentId]);
+    if (agentId)
+      client.request("queue.pause", { agentId }).catch(queueFail("queue.pause", { agentId }));
+  }, [client, agentId, queueFail]);
   const queueResume = useCallback(() => {
-    if (agentId) client.request("queue.resume", { agentId }).catch(() => {});
-  }, [client, agentId]);
+    if (agentId)
+      client.request("queue.resume", { agentId }).catch(queueFail("queue.resume", { agentId }));
+  }, [client, agentId, queueFail]);
   const queueRemove = useCallback(
     (queueId: string) => {
-      client.request("queue.remove", { queueId }).catch(() => {});
+      client.request("queue.remove", { queueId }).catch(queueFail("queue.remove", { queueId }));
     },
-    [client],
+    [client, queueFail],
   );
 
   return { ...state, loadEarlier, queuePause, queueResume, queueRemove };

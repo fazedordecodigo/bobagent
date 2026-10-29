@@ -26,6 +26,7 @@ import { useLayerFocus, useMediaQuery } from "./hooks/useLayerFocus";
 import { useOverview } from "./hooks/useOverview";
 import { DaemonClient } from "./lib/daemon";
 import { moveControlFocus } from "./lib/keyboard";
+import { errorFields, logError, logWarn } from "./lib/log";
 import { nativeCommand } from "./lib/native";
 import { useNativeNotifications } from "./lib/native-notifications";
 import { mod } from "./lib/platform";
@@ -148,6 +149,7 @@ export default function App() {
         if (alive) setClientReady(true);
       })
       .catch((e: unknown) => {
+        logError("app.connect_failed", errorFields(e));
         if (alive) setError(e instanceof Error ? e.message : String(e));
       });
     const offs = [
@@ -176,7 +178,9 @@ export default function App() {
         setChannels((prev) => prev.map((item) => (item.id === channel.id ? channel : item))),
       ),
       client.onReconnect(() => {
-        void refreshAll().catch(() => {});
+        void refreshAll().catch((e: unknown) =>
+          logWarn("app.refresh_after_reconnect_failed", errorFields(e)),
+        );
       }),
     ];
     return () => {
@@ -383,7 +387,7 @@ export default function App() {
           })),
         ]);
       })
-      .catch(() => {});
+      .catch((e: unknown) => logWarn("app.pages_list_failed", errorFields(e)));
     return () => {
       active = false;
     };

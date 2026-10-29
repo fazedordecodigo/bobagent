@@ -1,6 +1,7 @@
 import type { Agent, EmailAccount, EmailDraft, EmailProvider } from "@upbot/protocol";
 import { useCallback, useEffect, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
+import { errorFields, errorMessage, logWarn } from "../lib/log";
 import { btnCls, inputCls } from "./AgentSettings";
 
 const PROVIDER_HINTS: Record<EmailProvider, string> = {
@@ -20,11 +21,18 @@ const splitList = (s: string) =>
 
 function useDrafts(client: DaemonClient, agentId?: string) {
   const [drafts, setDrafts] = useState<EmailDraft[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const load = useCallback(() => {
     client
       .request("email.drafts.list", agentId ? { agentId, pendingOnly: true } : {})
-      .then(setDrafts)
-      .catch(() => {});
+      .then((d) => {
+        setDrafts(d);
+        setError(null);
+      })
+      .catch((e: unknown) => {
+        logWarn("email.drafts.list_failed", { agentId, ...errorFields(e) });
+        setError(errorMessage(e));
+      });
   }, [client, agentId]);
   useEffect(() => {
     load();
@@ -32,7 +40,7 @@ function useDrafts(client: DaemonClient, agentId?: string) {
       if (!agentId || d.agentId === agentId) load();
     });
   }, [client, agentId, load]);
-  return drafts;
+  return { drafts, error };
 }
 
 export function DraftCard({
@@ -144,23 +152,32 @@ export function DraftCard({
 
 function useAccounts(client: DaemonClient) {
   const [accounts, setAccounts] = useState<EmailAccount[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const load = useCallback(() => {
     client
       .request("email.accounts.list", {})
-      .then(setAccounts)
-      .catch(() => {});
+      .then((a) => {
+        setAccounts(a);
+        setError(null);
+      })
+      .catch((e: unknown) => {
+        logWarn("email.accounts.list_failed", errorFields(e));
+        setError(errorMessage(e));
+      });
   }, [client]);
   useEffect(() => {
     load();
     return client.on("email.accounts.changed", load);
   }, [client, load]);
-  return accounts;
+  return { accounts, error };
 }
 
 /** Pending drafts of one bot, shown above the composer. */
 export function DraftCards({ client, agentId }: { client: DaemonClient; agentId: string }) {
-  const drafts = useDrafts(client, agentId);
-  const accounts = useAccounts(client);
+  const { drafts, error } = useDrafts(client, agentId);
+  const { accounts } = useAccounts(client);
+  if (error)
+    return <div className="border-t border-zinc-800 px-4 py-2 text-xs text-red-400">{error}</div>;
   if (!drafts.length) return null;
   return (
     <div className="max-h-[50vh] space-y-2 overflow-y-auto border-t border-zinc-800 px-4 py-2">
@@ -172,8 +189,8 @@ export function DraftCards({ client, agentId }: { client: DaemonClient; agentId:
 }
 
 export function EmailView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
-  const accounts = useAccounts(client);
-  const drafts = useDrafts(client);
+  const { accounts, error: accountsError } = useAccounts(client);
+  const { drafts, error: draftsError } = useDrafts(client);
   const [provider, setProvider] = useState<EmailProvider>("gmail");
   const [form, setForm] = useState({
     address: "",
@@ -368,6 +385,9 @@ export function EmailView({ client, agents }: { client: DaemonClient; agents: Ag
         </button>
       </form>
       <h3 className="text-sm font-semibold text-zinc-300">Drafts</h3>
+      {(accountsError || draftsError) && (
+        <p className="text-xs text-red-400">{accountsError ?? draftsError}</p>
+      )}
       <div className="space-y-2">
         {drafts.map((d) => (
           <DraftCard

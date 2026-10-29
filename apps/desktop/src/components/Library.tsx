@@ -16,6 +16,7 @@ import type {
 } from "@upbot/protocol";
 import { useCallback, useEffect, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
+import { errorFields, errorMessage, type LogFields, logWarn } from "../lib/log";
 import { btnCls, inputCls, PROVIDERS } from "./AgentSettings";
 import { Markdown } from "./Markdown";
 
@@ -93,12 +94,17 @@ export function AvatarEditor({
 export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agentId: string }) {
   const [items, setItems] = useState<Memory[]>([]);
   const [text, setText] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const load = useCallback(() => {
     client
       .request("memories.list", { agentId })
       .then(setItems)
-      .catch(() => {});
+      .catch((e: unknown) => logWarn("memories.list_failed", { agentId, ...errorFields(e) }));
   }, [client, agentId]);
+  const fail = (scope: string, fields?: LogFields) => (e: unknown) => {
+    logWarn(scope, { ...fields, ...errorFields(e) });
+    setError(errorMessage(e));
+  };
   useEffect(() => {
     load();
     return client.on("memories.changed", (d) => {
@@ -116,7 +122,11 @@ export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agent
             <button
               type="button"
               className="text-xs text-zinc-500 hover:text-red-400"
-              onClick={() => client.request("memories.delete", { id: m.id }).catch(() => {})}
+              onClick={() =>
+                client
+                  .request("memories.delete", { id: m.id })
+                  .catch(fail("memories.delete_failed", { id: m.id }))
+              }
             >
               Delete
             </button>
@@ -132,7 +142,7 @@ export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agent
           client
             .request("memories.add", { agentId, text })
             .then(() => setText(""))
-            .catch(() => {});
+            .catch(fail("memories.add_failed", { agentId }));
         }}
       >
         <input
@@ -145,6 +155,7 @@ export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agent
           Add
         </button>
       </form>
+      {error && <p className="text-xs text-red-400">{error}</p>}
     </section>
   );
 }
@@ -159,8 +170,12 @@ export function SkillsView({ client }: { client: DaemonClient }) {
     client
       .request("skills.list", {})
       .then(setSkills)
-      .catch(() => {});
+      .catch((e: unknown) => logWarn("skills.list_failed", errorFields(e)));
   }, [client]);
+  const fail = (scope: string, fields?: LogFields) => (e: unknown) => {
+    logWarn(scope, { ...fields, ...errorFields(e) });
+    setError(errorMessage(e));
+  };
   useEffect(() => {
     load();
     return client.on("skills.changed", load);
@@ -246,7 +261,11 @@ export function SkillsView({ client }: { client: DaemonClient }) {
               <button
                 type="button"
                 className="text-xs text-zinc-500 hover:text-red-400"
-                onClick={() => client.request("skills.delete", { name: s.name }).catch(() => {})}
+                onClick={() =>
+                  client
+                    .request("skills.delete", { name: s.name })
+                    .catch(fail("skills.delete_failed", { name: s.name }))
+                }
               >
                 Delete
               </button>
@@ -256,6 +275,7 @@ export function SkillsView({ client }: { client: DaemonClient }) {
         ))}
         {skills.length === 0 && <li className="text-sm text-zinc-500">No skills yet.</li>}
       </ul>
+      {error && <p className="text-sm text-red-400">{error}</p>}
     </div>
   );
 }
@@ -268,7 +288,7 @@ export function RoutinesPanel({ client, agentId }: { client: DaemonClient; agent
     client
       .request("routines.list", { agentId })
       .then(setItems)
-      .catch(() => {});
+      .catch((e: unknown) => logWarn("routines.list_failed", { agentId, ...errorFields(e) }));
   }, [client, agentId]);
   useEffect(() => {
     load();
@@ -396,12 +416,17 @@ export function RoutinesPanel({ client, agentId }: { client: DaemonClient; agent
 
 export function BrowserView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
   const [state, setState] = useState<BrowserState | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const load = useCallback(() => {
     client
       .request("browser.status", {})
       .then(setState)
-      .catch(() => {});
+      .catch((e: unknown) => logWarn("browser.status_failed", errorFields(e)));
   }, [client]);
+  const fail = (scope: string, fields?: LogFields) => (e: unknown) => {
+    logWarn(scope, { ...fields, ...errorFields(e) });
+    setError(errorMessage(e));
+  };
   useEffect(() => {
     load();
     return client.on("browser.updated", load);
@@ -416,7 +441,7 @@ export function BrowserView({ client, agents }: { client: DaemonClient; agents: 
           <button
             type="button"
             className={`${btnCls} ml-auto bg-zinc-700 hover:bg-zinc-600`}
-            onClick={() => client.request("browser.close", {}).catch(() => {})}
+            onClick={() => client.request("browser.close", {}).catch(fail("browser.close_failed"))}
           >
             Close browser
           </button>
@@ -442,7 +467,9 @@ export function BrowserView({ client, agents }: { client: DaemonClient; agents: 
               type="button"
               className="text-xs text-zinc-500 hover:text-red-400"
               onClick={() =>
-                client.request("browser.closeTab", { agentId: t.agentId }).catch(() => {})
+                client
+                  .request("browser.closeTab", { agentId: t.agentId })
+                  .catch(fail("browser.closeTab_failed", { agentId: t.agentId }))
               }
             >
               Close tab
@@ -451,6 +478,7 @@ export function BrowserView({ client, agents }: { client: DaemonClient; agents: 
         ))}
         {state.tabs.length === 0 && <li className="text-sm text-zinc-500">No open tabs.</li>}
       </ul>
+      {error && <p className="text-sm text-red-400">{error}</p>}
     </div>
   );
 }
@@ -472,7 +500,7 @@ export function VaultView({ client, agents }: { client: DaemonClient; agents: Ag
     client
       .request("vault.list", {})
       .then(setEntries)
-      .catch(() => {});
+      .catch((e: unknown) => logWarn("vault.list_failed", errorFields(e)));
   }, [client]);
   useEffect(() => {
     load();
@@ -592,11 +620,12 @@ export function VaultView({ client, agents }: { client: DaemonClient; agents: Ag
 
 export function ComputerUsePanel({ client, agentId }: { client: DaemonClient; agentId: string }) {
   const [state, setState] = useState<{ available: boolean; agentIds: string[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const load = useCallback(() => {
     client
       .request("computer.access", {})
       .then(setState)
-      .catch(() => {});
+      .catch((e: unknown) => logWarn("computer.access_failed", errorFields(e)));
   }, [client]);
   useEffect(() => {
     load();
@@ -618,7 +647,10 @@ export function ComputerUsePanel({ client, agentId }: { client: DaemonClient; ag
                   ? state.agentIds.filter((x) => x !== agentId)
                   : [...state.agentIds, agentId],
               })
-              .catch(() => {})
+              .catch((e: unknown) => {
+                logWarn("computer.setAccess_failed", { agentId, ...errorFields(e) });
+                setError(errorMessage(e));
+              })
           }
         />
         Let this bot see the screen and control the mouse and keyboard
@@ -626,6 +658,7 @@ export function ComputerUsePanel({ client, agentId }: { client: DaemonClient; ag
       <p className="text-xs text-zinc-500">
         macOS asks for Screen Recording and Accessibility permission the first time.
       </p>
+      {error && <p className="text-xs text-red-400">{error}</p>}
     </section>
   );
 }
@@ -662,7 +695,7 @@ export function GatewaysView({ client, agents }: { client: DaemonClient; agents:
     client
       .request("gateways.list", {})
       .then(setItems)
-      .catch(() => {});
+      .catch((e: unknown) => logWarn("gateways.list_failed", errorFields(e)));
   }, [client]);
   useEffect(() => {
     load();
@@ -965,7 +998,7 @@ export function MobileView({ client }: { client: DaemonClient }) {
     client
       .request("mobile.status", {})
       .then(setSt)
-      .catch(() => {});
+      .catch((e: unknown) => logWarn("mobile.status_failed", errorFields(e)));
   }, [client]);
   useEffect(() => {
     load();
@@ -1059,11 +1092,11 @@ export function TeamView({ client, agents }: { client: DaemonClient; agents: Age
     client
       .request("team.status", {})
       .then(setSt)
-      .catch(() => {});
+      .catch((e: unknown) => logWarn("team.status_failed", errorFields(e)));
     client
       .request("team.messages", {})
       .then(setMsgs)
-      .catch(() => {});
+      .catch((e: unknown) => logWarn("team.messages_failed", errorFields(e)));
     const a = client.on("team.updated", setSt);
     const b = client.on("team.message", (m) =>
       setMsgs((prev) => {

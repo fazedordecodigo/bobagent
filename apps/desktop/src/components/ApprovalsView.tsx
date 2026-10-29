@@ -14,6 +14,7 @@ import {
   requiresFullReview,
 } from "../lib/approval-description";
 import type { DaemonClient } from "../lib/daemon";
+import { errorFields, errorMessage, logWarn } from "../lib/log";
 import { btnCls, inputCls } from "./AgentSettings";
 import { useApprovalFeedback } from "./ApprovalFeedback";
 import s from "./Approvals.module.css";
@@ -21,11 +22,18 @@ import { Button, Field, StatusPill } from "./ds/controls";
 
 function useApprovals(client: DaemonClient, agentId?: string) {
   const [items, setItems] = useState<Approval[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const load = useCallback(() => {
     client
       .request("approvals.list", agentId ? { agentId } : {})
-      .then(setItems)
-      .catch(() => {});
+      .then((list) => {
+        setItems(list);
+        setError(null);
+      })
+      .catch((e: unknown) => {
+        logWarn("approvals.list_failed", { agentId, ...errorFields(e) });
+        setError("Não foi possível carregar aprovações");
+      });
   }, [client, agentId]);
   useEffect(() => {
     load();
@@ -33,7 +41,7 @@ function useApprovals(client: DaemonClient, agentId?: string) {
       if (!agentId || a.agentId === agentId) load();
     });
   }, [client, agentId, load]);
-  return items;
+  return { items, error };
 }
 
 function Countdown({ until }: { until: number }) {
@@ -231,7 +239,14 @@ export function ApprovalCards({
   agentId: string;
   botName: string;
 }) {
-  const pending = useApprovals(client, agentId).filter((a) => a.status === "pending");
+  const { items, error } = useApprovals(client, agentId);
+  const pending = items.filter((a) => a.status === "pending");
+  if (error)
+    return (
+      <div className={s.cards}>
+        <p className="px-4 py-1 text-xs text-red-400">{error}</p>
+      </div>
+    );
   if (!pending.length) return null;
   return (
     <div className={s.cards}>
@@ -257,9 +272,16 @@ export function AppApprovalCards({
   agents: Agent[];
   primary?: boolean;
 }) {
-  const pending = useApprovals(client).filter(
+  const { items, error } = useApprovals(client);
+  const pending = items.filter(
     (a) => a.status === "pending" && a.kind === "tool" && Boolean(a.appId),
   );
+  if (error)
+    return (
+      <section aria-label="Pedidos de apps conectados" className={s.cards}>
+        <p className="px-4 py-1 text-xs text-red-400">{error}</p>
+      </section>
+    );
   if (!pending.length) return null;
   return (
     <section aria-label="Pedidos de apps conectados" className={s.cards}>
@@ -278,7 +300,7 @@ export function AppApprovalCards({
 }
 
 export function ApprovalsView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
-  const items = useApprovals(client);
+  const { items, error: listError } = useApprovals(client);
   const [rules, setRules] = useState<ApprovalRule[]>([]);
   const [form, setForm] = useState({ pattern: "", action: "ask" as "ask" | "allow", agentId: "" });
   const [error, setError] = useState<string | null>(null);
@@ -286,7 +308,10 @@ export function ApprovalsView({ client, agents }: { client: DaemonClient; agents
     client
       .request("approvals.rules", {})
       .then(setRules)
-      .catch(() => {});
+      .catch((e: unknown) => {
+        logWarn("approvals.rules_failed", errorFields(e));
+        setError(errorMessage(e));
+      });
   }, [client]);
   useEffect(() => {
     load();
@@ -381,6 +406,7 @@ export function ApprovalsView({ client, agents }: { client: DaemonClient; agents
       </form>
       {error && <div className="text-xs text-red-400">{error}</div>}
       <h3 className="text-sm font-semibold text-zinc-300">Pedidos</h3>
+      {listError && <p className="text-xs text-red-400">{listError}</p>}
       <div className="space-y-2">
         {items.map((a) => (
           <ApprovalCard

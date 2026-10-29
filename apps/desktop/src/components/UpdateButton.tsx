@@ -1,5 +1,6 @@
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useState } from "react";
+import { errorMessage, logError, logInfo } from "../lib/log";
 
 export function UpdateButton() {
   const [state, setState] = useState<
@@ -14,6 +15,7 @@ export function UpdateButton() {
       if (state === "available" && update) {
         setState("installing");
         await update.downloadAndInstall();
+        logInfo("updater.installed", { version: update.version });
         setState("done");
         return;
       }
@@ -22,7 +24,13 @@ export function UpdateButton() {
       setUpdate(u);
       setState(u ? "available" : "none");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const message = errorMessage(e);
+      logError("updater.failed", {
+        phase: state === "installing" ? "install" : "check",
+        version: update?.version,
+        error: message,
+      });
+      setError(message);
       setState("error");
     }
   };
