@@ -94,12 +94,6 @@ export function errorFields(e: unknown): string {
   return code ? `errorType=${type} code=${code}` : `errorType=${type}`;
 }
 
-const CONFIG_OPTION_ID_RE = /^[a-z][a-z0-9_.-]{0,31}$/;
-
-export function safeConfigOptionId(id: unknown): string {
-  return typeof id === "string" && CONFIG_OPTION_ID_RE.test(id) ? id : "<redacted>";
-}
-
 /**
  * Bounded provider-exit diagnostics: exit kind, code/signal and whether a detail
  * tail followed — never the tail itself (provider stderr can contain secrets).
@@ -404,11 +398,11 @@ export class AgentRuntime {
     this.sessionConfigApplied = true;
     const opts = session.configOptions;
     let changed = false;
-    for (const o of opts) {
+    for (const [index, o] of opts.entries()) {
       const desired = this.agent.config[o.id];
       if (desired === undefined) continue;
       if (!o.options.some((v) => v.value === desired)) {
-        this.logRuntime("skipping invalid config", `option=${safeConfigOptionId(o.id)}`);
+        this.logRuntime("skipping invalid config", `option#${index}`);
         continue;
       }
       if (o.currentValue === desired) continue;
@@ -417,10 +411,7 @@ export class AgentRuntime {
         o.currentValue = desired;
         changed = true;
       } catch (e) {
-        this.logRuntime(
-          "set_config_option failed",
-          `option=${safeConfigOptionId(o.id)} ${errorFields(e)}`,
-        );
+        this.logRuntime("set_config_option failed", `option#${index} ${errorFields(e)}`);
       }
     }
     // default mode when the user hasn't chosen one
