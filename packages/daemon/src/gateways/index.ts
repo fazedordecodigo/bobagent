@@ -21,6 +21,8 @@ export const TOKEN_FIELDS: Record<GatewayKind, string[]> = {
   discord: ["botToken"],
 };
 const MAX_REPLY = 20_000;
+const errorName = (e: unknown) =>
+  e instanceof Error && /^[A-Za-z]{1,40}$/.test(e.name) ? e.name : "unknown";
 
 type Row = {
   id: string;
@@ -35,7 +37,11 @@ type Row = {
 
 export class GatewayService {
   private transports = new Map<string, Transport>();
-  private status = new Map<string, { status: GatewayStatus; error: string | null }>();
+  private transportInfo = new WeakMap<Transport, { kind: GatewayKind; secrets: string[] }>();
+  private status = new Map<
+    string,
+    { status: GatewayStatus; error: string | null; sendError: string | null }
+  >();
 
   constructor(
     private db: Database,
@@ -62,7 +68,7 @@ export class GatewayService {
       allowedUsers: JSON.parse(r.allowed_users) as string[],
       enabled: r.enabled === 1,
       status: r.enabled === 1 ? (s?.status ?? "connecting") : "stopped",
-      error: r.enabled === 1 ? (s?.error ?? null) : null,
+      error: r.enabled === 1 ? (s?.error ?? s?.sendError ?? null) : null,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };
@@ -191,7 +197,7 @@ export class GatewayService {
       onMessage: (m) => this.onInbound(id, m),
       onStatus: (status, error = null) => {
         if (this.transports.get(id) !== t) return;
-        this.status.set(id, { status, error });
+        this.status.set(id, { status, error, sendError: this.status.get(id)?.sendError ?? null });
         this.emit(id);
       },
     };
@@ -203,14 +209,16 @@ export class GatewayService {
           ? new SlackTransport(tokens.botToken!, tokens.appToken!, hooks)
           : new DiscordTransport(tokens.botToken!, hooks);
     this.transports.set(id, t);
-    this.status.set(id, { status: "connecting", error: null });
+    this.transportInfo.set(t, {
+      kind: r.kind,
+      secrets: Object.values(tokens).filter((value) => value.length > 0),
+    });
+    this.status.set(id, { status: "connecting", error: null, sendError: null });
     t.start();
   }
 
   /**
-   * Posts a message through the gateway's transport. Send failures are logged and stored
-   * on the gateway's status (surfaced via `gateway.updated`) instead of being dropped;
-   * a later successful send clears the recorded error.
+   * Posts through the gateway transport and reports redacted send errors separately.
    */
   private async deliver(id: string, chatId: string, text: string, replyTo?: string) {
     const t = this.transports.get(id);
@@ -218,17 +226,25 @@ export class GatewayService {
     try {
       await t.send(chatId, text, replyTo);
     } catch (e) {
-      const message = (e as Error).message;
-      console.error(`[upbotd] gateway ${id} send failed:`, message);
+      const info = this.transportInfo.get(t);
+      let message = e instanceof Error ? e.message : "send failed";
+      for (const secret of info?.secrets ?? []) message = message.split(secret).join("[redacted]");
+      message = message.slice(0, 500);
+      console.error(`[upbotd] gateway ${id} (${info?.kind ?? "unknown"}) send failed (${errorName(e)})`);
       if (this.transports.get(id) !== t) return;
-      this.status.set(id, { status: this.status.get(id)?.status ?? "error", error: message });
+      const status = this.status.get(id) ?? {
+        status: "error" as GatewayStatus,
+        error: null,
+        sendError: null,
+      };
+      this.status.set(id, { ...status, sendError: message });
       this.emit(id);
       return;
     }
     if (this.transports.get(id) !== t) return;
     const s = this.status.get(id);
-    if (s?.error) {
-      this.status.set(id, { status: s.status, error: null });
+    if (s?.sendError) {
+      this.status.set(id, { ...s, sendError: null });
       this.emit(id);
     }
   }

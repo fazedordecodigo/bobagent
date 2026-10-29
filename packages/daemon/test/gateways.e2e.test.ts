@@ -17,10 +17,10 @@ import {
 const TOKEN = `gw-test-${crypto.randomUUID()}`;
 type Json = Record<string, unknown>;
 
-async function waitFor<T>(fn: () => T | undefined, ms = 15000): Promise<T> {
+async function waitFor<T>(fn: () => T | undefined | Promise<T | undefined>, ms = 15000): Promise<T> {
   const end = Date.now() + ms;
   while (Date.now() < end) {
-    const v = fn();
+    const v = await fn();
     if (v !== undefined) return v;
     await Bun.sleep(50);
   }
@@ -44,12 +44,16 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
   let fake: ReturnType<typeof Bun.serve>;
   const tgUpdates: Json[] = [];
   const tgSent: Json[] = [];
+  const tg2Updates: Json[] = [];
+  const tg2Sent: Json[] = [];
   const slackPosted: Json[] = [];
   const slackAcks: string[] = [];
   const slackEnvelopes: Json[] = [];
   const discordSent: { channel: string; body: Json }[] = [];
   let discordIdentify: Json | null = null;
   let updateId = 1;
+  let tg2FailSend = false;
+  let tg2FailPoll = false;
 
   beforeAll(async () => {
     fake = Bun.serve({
@@ -65,17 +69,31 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
         }
         const tg = /^\/bot([^/]+)\/(\w+)$/.exec(u.pathname);
         if (tg) {
-          if (tg[1] !== "TG-TOKEN")
+          if (tg[1] !== "TG-TOKEN" && tg[1] !== "TG-2")
             return Response.json({ ok: false, description: "Unauthorized" }, { status: 401 });
           const body = (await req.json().catch(() => ({}))) as Json;
+          const isSecondTelegram = tg[1] === "TG-2";
+          if (isSecondTelegram && tg2FailPoll && (tg[2] === "getMe" || tg[2] === "getUpdates"))
+            return Response.json(
+              { ok: false, description: "Conflict: polling broken" },
+              { status: 409 },
+            );
           if (tg[2] === "getMe")
             return Response.json({ ok: true, result: { id: 1, is_bot: true } });
           if (tg[2] === "getUpdates") {
-            if (tgUpdates.length === 0) await Bun.sleep(100);
-            return Response.json({ ok: true, result: tgUpdates.splice(0) });
+            const updates = isSecondTelegram ? tg2Updates : tgUpdates;
+            if (updates.length === 0) await Bun.sleep(100);
+            return Response.json({ ok: true, result: updates.splice(0) });
           }
           if (tg[2] === "sendMessage") {
-            tgSent.push(body);
+            if (isSecondTelegram) {
+              if (tg2FailSend)
+                return Response.json(
+                  { ok: false, description: "Bad Request: chat not found" },
+                  { status: 400 },
+                );
+              tg2Sent.push(body);
+            } else tgSent.push(body);
             return Response.json({ ok: true, result: {} });
           }
         }
@@ -183,6 +201,15 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
   });
 
   const tgMsg = (userId: number, text: string) => ({
+    update_id: updateId++,
+    message: {
+      message_id: updateId * 10,
+      chat: { id: userId + 1000 },
+      from: { id: userId, username: `u${userId}` },
+      text,
+    },
+  });
+  const tg2Msg = (userId: number, text: string) => ({
     update_id: updateId++,
     message: {
       message_id: updateId * 10,
@@ -314,5 +341,88 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
       "telegram",
       "slack",
     ]);
+  });
+
+  test("telegram send errors stay separate from connection status", async () => {
+    const relay = (await c.request("agents.create", {
+      name: "Relay",
+      provider: "devin",
+      instructions: "",
+    })) as Agent;
+    let gatewayId: string | undefined;
+    const waitGateway = (predicate: (gateway: Gateway) => boolean) =>
+      waitFor(async () => {
+        const current = ((await c.request("gateways.list", {})) as Gateway[]).find(
+          (gateway) => gateway.id === gatewayId,
+        );
+        return current && predicate(current) ? current : undefined;
+      });
+    try {
+      const gateway = (await c.request("gateways.create", {
+        kind: "telegram",
+        name: "Relay Telegram",
+        agentId: relay.id,
+        tokens: { botToken: "TG-2" },
+        allowedUsers: ["43"],
+      })) as Gateway;
+      gatewayId = gateway.id;
+      await waitGateway((current) => current.status === "connected");
+
+      tg2FailSend = true;
+      tg2Updates.push(tg2Msg(43, "echo:lost reply"));
+      const failedSend = await waitGateway(
+        (current) => current.error?.includes("chat not found") === true,
+      );
+      expect(failedSend.status).toBe("connected");
+      expect(tg2Sent.some((message) => message.text === "lost reply")).toBe(false);
+      expect(failedSend.error).not.toContain("TG-2");
+
+      tg2FailPoll = true;
+      const pollError = await waitGateway(
+        (current) =>
+          current.status === "error" && current.error?.includes("polling broken") === true,
+      );
+      expect(pollError.status).toBe("error");
+      tg2FailPoll = false;
+      const recovered = await waitGateway((current) => current.status === "connected");
+      expect(recovered.error ?? "").toContain("chat not found");
+
+      tg2FailSend = false;
+      tg2Updates.push(tg2Msg(43, "echo:delivered"));
+      await waitFor(() => tg2Sent.find((message) => message.text === "delivered"));
+      await waitGateway((current) => current.error === null);
+
+      tg2Updates.push(tg2Msg(43, "slow"));
+      await waitFor(async () => {
+        const { items, turns } = (await c.request("chat.history", {
+          agentId: relay.id,
+        })) as { items: ChatItem[]; turns: { id: string; status: string }[] };
+        const userMessage = items.find((item) => item.kind === "user_message" && item.text === "slow");
+        return userMessage && turns.some((turn) => turn.id === userMessage.turnId && turn.status === "running")
+          ? true
+          : undefined;
+      });
+      tg2FailPoll = true;
+      const slowPollError = await waitGateway(
+        (current) =>
+          current.status === "error" && current.error?.includes("polling broken") === true,
+      );
+      expect(slowPollError.status).toBe("error");
+      await c.request("chat.cancel", { agentId: relay.id });
+      await waitFor(() =>
+        tg2Sent.find((message) => message.text === "The agent stopped before replying."),
+      );
+      const cancelled = await waitGateway(
+        (current) =>
+          current.status === "error" && current.error?.includes("polling broken") === true,
+      );
+      expect(cancelled.error ?? "").toContain("polling broken");
+      tg2FailPoll = false;
+      await waitGateway((current) => current.status === "connected" && current.error === null);
+    } finally {
+      tg2FailSend = false;
+      tg2FailPoll = false;
+      if (gatewayId) await c.request("gateways.delete", { id: gatewayId }).catch(() => {});
+    }
   });
 });
