@@ -114,12 +114,19 @@ test("app tool errors are logged without their message", async () => {
 });
 
 describe("errorDiagnostics", () => {
-  test("keeps the class, a checked code and stack frames, never the message", () => {
+  test("keeps the class and a checked code, never the message or stack", () => {
     const e = Object.assign(new TypeError("token=sk-secret\n    at sk-secret"), { code: "ENOENT" });
-    const d = errorDiagnostics(e);
-    expect(d).toMatchObject({ errorType: "TypeError", code: "ENOENT" });
-    expect(d.frames?.length).toBeGreaterThan(0);
-    expect(JSON.stringify(d)).not.toContain("sk-secret");
+    expect(errorDiagnostics(e)).toEqual({ errorType: "TypeError", code: "ENOENT" });
+  });
+
+  test("forged frame lines in a message that was later shortened stay out", () => {
+    const upstream = new Error("rejected\n    at ghp_forgedFrameSecret (x:1:1)");
+    void upstream.stack;
+    upstream.message = "rejected";
+    const wrapper = new Error("rejected", { cause: upstream });
+    wrapper.name = "AppToolError";
+    expect(JSON.stringify(errorDiagnostics(upstream))).not.toContain("ghp_forgedFrameSecret");
+    expect(JSON.stringify(errorDiagnostics(wrapper))).not.toContain("ghp_forgedFrameSecret");
   });
 
   test("drops untrusted names, codes and rewritten stacks", () => {
@@ -134,7 +141,7 @@ describe("errorDiagnostics", () => {
   });
 });
 
-test("errorDiagnostics keeps the upstream cause's type, code and frames, never its message", () => {
+test("errorDiagnostics keeps the upstream cause's type and code, never its message", () => {
   const upstream = Object.assign(new Error("MCP error -32000: Bearer ghp_upstreamSecret"), {
     name: "McpError",
     code: -32000,

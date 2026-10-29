@@ -122,6 +122,8 @@ describe("bridge failure logging e2e", () => {
     expect(line).toContain("isApp: true");
     expect(line).toContain('errorType: "AppToolError"');
     expect(line).toMatch(/cause: \{[\s\S]*errorType: "McpError"[\s\S]*code: -32000/);
+    expect(line).not.toContain("frames");
+    expect(line).not.toContain("forged.ts");
     expect(run.log.text).not.toContain(APP_SECRET);
   }, 30_000);
 });

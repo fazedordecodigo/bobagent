@@ -458,13 +458,13 @@ const ERROR_NAME = /^[A-Za-z_$][\w$]{0,63}$/;
 const ERROR_CODE = /^[A-Z][A-Z0-9_]{0,31}$/;
 
 /**
- * Log-safe description of a caught error: its class, a format-checked code and the stack
- * frames, never its message (tools and app MCP servers may echo credentials into it).
+ * Log-safe description of a caught error and its `cause` chain: class and format-checked code
+ * only. Never the message nor the stack: tools and app MCP servers may echo credentials into the
+ * message, and the stack embeds it, so frame-shaped lines in it can be forged.
  */
 type ErrorDiagnostics = {
   errorType: string;
   code?: string | number;
-  frames?: string[];
   cause?: ErrorDiagnostics;
 };
 
@@ -475,18 +475,6 @@ export function errorDiagnostics(e: unknown, depth = 0): ErrorDiagnostics {
   const code = (e as { code?: unknown }).code;
   if (Number.isSafeInteger(code)) out.code = code as number;
   else if (typeof code === "string" && ERROR_CODE.test(code)) out.code = code;
-  const header = e.message ? `${e.name}: ${e.message}` : String(e.name);
-  // Frames are only trusted when the stack starts with the exact header (a rewritten stack
-  // or message could otherwise smuggle untrusted text into lines that look like frames).
-  if (typeof e.stack === "string" && e.stack.startsWith(header)) {
-    const frames = e.stack
-      .slice(header.length)
-      .split("\n")
-      .filter((l) => /^\s+at\s/.test(l))
-      .slice(0, 10)
-      .map((l) => l.trim().slice(0, 300));
-    if (frames.length) out.frames = frames;
-  }
   if (e.cause !== undefined && depth < 2) out.cause = errorDiagnostics(e.cause, depth + 1);
   return out;
 }
