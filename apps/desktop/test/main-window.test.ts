@@ -1056,23 +1056,50 @@ test("cached approval and draft cards remain visible when refreshes fail", async
     await target.getByTestId("email-draft").waitFor();
 
     fail = true;
-    if (!routedSocket) throw new Error("Routed websocket was not created");
+    const socket = routedSocket;
+    if (!socket) throw new Error("Routed websocket was not created");
     const approvalLog = target.waitForEvent("console", {
       predicate: (message) => message.text().includes("[desktop] approvals.list_failed"),
     });
-    routedSocket.send(JSON.stringify({ event: "approval.updated", data: approval }));
-    routedSocket.send(JSON.stringify({ event: "email.draft.updated", data: draft }));
+    const overviewLogs = Promise.all(
+      ["history", "queue", "approvals", "apps", "email"].map((name) =>
+        target.waitForEvent("console", {
+          predicate: (message) => message.text().includes(`[desktop] overview.${name}_failed`),
+        }),
+      ),
+    );
+    socket.send(JSON.stringify({ event: "approval.updated", data: approval }));
+    socket.send(JSON.stringify({ event: "email.draft.updated", data: draft }));
+    socket.send(
+      JSON.stringify({
+        event: "turn.started",
+        data: {
+          id: "refresh-error-turn",
+          agentId: bot.id,
+          queueId: null,
+          status: "running",
+          stopReason: null,
+          error: null,
+          startedAt: Date.now(),
+          endedAt: null,
+        },
+      }),
+    );
+    socket.send(JSON.stringify({ event: "apps.changed", data: {} }));
+    socket.send(JSON.stringify({ event: "email.accounts.changed", data: {} }));
+    socket.send(JSON.stringify({ event: "approvals.rulesChanged", data: {} }));
     await target.getByText("Não foi possível carregar aprovações", { exact: true }).waitFor();
     await target.getByText("Falha token=sk-secret-xyz", { exact: true }).waitFor();
     await target.getByTestId("approval").waitFor();
     await target.getByTestId("email-draft").waitFor();
     const approvalMessage = await approvalLog;
     expect(approvalMessage.text()).toContain('"code":"internal"');
+    await overviewLogs;
 
     const closedMessage = target.waitForEvent("console", {
       predicate: (message) => message.text().includes("[desktop] daemon.socket_closed"),
     });
-    routedSocket.close({ code: 4001, reason: "reason-secret-abc" });
+    socket.close({ code: 4001, reason: "reason-secret-abc" });
     expect((await closedMessage).text()).toContain('"code":4001');
     expect(consoleText.join("\n")).not.toContain("sk-secret-xyz");
     expect(consoleText.join("\n")).not.toContain("reason-secret-abc");
