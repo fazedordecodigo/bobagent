@@ -79,7 +79,17 @@ vault allowlisted to the bot) and `request_takeover` (user uses the bot browser,
 RPC `approvals.list/respond/rules/setRules` (also allowed for mobile), events
 `approval.updated`, `approvals.rulesChanged`. Codex gets `tool_timeout_sec = 3600` for MCP
 servers so waits do not time out. UI: `ApprovalCards` above the composer, Settings →
-Approvals. Tests: `test/approvals.e2e.test.ts`.
+Approvals. Tests: `test/approvals.e2e.test.ts`, `test/approval-audit.test.ts`.
+Every terminal decision persists to `approval_audit` (migration 21): `approval.decided`
+(status, decision, kind, tool, app/permission, ageMs — never args or secret values),
+`approval.auto_denied` for off permissions, `approval.permission_escalated` for
+`always` escalations (app previousLevel or created ruleId), `approval.rules_changed`
+(added/removed/changed rule ids) and `approval.app_permissions_changed` (source connect/update/
+restore, per-kind from/to). Failed or overridden decisions include requestedDecision, reason
+and failure. `approval.secret_allowlist_read_failed` records vault allowlist failures; error
+details in the audit and stderr are limited to code/name, never message or stack. Tests:
+`test/approval-audit.test.ts` and
+`test/approvals.e2e.test.ts` cover the audit trail.
 
 Desktop notifications: `apps/desktop/src/lib/notifications.ts` owns approval eligibility,
 bounded summaries, actions, persisted one-hour mute and daemon decisions. Only pending
@@ -311,7 +321,10 @@ scheduled runs. Webhooks: `POST /hooks/<routineId>` with
 `Authorization: Bearer <webhookToken>` (per-routine token; Origin rejected), body passed as
 `<webhook_payload>` (20 KB cap). RPC `routines.list/create/update/delete/run/runs`, events
 `routine.updated`/`routine.deleted`. The prompt is wrapped in `<routine name trigger>`;
-`queue.meta_json` puts `routine`/`attachments` on the user_message item.
+`queue.meta_json` puts `routine`/`attachments` on the user_message item. `readQueueMeta`
+validates each known field (routine/gateway/team/attachments entries) independently; invalid
+ones are dropped (no reply destination is invented), unknown keys are ignored, and an invalid
+or unparseable origin keeps the turn background.
 Attachments: `chat.send {attachments:[{name,mime,dataBase64}]}` (max 10, 25 MB total) are
 written to `<workspace>/attachments/<id>/` (`src/attachments.ts`, basename-sanitized, ZIPs
 extracted with `unzip` or Windows `tar`, with unsafe archive paths rejected) and listed in an
@@ -460,7 +473,8 @@ per-run root disk on session end. With `setpriv` installed, Firecracker runs wit
 `--pdeathsig KILL`. On the Linux x86_64/KVM test host, boot to first guest output measured 1.7
 seconds. The proxy resolves DNS once, rejects a hostname if any IPv4 answer is non-public, and
 connects to the approved address. CONNECT requests are audited at `vms/<agentId>/proxy.log`
-(rotated to `.1` above 1 MiB); provider processes drop inherited `UPBOT_*` variables while
+(rotated to `.1` above 1 MiB) with allow/deny decisions plus `connected`/`upstream error`
+outcomes per destination; provider processes drop inherited `UPBOT_*` variables while
 retaining explicit RunSpec env.
 MicroVM sign-in (`src/remote/credentials.ts`): `vmCredentials.list/set/delete` store
 `vmcred.<provider>` in the vault (hidden from `vault.list`, never on an allowlist):

@@ -11,7 +11,7 @@ import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Agent } from "@upbot/protocol";
 import { ProviderId } from "@upbot/protocol";
 import type { AgentStore } from "./agents";
-import type { ApprovalService } from "./approvals";
+import { type ApprovalService, GateRejection } from "./approvals";
 import type { AppsService } from "./apps";
 import type { BrowserService } from "./browser";
 import type { ChannelService } from "./channels";
@@ -454,6 +454,31 @@ export function bridgeCommand(): { command: string; args: string[] } {
     : { command: process.execPath, args: [Bun.main, "mcp-bridge"] };
 }
 
+const ERROR_NAME = /^[A-Za-z_$][\w$]{0,63}$/;
+const ERROR_CODE = /^[A-Z][A-Z0-9_]{0,31}$/;
+
+/**
+ * Log-safe description of a caught error and its `cause` chain: class and format-checked code
+ * only. Never the message nor the stack: tools and app MCP servers may echo credentials into the
+ * message, and the stack embeds it, so frame-shaped lines in it can be forged.
+ */
+type ErrorDiagnostics = {
+  errorType: string;
+  code?: string | number;
+  cause?: ErrorDiagnostics;
+};
+
+export function errorDiagnostics(e: unknown, depth = 0): ErrorDiagnostics {
+  if (!(e instanceof Error)) return { errorType: typeof e };
+  const errorType = typeof e.name === "string" && ERROR_NAME.test(e.name) ? e.name : "Error";
+  const out: ErrorDiagnostics = { errorType };
+  const code = (e as { code?: unknown }).code;
+  if (Number.isSafeInteger(code)) out.code = code as number;
+  else if (typeof code === "string" && ERROR_CODE.test(code)) out.code = code;
+  if (e.cause !== undefined && depth < 2) out.cause = errorDiagnostics(e.cause, depth + 1);
+  return out;
+}
+
 export class Bridge {
   private tokens = new Map<string, string>();
   private byAgent = new Map<string, string>();
@@ -509,23 +534,41 @@ export class Bridge {
   }
 
   async handle(agentId: string, body: Json): Promise<Json> {
-    if (body.method === "tools/list")
-      return {
-        tools: [...BRIDGE_TOOLS, ...((await this.apps?.toolsFor(agentId).catch(() => [])) ?? [])],
-      };
+    if (body.method === "tools/list") {
+      const appTools = await this.apps?.toolsFor(agentId).catch((e) => {
+        console.error("[upbotd] bridge tools/list failed", { agentId, ...errorDiagnostics(e) });
+        return [];
+      });
+      return { tools: [...BRIDGE_TOOLS, ...(appTools ?? [])] };
+    }
     if (body.method !== "tools/call")
       throw new Error(`unknown bridge method ${String(body.method)}`);
     const params = (body.params ?? {}) as Json;
     const args = (params.arguments ?? {}) as Json;
+    const startedAt = Date.now();
+    let name = "";
+    let isApp = false;
     let r: ToolResult;
     try {
-      const name = String(params.name);
-      const isApp = this.apps?.isAppTool(name) ?? false;
+      name = String(params.name);
+      isApp = this.apps?.isAppTool(name) ?? false;
       await this.approvals?.gate(agentId, name, args, isApp);
       r =
         (isApp ? await this.apps!.call(agentId, name, args) : null) ??
         (await this.call(agentId, name, args));
     } catch (e) {
+      // Tool names are bot-controlled input: only registered names are safe to log.
+      const knownTool =
+        BRIDGE_TOOLS.some((t) => t.name === name) ||
+        (isApp && (this.apps?.hasAppTool?.(name) ?? false));
+      console.error("[upbotd] bridge tool failed", {
+        agentId,
+        tool: knownTool ? name : "<unregistered>",
+        isApp,
+        durationMs: Date.now() - startedAt,
+        reason: e instanceof GateRejection ? e.reason : "error",
+        ...errorDiagnostics(e),
+      });
       r = { text: (e as Error).message, isError: true };
     }
     return { content: [{ type: "text", text: r.text }], isError: r.isError === true };

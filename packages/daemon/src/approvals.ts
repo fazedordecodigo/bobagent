@@ -31,6 +31,17 @@ export function legacyPattern(pattern: string): string {
 
 const ms = (env: string | undefined, d: number) => (env && Number(env) > 0 ? Number(env) : d);
 
+/** Expected tool-call rejection: the user denied, the approval expired or the app forbids it. */
+export class GateRejection extends Error {
+  constructor(
+    readonly reason: "denied" | "expired",
+    message: string,
+  ) {
+    super(message);
+    this.name = "GateRejection";
+  }
+}
+
 export class ApprovalService {
   private pending = new Map<string, Approval>();
   private waiters = new Map<string, Waiter>();
@@ -44,16 +55,66 @@ export class ApprovalService {
     private runtimes: () => RuntimeManager,
     private broadcast: Broadcast,
     private apps: AppsService,
-  ) {}
+  ) {
+    apps.onPermissionsChanged = (e) =>
+      this.audit("approval.app_permissions_changed", {
+        appId: e.appId,
+        source: e.source,
+        changes: e.changes,
+      });
+  }
 
   rules(): ApprovalRule[] {
     return getSetting<ApprovalRule[]>(this.db, "approval_rules", []);
   }
 
   setRules(rules: ApprovalRule[]): ApprovalRule[] {
+    const previous = this.rules();
     setSetting(this.db, "approval_rules", rules);
+    const previousIds = new Set(previous.map((r) => r.id));
+    const nextIds = new Set(rules.map((r) => r.id));
+    const addedRuleIds = rules.filter((r) => !previousIds.has(r.id)).map((r) => r.id);
+    const removedRuleIds = previous.filter((r) => !nextIds.has(r.id)).map((r) => r.id);
+    const previousById = new Map(previous.map((r) => [r.id, r]));
+    const changedRuleIds = rules
+      .filter((r) => {
+        const old = previousById.get(r.id);
+        return (
+          old !== undefined &&
+          (old.pattern !== r.pattern || old.action !== r.action || old.agentId !== r.agentId)
+        );
+      })
+      .map((r) => r.id);
+    this.audit("approval.rules_changed", {
+      addedCount: addedRuleIds.length,
+      removedCount: removedRuleIds.length,
+      changedCount: changedRuleIds.length,
+      addedRuleIds,
+      removedRuleIds,
+      changedRuleIds,
+    });
     this.broadcast("approvals.rulesChanged", {});
     return rules;
+  }
+
+  /** Persistent audit trail (approval_audit). Never stores args, details or secret values. */
+  private audit(event: string, data: Record<string, unknown>, a?: Approval): void {
+    try {
+      this.db
+        .query(
+          "INSERT INTO approval_audit (event, approval_id, agent_id, turn_id, data_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run(
+          event,
+          a?.id ?? (typeof data.approvalId === "string" ? data.approvalId : null),
+          a?.agentId ?? (typeof data.agentId === "string" ? data.agentId : null),
+          a?.turnId ?? null,
+          JSON.stringify(data),
+          Date.now(),
+        );
+    } catch (error) {
+      console.error("[upbotd] approval.audit_write_failed", (error as Error).message);
+    }
   }
 
   /** "ask" | "allow" for a tool call, after rules and defaults. */
@@ -121,13 +182,43 @@ export class ApprovalService {
     });
   }
 
-  private finish(id: string, status: Approval["status"], value?: string): Approval | null {
+  private finish(
+    id: string,
+    status: Approval["status"],
+    value?: string,
+    outcome?: {
+      decision?: ApprovalDecision;
+      requestedDecision?: ApprovalDecision;
+      reason?: string;
+      failure?: string;
+    },
+  ): Approval | null {
     if (status === "expired" && this.responding.has(id)) return null;
     const a = this.pending.get(id);
     if (!a) return null;
     this.pending.delete(id);
     const done = { ...a, status };
     this.recent = [done, ...this.recent].slice(0, 50);
+    this.audit(
+      "approval.decided",
+      {
+        approvalId: done.id,
+        turnId: done.turnId,
+        kind: done.kind,
+        tool: done.tool,
+        appId: done.appId ?? null,
+        permission: done.permission ?? null,
+        secretName: done.kind === "secret" ? done.secretName : null,
+        status,
+        decision: outcome?.decision ?? null,
+        requestedDecision: outcome?.requestedDecision ?? null,
+        reason: outcome?.reason ?? null,
+        failure: outcome?.failure ?? null,
+        background: done.background,
+        ageMs: Date.now() - done.createdAt,
+      },
+      done,
+    );
     const w = this.waiters.get(id);
     this.waiters.delete(id);
     if (w) {
@@ -158,20 +249,51 @@ export class ApprovalService {
     if (waiter) clearTimeout(waiter.timer);
     try {
       if (a.kind === "secret") {
-        if (p.decision === "deny") return this.finish(a.id, "denied")!;
+        if (p.decision === "deny")
+          return this.finish(a.id, "denied", undefined, { decision: "deny" })!;
         if (!p.value) throw new RpcError("bad_request", "enter the secret value");
         const name = a.secretName!;
-        const existing = this.vault.get(name);
-        const agentIds = existing ? [...new Set([...existing.agentIds, a.agentId])] : [a.agentId];
+        let agentIds: string[];
+        try {
+          const existing = this.vault.get(name);
+          agentIds = existing ? [...new Set([...existing.agentIds, a.agentId])] : [a.agentId];
+        } catch (error) {
+          const failure = error instanceof RpcError ? error.code : (error as Error).name;
+          this.audit(
+            "approval.secret_allowlist_read_failed",
+            {
+              approvalId: a.id,
+              agentId: a.agentId,
+              secretName: name,
+              failure,
+            },
+            a,
+          );
+          console.error("[upbotd] approval.secret_allowlist_read_failed", {
+            approvalId: a.id,
+            agentId: a.agentId,
+            secretName: name,
+            failure,
+          });
+          throw error;
+        }
         this.vault.set(name, p.value, agentIds);
         this.broadcast("vault.changed", {});
-        return this.finish(a.id, "approved")!;
+        return this.finish(a.id, "approved", undefined, { decision: p.decision })!;
       }
       if (a.kind === "takeover")
-        return this.finish(a.id, p.decision === "deny" ? "denied" : "done")!;
+        return this.finish(a.id, p.decision === "deny" ? "denied" : "done", undefined, {
+          decision: p.decision,
+        })!;
       if (a.appId && a.permission) {
-        if (p.decision === "deny" || this.apps.get(a.appId).permissions[a.permission] === "off")
-          return this.finish(a.id, "denied")!;
+        if (p.decision === "deny")
+          return this.finish(a.id, "denied", undefined, { decision: "deny" })!;
+        if (this.apps.get(a.appId).permissions[a.permission] === "off")
+          return this.finish(a.id, "denied", undefined, {
+            decision: "deny",
+            requestedDecision: p.decision,
+            reason: "permission_off",
+          })!;
         if (p.decision === "always" && !isSensitivePermission(a.permission)) {
           const app = this.apps.get(a.appId);
           a.previousLevel = app.permissions[a.permission];
@@ -181,6 +303,17 @@ export class ApprovalService {
             this.apps.restorePermission(a.appId, a.permission, a.previousLevel);
             throw error;
           }
+          this.audit(
+            "approval.permission_escalated",
+            {
+              approvalId: a.id,
+              agentId: a.agentId,
+              appId: a.appId,
+              permission: a.permission,
+              previousLevel: a.previousLevel,
+            },
+            a,
+          );
         }
         if (p.decision === "task" && a.turnId && !isSensitivePermission(a.permission)) {
           const key = `${a.agentId}:${a.turnId}`;
@@ -189,14 +322,28 @@ export class ApprovalService {
           this.grants.set(key, grants);
         }
       } else if (p.decision === "always" && a.tool) {
-        this.setRules([
-          ...this.rules(),
-          { id: crypto.randomUUID(), pattern: a.tool, action: "allow", agentId: a.agentId },
-        ]);
+        const rule: ApprovalRule = {
+          id: crypto.randomUUID(),
+          pattern: a.tool,
+          action: "allow",
+          agentId: a.agentId,
+        };
+        this.setRules([...this.rules(), rule]);
+        this.audit(
+          "approval.permission_escalated",
+          { approvalId: a.id, agentId: a.agentId, ruleId: rule.id, pattern: rule.pattern },
+          a,
+        );
       }
-      return this.finish(a.id, p.decision === "deny" ? "denied" : "approved")!;
+      return this.finish(a.id, p.decision === "deny" ? "denied" : "approved", undefined, {
+        decision: p.decision,
+      })!;
     } catch (error) {
-      this.finish(a.id, "denied");
+      this.finish(a.id, "denied", undefined, {
+        requestedDecision: p.decision,
+        reason: "respond_failed",
+        failure: error instanceof RpcError ? error.code : (error as Error).name,
+      });
       throw error;
     } finally {
       this.responding.delete(p.id);
@@ -215,8 +362,16 @@ export class ApprovalService {
     const app = isAppTool ? this.apps.appForTool(tool) : undefined;
     if (isAppTool && !app) throw new RpcError("not_found", "app not found");
     const permission = classifyAppTool(tool);
-    if (app?.permissions[permission] === "off")
-      throw new Error(`${app.name} não permite ${permission}`);
+    if (app?.permissions[permission] === "off") {
+      this.audit("approval.auto_denied", {
+        agentId,
+        tool,
+        appId: app.id,
+        permission,
+        reason: "permission_off",
+      });
+      throw new GateRejection("denied", `${app.name} não permite ${permission}`);
+    }
     if (this.decide(agentId, tool, isAppTool) === "allow") return;
     const detail = JSON.stringify(args ?? {}, null, 2);
     const { approval } = await this.open(agentId, {
@@ -228,7 +383,8 @@ export class ApprovalService {
       ...(app ? { appId: app.id, appName: app.name, permission } : {}),
     });
     if (approval.status === "approved") return;
-    throw new Error(
+    throw new GateRejection(
+      approval.status === "expired" ? "expired" : "denied",
       approval.status === "expired"
         ? `the user did not approve ${tool} in time; do not retry it, report back and wait for instructions`
         : `the user declined ${tool}; do not retry it`,
