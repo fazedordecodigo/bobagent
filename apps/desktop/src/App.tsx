@@ -22,6 +22,7 @@ import { ScheduledView } from "./components/ScheduledView";
 import { Sidebar } from "./components/Sidebar";
 import { TABS, ToolBody, type ToolTab } from "./components/ToolsView";
 import { UpdateButton } from "./components/UpdateButton";
+import { useChat } from "./hooks/useChat";
 import { useLayerFocus, useMediaQuery } from "./hooks/useLayerFocus";
 import { useOverview } from "./hooks/useOverview";
 import { DaemonClient } from "./lib/daemon";
@@ -190,6 +191,7 @@ export default function App() {
   const selected = agents.find((agent) => agent.id === selectedId) ?? null;
   const selectedOverview = selected ? overview[selected.id] : undefined;
   const selectedChannel = channels.find((channel) => channel.id === channelId) ?? null;
+  const chat = useChat(client, clientReady && view === "chat" ? (selected?.id ?? null) : null);
 
   const navigate = useCallback((next: View) => {
     setView(next);
@@ -584,6 +586,7 @@ export default function App() {
               client={client}
               agent={selected}
               overview={selectedOverview}
+              chat={chat}
               onOpenSettings={() => navigate("agent-settings")}
               notice={notice}
               onNoticeDismiss={() => setNotice(null)}
@@ -684,6 +687,7 @@ export default function App() {
           client={client}
           agent={selected}
           overview={selectedOverview}
+          chat={chat}
           overlayOpen={panelOpen && !sideOpen}
           onClose={togglePanel}
           onOpenApps={() => {
