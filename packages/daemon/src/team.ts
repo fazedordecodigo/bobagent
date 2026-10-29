@@ -1,7 +1,14 @@
 import type { Database } from "bun:sqlite";
-import type { TeamMember, TeamMessage, TeamStatus, Turn } from "@upbot/protocol";
+import {
+  RelayFrame,
+  type RelayIncomingFrame,
+  type TeamMember,
+  type TeamMessage,
+  type TeamStatus,
+  type Turn,
+} from "@upbot/protocol";
 import type { AgentStore } from "./agents";
-import type { ChatStore } from "./chat-store";
+import { type ChatStore, parseQueueMeta } from "./chat-store";
 import type { Broadcast } from "./rpc";
 import { RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
@@ -253,44 +260,33 @@ export class TeamClient {
   }
 
   private onFrame(raw: string) {
-    let m: Record<string, unknown>;
+    let m: RelayFrame;
     try {
-      m = JSON.parse(raw) as Record<string, unknown>;
+      const parsed = RelayFrame.safeParse(JSON.parse(raw));
+      if (!parsed.success) return;
+      m = parsed.data;
     } catch {
       return;
     }
     if (m.type === "welcome") {
-      this.me = m.member as { id: string; name: string };
+      this.me = m.member;
       this.emit();
     } else if (m.type === "roster") {
-      this.roster = (m.members as TeamMember[]).filter((x) => x.id !== this.me?.id);
+      this.roster = m.members.filter((x) => x.id !== this.me?.id);
       this.emit();
     } else if (m.type === "incoming") {
-      this.onIncoming(
-        m as {
-          requestId: string;
-          from: { memberId: string; name: string };
-          agentId: string;
-          text: string;
-        },
-      );
+      this.onIncoming(m);
     } else if (m.type === "reply") {
-      const status = m.status === "failed" ? "failed" : "completed";
       this.db
         .query(
           "UPDATE team_messages SET reply = ?, status = ? WHERE request_id = ? AND direction = 'out'",
         )
-        .run(String(m.text ?? ""), status, String(m.requestId));
-      this.emitMessage(String(m.requestId), "out");
+        .run(m.text, m.status, m.requestId);
+      this.emitMessage(m.requestId, "out");
     }
   }
 
-  private onIncoming(m: {
-    requestId: string;
-    from: { memberId: string; name: string };
-    agentId: string;
-    text: string;
-  }) {
+  private onIncoming(m: RelayIncomingFrame) {
     const shared = this.config()?.sharedAgentIds ?? [];
     const agent = this.agents.get(m.agentId);
     const fail = (text: string) =>
@@ -332,10 +328,7 @@ export class TeamClient {
   }
 
   onTurnEnded(turn: Turn, queueRow: { meta_json: string | null } | null) {
-    if (!queueRow?.meta_json) return;
-    const meta = JSON.parse(queueRow.meta_json) as {
-      team?: { requestId: string; memberId: string };
-    };
+    const meta = parseQueueMeta(queueRow);
     if (!meta.team) return;
     const text =
       turn.status === "completed"

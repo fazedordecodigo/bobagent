@@ -401,6 +401,32 @@ export const TeamMessage = z.object({
 });
 export type TeamMessage = z.infer<typeof TeamMessage>;
 
+// Frames the team relay (packages/relay) sends to a connected daemon member.
+const RelayMemberRef = z.object({ memberId: z.string(), name: z.string() });
+export const RelayFrame = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("welcome"),
+    member: z.object({ id: z.string(), name: z.string() }),
+  }),
+  z.object({ type: z.literal("roster"), members: z.array(TeamMember) }),
+  z.object({
+    type: z.literal("incoming"),
+    requestId: z.string(),
+    from: RelayMemberRef,
+    agentId: z.string(),
+    text: z.string(),
+  }),
+  z.object({
+    type: z.literal("reply"),
+    requestId: z.string(),
+    status: z.enum(["completed", "failed"]),
+    text: z.string().default(""),
+    from: RelayMemberRef.optional(),
+  }),
+]);
+export type RelayFrame = z.infer<typeof RelayFrame>;
+export type RelayIncomingFrame = Extract<RelayFrame, { type: "incoming" }>;
+
 // ---- Remote hosts, microVM isolation, subagents ----
 
 export const Isolation = z.enum(["none", "firecracker"]);

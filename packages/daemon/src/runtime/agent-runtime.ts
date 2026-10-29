@@ -10,7 +10,7 @@ import type {
   QueueState,
 } from "@upbot/protocol";
 import type { AgentStore } from "../agents";
-import type { ChatStore, QueueSource, QueueStore } from "../chat-store";
+import { type ChatStore, parseQueueMeta, type QueueSource, type QueueStore } from "../chat-store";
 import { checkProviderAvailable, DEFAULT_MODE, getDriver } from "../providers";
 import { withTimeout } from "../providers/process";
 import {
@@ -201,6 +201,7 @@ export class AgentRuntime {
     if (this.agents.queuePaused(this.agent.id)) return;
     const next = this.queue.peek(this.agent.id);
     if (!next) return;
+    const meta = parseQueueMeta(next);
     this.draining = true;
     try {
       const turnRow = this.store.createTurn(this.agent.id, next.id);
@@ -209,7 +210,6 @@ export class AgentRuntime {
       this.openTextItem = null;
       this.turnHops = next.hops ?? 0;
       this.turnChannelId = next.channel_id ?? null;
-      const meta = next.meta_json ? (JSON.parse(next.meta_json) as Record<string, unknown>) : {};
       this.turnBackground = Boolean(
         next.from_agent_id || next.channel_id || meta.routine || meta.gateway || meta.team,
       );
@@ -223,7 +223,7 @@ export class AgentRuntime {
         text: next.text,
         ...(sender ? { from: sender } : {}),
         ...(next.channel_id ? { channelId: next.channel_id } : {}),
-        ...(next.meta_json ? (JSON.parse(next.meta_json) as Record<string, unknown>) : {}),
+        ...meta,
       });
       this.setStatus("starting");
       this.broadcast("turn.started", turnRow);

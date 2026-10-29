@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { Gateway, GatewayKind, GatewayStatus, Turn } from "@upbot/protocol";
 import type { AgentStore } from "../agents";
-import type { ChatStore } from "../chat-store";
+import { type ChatStore, parseQueueMeta } from "../chat-store";
 import type { Broadcast } from "../rpc";
 import { RpcError } from "../runtime/agent-runtime";
 import type { RuntimeManager } from "../runtime/runtime-manager";
@@ -261,10 +261,7 @@ export class GatewayService {
 
   /** Posts the agent's final reply back to the chat the message came from. */
   onTurnEnded(turn: Turn, queueRow: { meta_json: string | null } | null) {
-    if (!queueRow?.meta_json) return;
-    const meta = JSON.parse(queueRow.meta_json) as {
-      gateway?: { id: string; chatId: string; replyTo?: string };
-    };
+    const meta = parseQueueMeta(queueRow);
     if (!meta.gateway) return;
     const t = this.transports.get(meta.gateway.id);
     if (!t) return;

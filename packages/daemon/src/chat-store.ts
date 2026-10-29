@@ -1,5 +1,14 @@
 import type { Database } from "bun:sqlite";
-import type { AgentUsage, ChatItem, Turn, TurnStatus } from "@upbot/protocol";
+import {
+  type AgentUsage,
+  ChatAttachment,
+  type ChatItem,
+  GatewayKind,
+  RoutineTrigger,
+  type Turn,
+  type TurnStatus,
+} from "@upbot/protocol";
+import { z } from "zod";
 
 type TurnRow = {
   id: string;
@@ -298,6 +307,42 @@ export type QueueSource = {
   /** Extra fields stored on the user_message item (routine, attachments). */
   meta?: Record<string, unknown>;
 };
+
+// meta_json on a queue row: extra fields producers attach for the drain loop and for the
+// services that consume the turn's user_message item (routines, gateways, team, attachments).
+export const QueueMeta = z
+  .object({
+    routine: z.object({ id: z.string(), name: z.string(), trigger: RoutineTrigger }).optional(),
+    gateway: z
+      .object({
+        id: z.string(),
+        kind: GatewayKind,
+        name: z.string(),
+        chatId: z.string(),
+        userId: z.string(),
+        userName: z.string(),
+        replyTo: z.string().optional(),
+      })
+      .loose()
+      .optional(),
+    team: z
+      .object({ requestId: z.string(), memberId: z.string(), memberName: z.string() })
+      .optional(),
+    attachments: z.array(ChatAttachment).optional(),
+  })
+  .loose();
+export type QueueMeta = z.infer<typeof QueueMeta>;
+
+/** Parses a queue row's meta_json; corrupt or malformed meta degrades to no meta. */
+export function parseQueueMeta(row: { meta_json: string | null } | null | undefined): QueueMeta {
+  if (!row?.meta_json) return {};
+  try {
+    const parsed = QueueMeta.safeParse(JSON.parse(row.meta_json));
+    return parsed.success ? parsed.data : {};
+  } catch {
+    return {};
+  }
+}
 
 function rowToQueueItem(r: QueueRow): QueueItemLite {
   return {
