@@ -90,9 +90,9 @@ describe("asynchronous child spawn errors", () => {
   });
 
   test("synchronous spawn errors never expose injected env values", () => {
-    const secret = `sk-spawn-env-${crypto.randomUUID()}`;
-    // a NUL byte in an env value makes the runtime throw ERR_INVALID_ARG_VALUE
-    // quoting the offending value verbatim, so it exercises the redaction
+    // not matched by redactSecrets' patterns, and NUL-terminated so the
+    // runtime's env validation would quote it verbatim in an escaped form
+    const secret = `plain-secret-${crypto.randomUUID()}`;
     let thrown: unknown;
     try {
       spawnProvider("bun", ["-e", "1"], process.cwd(), {
@@ -104,7 +104,7 @@ describe("asynchronous child spawn errors", () => {
     expect(thrown).toBeInstanceOf(ProviderError);
     const message = (thrown as Error).message;
     expect(message).not.toContain(secret);
-    if (message.includes("OPENAI_API_KEY")) expect(message).toContain("<redacted>");
+    expect(message).toContain("NUL");
   });
 
   test("ACP provider startup failure surfaces a sanitized stderr tail", async () => {

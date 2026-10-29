@@ -186,6 +186,16 @@ export function spawnProvider(
   extraEnv?: Record<string, string>,
   remote?: RemoteLaunch,
 ): ProviderProcess {
+  // Reject unsanitizable env upfront: the runtime's own env validation error
+  // quotes the offending value verbatim, which would leak an injected credential.
+  for (const [key, value] of Object.entries(extraEnv ?? {})) {
+    if (key.includes("\0") || value.includes("\0")) {
+      throw new ProviderError(
+        "provider_unavailable",
+        `${bin} failed to start: env ${key.replaceAll("\0", "\\0")} contains a NUL byte`,
+      );
+    }
+  }
   const stderrLines: string[] = [];
   let child: ChildProcess;
   try {
