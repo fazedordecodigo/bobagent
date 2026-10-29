@@ -454,6 +454,39 @@ export function bridgeCommand(): { command: string; args: string[] } {
     : { command: process.execPath, args: [Bun.main, "mcp-bridge"] };
 }
 
+const ERROR_NAME = /^[A-Za-z_$][\w$]{0,63}$/;
+const ERROR_CODE = /^[A-Z][A-Z0-9_]{0,31}$/;
+
+/**
+ * Log-safe description of a caught error: its class, a format-checked code and the stack
+ * frames, never its message (tools and app MCP servers may echo credentials into it).
+ */
+export function errorDiagnostics(e: unknown): {
+  errorType: string;
+  code?: string | number;
+  frames?: string[];
+} {
+  if (!(e instanceof Error)) return { errorType: typeof e };
+  const errorType = typeof e.name === "string" && ERROR_NAME.test(e.name) ? e.name : "Error";
+  const out: { errorType: string; code?: string | number; frames?: string[] } = { errorType };
+  const code = (e as { code?: unknown }).code;
+  if (Number.isSafeInteger(code)) out.code = code as number;
+  else if (typeof code === "string" && ERROR_CODE.test(code)) out.code = code;
+  const header = e.message ? `${e.name}: ${e.message}` : String(e.name);
+  // Frames are only trusted when the stack starts with the exact header (a rewritten stack
+  // or message could otherwise smuggle untrusted text into lines that look like frames).
+  if (typeof e.stack === "string" && e.stack.startsWith(header)) {
+    const frames = e.stack
+      .slice(header.length)
+      .split("\n")
+      .filter((l) => /^\s+at\s/.test(l))
+      .slice(0, 10)
+      .map((l) => l.trim().slice(0, 300));
+    if (frames.length) out.frames = frames;
+  }
+  return out;
+}
+
 export class Bridge {
   private tokens = new Map<string, string>();
   private byAgent = new Map<string, string>();
@@ -511,7 +544,7 @@ export class Bridge {
   async handle(agentId: string, body: Json): Promise<Json> {
     if (body.method === "tools/list") {
       const appTools = await this.apps?.toolsFor(agentId).catch((e) => {
-        console.error("[upbotd] bridge tools/list failed", { agentId, error: e });
+        console.error("[upbotd] bridge tools/list failed", { agentId, ...errorDiagnostics(e) });
         return [];
       });
       return { tools: [...BRIDGE_TOOLS, ...(appTools ?? [])] };
@@ -538,7 +571,7 @@ export class Bridge {
         isApp,
         durationMs: Date.now() - startedAt,
         reason: e instanceof GateRejection ? e.reason : "error",
-        error: e,
+        ...errorDiagnostics(e),
       });
       r = { text: (e as Error).message, isError: true };
     }
