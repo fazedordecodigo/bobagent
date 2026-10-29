@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   chmodSync,
   existsSync,
@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { resetPathCache } from "../src/env/login-path";
 import { loadVaultKey } from "../src/vault";
 
@@ -177,4 +177,78 @@ test.skipIf(process.platform !== "win32")(
     expect(existsSync(join(dataDir, "vault.key.dpapi.tmp"))).toBe(false);
   },
   15_000,
+);
+
+test("logs the DPAPI failure cause and falls back to a plaintext key", () => {
+  const directory = testRoot();
+  const dataDir = join(directory, "data");
+  mkdirSync(join(dataDir, "vault.key.dpapi.tmp"), { recursive: true });
+  setEnv("UPBOT_VAULT_KEY", undefined);
+  if (process.platform !== "win32") {
+    mkdirSync(join(directory, "empty-bin"));
+    setEnv("PATH", join(directory, "empty-bin"));
+  }
+  const error = spyOn(console, "error").mockImplementation(() => {});
+
+  try {
+    const key = loadVaultKey(dataDir, "win32");
+    const keyHex = key.toString("hex");
+    const file = join(dataDir, "vault.key");
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error.mock.calls[0]?.[0]).toMatch(
+      /^UpBot could not use Windows DPAPI \(.+\); storing the vault key in a plaintext file\.$/,
+    );
+    expect(JSON.stringify(error.mock.calls)).not.toContain(keyHex);
+    expect(readFileSync(file, "utf8")).toBe(keyHex);
+    if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(existsSync(join(dataDir, "vault.key.dpapi"))).toBe(false);
+
+    expect(loadVaultKey(dataDir, "win32").equals(key)).toBe(true);
+    expect(error).toHaveBeenCalledTimes(1);
+  } finally {
+    error.mockRestore();
+  }
+}, 15_000);
+
+test.skipIf(process.platform !== "darwin")(
+  "logs the keychain add failure before falling back",
+  () => {
+    const directory = testRoot();
+    const dataDir = join(directory, "data");
+    const binDir = join(directory, "bin");
+    const logFile = join(directory, "security.log");
+    const security = join(binDir, "security");
+    mkdirSync(binDir);
+    writeFileSync(
+      security,
+      '#!/bin/sh\nprintf \'%s\\n\' "$1" >> "$KEYCHAIN_TEST_LOG"\ncase "$1" in\n  find-generic-password) exit 44 ;;\n  add-generic-password) exit 45 ;;\nesac\nexit 0\n',
+      { mode: 0o700 },
+    );
+    chmodSync(security, 0o700);
+    setEnv("PATH", [binDir, process.env.PATH ?? ""].filter(Boolean).join(delimiter));
+    setEnv("KEYCHAIN_TEST_LOG", logFile);
+    setEnv("UPBOT_VAULT_KEY", undefined);
+    const error = spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const key = loadVaultKey(dataDir, "darwin");
+      const keyHex = key.toString("hex");
+      const file = join(dataDir, "vault.key");
+      expect(error.mock.calls.map(([message]) => message)).toEqual([
+        "[upbotd] keychain add failed (exit 45)",
+        "UpBot could not use the platform secure store; storing the vault key in a plaintext file.",
+      ]);
+      expect(JSON.stringify(error.mock.calls)).not.toContain(keyHex);
+      expect(readFileSync(file, "utf8")).toBe(keyHex);
+      expect(statSync(file).mode & 0o777).toBe(0o600);
+      const calls = readFileSync(logFile, "utf8").trim().split("\n");
+      expect(calls).toEqual([
+        "find-generic-password",
+        "find-generic-password",
+        "add-generic-password",
+      ]);
+    } finally {
+      error.mockRestore();
+    }
+  },
 );
