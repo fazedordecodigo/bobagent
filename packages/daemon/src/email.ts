@@ -5,7 +5,7 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import nodemailer from "nodemailer";
 import { RpcError } from "./runtime/agent-runtime";
-import type { Vault } from "./vault";
+import { EMAIL_PREFIX, type Vault } from "./vault";
 
 // Email over IMAP (search/read) + SMTP (send). Passwords (app passwords) live in the vault as
 // email.<id>.password and never reach bots. Bots can only create drafts; a draft is sent only
@@ -110,7 +110,7 @@ export class EmailService {
   // ---- accounts ----
 
   private passwordName(id: string) {
-    return `email.${id}.password`;
+    return `${EMAIL_PREFIX}${id}.password`;
   }
 
   private rowToAccount(r: { id: string; config_json: string; created_at: number }): EmailAccount {

@@ -15,7 +15,7 @@ import type {
 } from "@upbot/protocol";
 import { AppPermissions, defaultAppPermissions } from "@upbot/protocol";
 import { RpcError } from "./runtime/agent-runtime";
-import type { Vault } from "./vault";
+import { APP_PREFIX, type Vault } from "./vault";
 
 // Connected apps: MCP servers the daemon runs (stdio) or talks to (streamable HTTP) on behalf
 // of the bots. Secrets live in the vault as app.<id>.<KEY> and only reach the server process
@@ -24,6 +24,8 @@ import type { Vault } from "./vault";
 
 type Broadcast = (event: string, data: unknown) => void;
 type Tool = { name: string; description?: string; inputSchema?: unknown };
+
+const secretName = (id: string, key: string) => `${APP_PREFIX}${id}.${key}`;
 
 export const APP_CATALOG: AppCatalogEntry[] = [
   {
@@ -289,7 +291,7 @@ export class AppsService {
     if (this.list().some((a) => a.slug === slug))
       throw new RpcError("conflict", `an app named "${config.name}" is already connected`);
     const id = crypto.randomUUID();
-    for (const [k, v] of Object.entries(p.secrets)) this.vault.set(`app.${id}.${k}`, v, []);
+    for (const [k, v] of Object.entries(p.secrets)) this.vault.set(secretName(id, k), v, []);
     this.db
       .query(
         "INSERT INTO connected_apps (id, catalog_id, config_json, permissions_json, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)",
@@ -314,7 +316,7 @@ export class AppsService {
     if (p.secrets) {
       for (const [k, v] of Object.entries(p.secrets)) {
         if (!c.secretKeys.includes(k)) throw new RpcError("bad_request", `unknown secret ${k}`);
-        if (v) this.vault.set(`app.${p.id}.${k}`, v, []);
+        if (v) this.vault.set(secretName(p.id, k), v, []);
       }
     }
     const enabled = p.enabled ?? r.enabled === 1;
@@ -343,7 +345,7 @@ export class AppsService {
     const c = this.config(this.row(id));
     await this.stop(id);
     this.db.query("DELETE FROM connected_apps WHERE id = ?").run(id);
-    for (const k of c.secretKeys) this.vault.delete(`app.${id}.${k}`);
+    for (const k of c.secretKeys) this.vault.delete(secretName(id, k));
     this.live.delete(id);
     this.changed();
   }
@@ -367,7 +369,7 @@ export class AppsService {
 
   private secrets(id: string, c: Config): Record<string, string> {
     const out: Record<string, string> = {};
-    for (const k of c.secretKeys) out[k] = this.vault.revealInternal(`app.${id}.${k}`);
+    for (const k of c.secretKeys) out[k] = this.vault.revealInternal(secretName(id, k));
     return out;
   }
 
