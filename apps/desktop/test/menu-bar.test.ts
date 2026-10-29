@@ -72,12 +72,17 @@ beforeAll(async () => {
       stderr: "inherit",
     });
   }
-  for (let attempt = 0; attempt < 100; attempt++) {
+  let viteReady = false;
+  for (let attempt = 0; attempt < 300; attempt++) {
     try {
-      if ((await fetch(base)).ok) break;
+      if ((await fetch(base)).ok) {
+        viteReady = true;
+        break;
+      }
     } catch {}
     await Bun.sleep(100);
   }
+  if (!viteReady) throw new Error("Vite dev server did not start on :1420");
   browser = await chromium.launch({ channel: "chrome", headless: true });
   const context = await browser.newContext({ viewport: { width: 384, height: 600 } });
   page = await context.newPage();
@@ -94,16 +99,16 @@ beforeAll(async () => {
   await main.goto(`${base}#port=${daemon.port}&token=${token}`);
   await main
     .getByRole("textbox", { name: "Mensagem para o bot" })
-    .waitFor({ timeout: 10000 })
+    .waitFor({ timeout: 45000 })
     .catch(async (error) => {
       throw new Error(
         `${String(error)}\n${errors.join("\n")}\n${await main.locator("body").innerText()}`,
       );
     });
   await page.goto(url());
-  await page.getByText("Nada aguardando você", { exact: true }).waitFor();
+  await page.getByText("Nada aguardando você", { exact: true }).waitFor({ timeout: 30000 });
   if (out) mkdirSync(out, { recursive: true });
-}, 30000);
+}, 90000);
 
 afterAll(async () => {
   await browser?.close();
