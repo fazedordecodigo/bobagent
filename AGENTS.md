@@ -460,7 +460,8 @@ per-run root disk on session end. With `setpriv` installed, Firecracker runs wit
 `--pdeathsig KILL`. On the Linux x86_64/KVM test host, boot to first guest output measured 1.7
 seconds. The proxy resolves DNS once, rejects a hostname if any IPv4 answer is non-public, and
 connects to the approved address. CONNECT requests are audited at `vms/<agentId>/proxy.log`
-(rotated to `.1` above 1 MiB); provider processes drop inherited `UPBOT_*` variables while
+(rotated to `.1` above 1 MiB) with allow/deny decisions plus `connected`/`upstream error`
+outcomes per destination; provider processes drop inherited `UPBOT_*` variables while
 retaining explicit RunSpec env.
 MicroVM sign-in (`src/remote/credentials.ts`): `vmCredentials.list/set/delete` store
 `vmcred.<provider>` in the vault (hidden from `vault.list`, never on an allowlist):
