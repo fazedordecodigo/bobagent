@@ -2,6 +2,7 @@ import type { Agent } from "@upbot/protocol";
 import { useState } from "react";
 import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 import { btnCls } from "./AgentSettings";
 
 export function PagesView({
@@ -23,7 +24,7 @@ export function PagesView({
   );
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   const page = pages.find((p) => p.id === selected) ?? pages[0] ?? null;
   const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? "bot removido";
   return (

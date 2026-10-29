@@ -98,7 +98,7 @@ export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agent
   );
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   return (
     <section className="mx-auto max-w-lg space-y-2 px-6 pb-6">
       <h3 className="text-sm font-semibold text-zinc-300">Memories</h3>
@@ -157,7 +157,7 @@ export function SkillsView({ client }: { client: DaemonClient }) {
     },
   );
   const [error, setError] = useState<string | null>(null);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
 
   if (edit) {
     return (
@@ -392,7 +392,7 @@ export function BrowserView({ client, agents }: { client: DaemonClient; agents: 
     },
   );
   const [error, setError] = useState<string | null>(null);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   if (!state) {
     return loadError ? (
       <div className="mx-auto max-w-2xl p-6">
@@ -589,7 +589,7 @@ export function ComputerUsePanel({ client, agentId }: { client: DaemonClient; ag
     },
   );
   const [error, setError] = useState<string | null>(null);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   if (!state?.available) {
     return loadError ? <p className="text-xs text-red-400">{loadError}</p> : null;
   }

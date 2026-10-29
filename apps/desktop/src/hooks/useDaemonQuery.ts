@@ -1,6 +1,7 @@
 import type { DaemonEventMap, MethodName, MethodParams, MethodResult } from "@upbot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 
 /** Subscriptions for `useDaemonQuery`: `true` reloads on every event, a
  * predicate reloads only when it accepts the event payload. */
@@ -47,7 +48,7 @@ export function useDaemonQuery<M extends MethodName>(
       })
       .catch((e: unknown) => {
         if (mounted.current && gen === generation.current) {
-          setError(e instanceof Error ? e.message : String(e));
+          setError(errorMessage(e));
         }
       });
   }, [client, method]);
