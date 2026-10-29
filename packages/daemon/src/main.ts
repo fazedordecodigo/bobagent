@@ -39,6 +39,7 @@ const ORIGIN_ALLOWLIST = new Set([
   "tauri://localhost",
   "http://tauri.localhost",
   "http://localhost:1420",
+  "http://localhost:1422",
 ]);
 
 function parseArgs(argv: string[]): { dataDir: string; agentsRoot: string } {
@@ -290,6 +291,7 @@ async function main() {
           hook[1]!,
           auth.startsWith("Bearer ") ? auth.slice(7) : "",
         );
+        if (id && typeof id === "object") return new Response("not found", { status: 404 });
         if (!id) return new Response("unauthorized", { status: 401 });
         return req.text().then(
           (payload) => {

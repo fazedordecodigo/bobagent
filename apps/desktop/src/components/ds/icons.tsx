@@ -104,6 +104,19 @@ export function HomeIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+export function HookIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...props} viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+      <path
+        d="M10 14a4 4 0 0 1 0-5.6l2.8-2.8a4 4 0 0 1 5.6 5.6L17 12.6M14 10a4 4 0 0 1 0 5.6l-2.8 2.8a4 4 0 0 1-5.6-5.6L7 11.4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
 export function LockIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...props} viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">

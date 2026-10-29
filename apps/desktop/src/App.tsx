@@ -8,13 +8,13 @@ import type {
   ProviderId,
 } from "@upbot/protocol";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AgentSettings, PROVIDERS } from "./components/AgentSettings";
+import { AgentConfigScreen } from "./components/AgentConfigScreen";
+import { PROVIDERS } from "./components/AgentSettings";
 import { ChannelCreateForm, ChannelView } from "./components/ChannelView";
 import { ChatView } from "./components/ChatView";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
 import { IconButton } from "./components/ds/controls";
 import { Icon } from "./components/icons";
-import { AvatarEditor, ComputerUsePanel, MemoriesPanel, RoutinesPanel } from "./components/Library";
 import { NotificationSettings } from "./components/NotificationSettings";
 import { PagesView } from "./components/PagesView";
 import { RunPanel } from "./components/RunPanel";
@@ -107,6 +107,16 @@ export default function App() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [statuses, setStatuses] = useState<Record<string, AgentStatusInfo>>({});
   const [selectedId, setSelectedId] = useState<string | null>(() => readStorage("upbot.agent"));
+  const [agentNameDraft, setAgentNameDraft] = useState<{
+    agentId: string;
+    name: string;
+  } | null>(null);
+  const updateAgentNameDraft = useCallback(
+    (agentId: string, name: string | null) =>
+      setAgentNameDraft(name === null ? null : { agentId, name }),
+    [],
+  );
+  const [deletedAgentSnapshot, setDeletedAgentSnapshot] = useState<Agent | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [channelId, setChannelId] = useState<string | null>(null);
   const [view, setView] = useState<View>(readView);
@@ -188,6 +198,7 @@ export default function App() {
 
   const overview = useOverview(client, agents, statuses, clientReady);
   const selected = agents.find((agent) => agent.id === selectedId) ?? null;
+  const settingsAgent = selected ?? deletedAgentSnapshot;
   const selectedOverview = selected ? overview[selected.id] : undefined;
   const selectedChannel = channels.find((channel) => channel.id === channelId) ?? null;
 
@@ -251,6 +262,7 @@ export default function App() {
 
   useEffect(() => {
     if (!clientReady || !agents.length) return;
+    if (view === "agent-settings" && deletedAgentSnapshot) return;
     if (!selectedId || !agents.some((agent) => agent.id === selectedId)) {
       const first = agents[0];
       if (first) {
@@ -258,7 +270,7 @@ export default function App() {
         writeStorage("upbot.agent", first.id);
       }
     }
-  }, [agents, clientReady, selectedId]);
+  }, [agents, clientReady, deletedAgentSnapshot, selectedId, view]);
 
   const shortcutsRef = useRef<(e: KeyboardEvent) => void>(() => {});
   shortcutsRef.current = (e) => {
@@ -438,30 +450,6 @@ export default function App() {
     [client, navigate],
   );
 
-  const updateAgent = useCallback(
-    async (
-      id: string,
-      patch: {
-        name?: string;
-        instructions?: string;
-        provider?: ProviderId;
-        avatar?: AgentAvatar | null;
-      },
-    ) => {
-      await client.request("agents.update", { id, ...patch });
-    },
-    [client],
-  );
-
-  const deleteAgent = useCallback(
-    async (id: string) => {
-      await client.request("agents.delete", { id });
-      setSelectedId(null);
-      navigate("agents");
-    },
-    [client, navigate],
-  );
-
   const togglePanel = () => {
     if (window.matchMedia("(max-width: 1180px)").matches) setPanelOpen((open) => !open);
     else setNoPanel((hidden) => !hidden);
@@ -496,6 +484,7 @@ export default function App() {
         overview={overview}
         statuses={statuses}
         selectedId={selectedId}
+        agentNameOverride={agentNameDraft}
         channelId={channelId}
         current={view === "settings" && settingsTab === "apps" ? "apps" : view}
         profileName={profileName}
@@ -640,39 +629,42 @@ export default function App() {
           <section className="view on">
             <PagesView client={client} agents={agents} onOpenBot={openAgent} />
           </section>
-        ) : view === "agent-settings" && selected ? (
+        ) : view === "agent-settings" && settingsAgent ? (
           <section className="view on">
-            <div className="page agent-settings-page">
-              <div className="page-inner">
-                <div className="page-top">
-                  <div>
-                    <h1>{selected.name}</h1>
-                    <p>Configurações do bot</p>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => navigate("chat")}
-                  >
-                    Voltar à conversa
-                  </button>
-                </div>
-                <AvatarEditor
-                  agent={selected}
-                  onSave={(avatar) => updateAgent(selected.id, { avatar })}
-                />
-                <AgentSettings
-                  key={selected.id}
-                  client={client}
-                  agent={selected}
-                  onUpdate={updateAgent}
-                  onDelete={deleteAgent}
-                />
-                <MemoriesPanel client={client} agentId={selected.id} />
-                <RoutinesPanel client={client} agentId={selected.id} />
-                <ComputerUsePanel client={client} agentId={selected.id} />
-              </div>
-            </div>
+            <AgentConfigScreen
+              key={settingsAgent.id}
+              agent={settingsAgent}
+              client={client}
+              deleted={!selected}
+              onBack={() => navigate("chat")}
+              onHome={() => {
+                setDeletedAgentSnapshot(null);
+                setSelectedId(null);
+                navigate("home");
+              }}
+              onName={updateAgentNameDraft}
+              onDeleted={(deletedAgent, committed) => {
+                setDeletedAgentSnapshot(deletedAgent);
+                if (committed) {
+                  setSelectedId(null);
+                  setAgents((current) => current.filter((item) => item.id !== deletedAgent.id));
+                }
+              }}
+              onOpenApps={() => {
+                setSettingsTab("apps");
+                navigate("settings");
+              }}
+              onRestored={(restored) => {
+                setDeletedAgentSnapshot(null);
+                setAgents((current) =>
+                  current.some((item) => item.id === restored.id)
+                    ? current.map((item) => (item.id === restored.id ? restored : item))
+                    : [...current, restored],
+                );
+                setSelectedId(restored.id);
+                navigate("agent-settings");
+              }}
+            />
           </section>
         ) : (
           <section className="view on">

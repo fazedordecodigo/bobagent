@@ -162,6 +162,41 @@ describe("routines + attachments e2e", () => {
     ).toEqual(["Standup", "Tick"]);
   });
 
+  test("deleted agents stop scheduled and manual routines until restored", async () => {
+    const agent = (await c.request("agents.create", {
+      name: "Paused agent",
+      provider: "devin",
+      instructions: "",
+    })) as Agent;
+    const r = (await c.request("routines.create", {
+      agentId: agent.id,
+      name: "Paused routine",
+      prompt: "echo:paused",
+      schedule: "every 5m",
+      webhook: true,
+    })) as Routine;
+    const db = new Database(join(dataDir, "upbot.db"));
+    await c.request("agents.delete", { id: agent.id });
+    db.query("UPDATE routines SET next_run_at = 1 WHERE id = ?").run(r.id);
+    await Bun.sleep(450);
+    expect(((await c.request("routines.runs", { id: r.id })) as RoutineRun[]).length).toBe(0);
+    await expect(c.request("routines.run", { id: r.id })).rejects.toMatchObject({
+      code: "not_found",
+    });
+    const response = await fetch(r.webhookUrl!, {
+      method: "POST",
+      headers: { authorization: `Bearer ${r.webhookToken}` },
+    });
+    expect(response.status).toBe(404);
+    await c.request("agents.restore", { id: agent.id });
+    await c.waitForEventWhere(
+      "routine.updated",
+      (item) => (item as Routine).id === r.id && !!(item as Routine).lastRunAt,
+    );
+    expect(((await c.request("routines.runs", { id: r.id })) as RoutineRun[]).length).toBe(1);
+    db.close();
+  });
+
   test("attachments are saved in the workspace, zips extracted, paths given to the agent", async () => {
     const zip = storedZip([
       { name: "notes.txt", contents: Buffer.from("zipped content") },

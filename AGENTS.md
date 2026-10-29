@@ -283,7 +283,9 @@ Tests: `test/usage.e2e.test.ts`.
 
 ## Avatars, memories, skills, agent creation (Phase 8)
 
-`Agent.avatar` (`{emoji,color}` or null, `agents.avatar_json`, migration 8). `agents.draft
+`Agent.avatar` (`{emoji,color}`, `{icon}` with `sym|mail|receipt|plane|chart|cal|sheet`, or
+null; `agents.avatar_json`, migration 8). `agents.restore {id}` restores a soft-deleted agent
+and emits `agent.created` so clients add it back to their lists. `agents.draft
 {prompt}` (`src/draft.ts`, deterministic) proposes name/instructions/avatar for the create
 form. Memories: `memories` table, `MemoryStore` (`src/memories.ts`), RPC
 `memories.list/add/update/delete`, event `memories.changed`. Skills library:
@@ -292,14 +294,17 @@ in `.history/` (`src/skills.ts`), RPC `skills.list/get/save/delete`, event `skil
 Bridge tools: `remember`, `forget`, `list_memories`, `list_skills`, `read_skill`,
 `create_skill`, `revise_skill`, `create_agent`. The first prompt of every fresh session is
 prefixed with `<agent_memories>` and `<skills_library>` (index only). UI:
-`components/Library.tsx`. Tests: `test/phase8.e2e.test.ts`.
+`components/Library.tsx`; the saved agent configuration screen is
+`apps/desktop/src/components/AgentConfigScreen.tsx`. Tests: `test/phase8.e2e.test.ts`.
 
 ## Routines + attachments (Phase 9)
 
 Routines (`src/routines.ts`, migration 9: `routines`, `routine_runs`) are saved prompts sent
 to an agent with `trigger` schedule|webhook|manual. Schedules: `every <n>m|h|d`, `daily HH:MM`,
 `weekly <day> HH:MM` (local time); the scheduler ticks every `UPBOT_ROUTINE_TICK_MS`
-(default 30000) and collapses missed runs into one. Webhooks: `POST /hooks/<routineId>` with
+(default 30000), skips soft-deleted agents, and collapses missed runs into one. Manual and
+webhook triggers also reject routines whose agent is soft-deleted; restoring the agent resumes
+scheduled runs. Webhooks: `POST /hooks/<routineId>` with
 `Authorization: Bearer <webhookToken>` (per-routine token; Origin rejected), body passed as
 `<webhook_payload>` (20 KB cap). RPC `routines.list/create/update/delete/run/runs`, events
 `routine.updated`/`routine.deleted`. The prompt is wrapped in `<routine name trigger>`;

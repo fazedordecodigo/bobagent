@@ -82,15 +82,17 @@ export class AgentStore {
     const instructions = params.instructions ?? existing.instructions;
     const provider = params.provider ?? existing.provider;
     const avatar = params.avatar === undefined ? existing.avatar : params.avatar;
+    const config = provider === existing.provider ? existing.config : {};
     this.db
       .query(
-        "UPDATE agents SET name = ?, instructions = ?, provider = ?, avatar_json = ?, updated_at = ? WHERE id = ?",
+        "UPDATE agents SET name = ?, instructions = ?, provider = ?, avatar_json = ?, config_json = ?, updated_at = ? WHERE id = ?",
       )
       .run(
         name,
         instructions,
         provider,
         avatar ? JSON.stringify(avatar) : null,
+        JSON.stringify(config),
         Date.now(),
         params.id,
       );
@@ -119,5 +121,16 @@ export class AgentStore {
     if (!existing) return false;
     this.db.query("UPDATE agents SET deleted_at = ? WHERE id = ?").run(Date.now(), id);
     return true;
+  }
+
+  restore(id: string): Agent | null {
+    const deleted = this.db
+      .query("SELECT id FROM agents WHERE id = ? AND deleted_at IS NOT NULL")
+      .get(id);
+    if (!deleted) return null;
+    this.db
+      .query("UPDATE agents SET deleted_at = NULL, updated_at = ? WHERE id = ?")
+      .run(Date.now(), id);
+    return this.get(id);
   }
 }

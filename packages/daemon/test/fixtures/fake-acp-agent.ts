@@ -49,6 +49,18 @@ function configOptions() {
       currentValue: state.config.mode ?? "default",
       options: MODE_VALUES.map((v) => ({ value: v, name: v })),
     },
+    ...(process.env.FAKE_ACP_EFFORT === "1"
+      ? [
+          {
+            id: "effort",
+            name: "Effort",
+            category: "effort",
+            type: "select",
+            currentValue: state.config.effort ?? "medium",
+            options: ["low", "medium", "high"].map((value) => ({ value, name: value })),
+          },
+        ]
+      : []),
     {
       id: "model",
       name: "Model",
@@ -61,7 +73,11 @@ function configOptions() {
 }
 
 const state = {
-  config: { mode: undefined as string | undefined, model: undefined as string | undefined },
+  config: {
+    mode: undefined as string | undefined,
+    model: undefined as string | undefined,
+    effort: undefined as string | undefined,
+  },
 };
 try {
   Object.assign(state, JSON.parse(readFileSync(join(STATE_DIR, "state.json"), "utf8")));

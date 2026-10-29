@@ -516,11 +516,21 @@ export class AgentRuntime {
     }
   }
 
-  async setConfig(configId: string, value: string): Promise<ConfigOption[]> {
+  async setConfig(configId: string, value: string | null): Promise<ConfigOption[]> {
     if (this.turn) throw new RpcError("busy", "a turn is running for this agent");
     const session = await this.ensureSession();
     const opt = session.configOptions.find((o) => o.id === configId);
     if (!opt) throw new RpcError("bad_request", `unknown configId ${configId}`);
+    if (value === null) {
+      if (!Object.hasOwn(this.agent.config, configId)) return session.configOptions;
+      const config = { ...this.agent.config };
+      delete config[configId];
+      this.agents.setConfig(this.agent.id, config);
+      this.agent = { ...this.agent, config };
+      this.dropSession();
+      this.broadcast("agent.updated", this.agent);
+      return this.configOptionsList();
+    }
     if (!opt.options.some((v) => v.value === value)) {
       throw new RpcError("bad_request", `invalid value ${value} for ${configId}`);
     }
