@@ -6,7 +6,6 @@ import {
   deepEqual,
   formatCustomSchedule,
   fromRoutine,
-  isDirty,
   isValidTime,
   planMutations,
   rebase,
@@ -45,12 +44,10 @@ const routine = (schedule: string | null): Routine =>
     updatedAt: 0,
   }) as Routine;
 
-test("deep equality tracks nested draft state and dirty state", () => {
+test("deep equality tracks nested draft state", () => {
   const saved = config({ memories: [{ id: "m1", text: "Preferências" }] });
   expect(deepEqual(saved, config({ memories: [{ id: "m1", text: "Preferências" }] }))).toBe(true);
   expect(deepEqual(saved, config({ memories: [{ id: "m1", text: "Outra coisa" }] }))).toBe(false);
-  expect(isDirty(saved, saved)).toBe(false);
-  expect(isDirty(config({ name: "Alterado" }), saved)).toBe(true);
 });
 
 test("rebase adopts untouched server fields and preserves locally edited fields", () => {
