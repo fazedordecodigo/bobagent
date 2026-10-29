@@ -337,17 +337,7 @@ export class TeamClient {
       team?: { requestId: string; memberId: string };
     };
     if (!meta.team) return;
-    const text =
-      turn.status === "completed"
-        ? this.chat
-            .itemsForTurn(turn.id)
-            .filter((i) => i.kind === "agent_message")
-            .map((i) => ("text" in i ? i.text : ""))
-            .join("\n\n")
-            .trim() || "(no reply)"
-        : turn.status === "failed"
-          ? `The agent failed: ${turn.error ?? "unknown error"}`
-          : "The agent stopped before replying.";
+    const text = this.chat.turnReplyText(turn);
     const status = turn.status === "completed" ? "completed" : "failed";
     this.ws?.send(
       JSON.stringify({

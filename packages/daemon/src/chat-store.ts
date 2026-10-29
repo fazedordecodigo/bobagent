@@ -140,6 +140,22 @@ export class ChatStore {
     return rows.map(rowToItem);
   }
 
+  /** A turn's final reply: its agent_message texts joined and trimmed ("" when none). */
+  finalReply(turnId: string): string {
+    return this.itemsForTurn(turnId)
+      .filter((i) => i.kind === "agent_message")
+      .map((i) => ("text" in i ? i.text : ""))
+      .join("\n\n")
+      .trim();
+  }
+
+  /** Reply text for an ended turn, with fallbacks for empty/failed/stopped turns. */
+  turnReplyText(turn: Turn): string {
+    if (turn.status === "completed") return this.finalReply(turn.id) || "(no reply)";
+    if (turn.status === "failed") return `The agent failed: ${turn.error ?? "unknown error"}`;
+    return "The agent stopped before replying.";
+  }
+
   history(
     agentId: string,
     beforeSeq: number | undefined,

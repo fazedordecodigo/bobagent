@@ -362,12 +362,7 @@ ${text}`;
       return;
     }
     if (turn.status !== "completed") return;
-    const items = this.chat.itemsForTurn(turn.id);
-    const reply = items
-      .filter((i) => i.kind === "agent_message")
-      .map((i) => ("text" in i ? i.text : ""))
-      .join("\n\n")
-      .trim();
+    const reply = this.chat.finalReply(turn.id);
     if (!reply) return;
     this.append(ch.id, "agent", turn.agentId, reply);
     const hops = queueRow.hops + 1;
