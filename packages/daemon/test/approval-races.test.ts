@@ -7,10 +7,12 @@ import type { RuntimeManager } from "../src/runtime/runtime-manager";
 import { Vault } from "../src/vault";
 
 async function withApprovals(
-  run: (approvals: ApprovalService, apps: AppsService) => Promise<void>,
+  run: (approvals: ApprovalService, apps: AppsService, vault: Vault) => Promise<void>,
 ) {
   const ttl = process.env.UPBOT_APPROVAL_TTL_MS;
+  const vaultKey = process.env.UPBOT_VAULT_KEY;
   process.env.UPBOT_APPROVAL_TTL_MS = "50";
+  process.env.UPBOT_VAULT_KEY = "ab".repeat(32);
   const db = new Database(":memory:");
   try {
     for (const sql of migrations) db.exec(sql);
@@ -41,10 +43,12 @@ async function withApprovals(
       () => {},
       apps,
     );
-    await run(approvals, apps);
+    await run(approvals, apps, vault);
   } finally {
     if (ttl === undefined) delete process.env.UPBOT_APPROVAL_TTL_MS;
     else process.env.UPBOT_APPROVAL_TTL_MS = ttl;
+    if (vaultKey === undefined) delete process.env.UPBOT_VAULT_KEY;
+    else process.env.UPBOT_VAULT_KEY = vaultKey;
     db.close();
   }
 }
@@ -162,3 +166,31 @@ for (const persisted of [false, true]) {
     });
   });
 }
+
+test("approving a secret merges the existing allowlist instead of shrinking it", async () => {
+  await withApprovals(async (approvals, _apps, vault) => {
+    vault.set("stripe.key", "v1", ["bot-a"]);
+    const request = approvals.requestSecret("bot-b", "stripe.key", "", "need it");
+    const pending = approvals.list().find((a) => a.status === "pending")!;
+    await approvals.respond({ id: pending.id, decision: "approve", value: "v2" });
+    expect(await request).toContain("gave you access");
+    expect(vault.get("stripe.key")!.agentIds.sort()).toEqual(["bot-a", "bot-b"]);
+    expect(vault.reveal("stripe.key", "bot-a")).toBe("v2");
+  });
+});
+
+test("a vault read failure while approving a secret propagates and keeps the allowlist", async () => {
+  await withApprovals(async (approvals, _apps, vault) => {
+    vault.set("stripe.key", "v1", ["bot-a"]);
+    spyOn(vault, "get").mockImplementation(() => {
+      throw new Error("corrupt row");
+    });
+    const request = approvals.requestSecret("bot-b", "stripe.key", "", "need it");
+    const pending = approvals.list().find((a) => a.status === "pending")!;
+    await expect(
+      approvals.respond({ id: pending.id, decision: "approve", value: "v2" }),
+    ).rejects.toThrow("corrupt row");
+    expect(await request).toContain("did not provide");
+    expect(vault.reveal("stripe.key", "bot-a")).toBe("v1");
+  });
+});

@@ -954,6 +954,94 @@ test("scheduled routines show recoverable RPC errors", async () => {
   }
 }, 15000);
 
+test("skill save errors clear on cancel and when creating another skill", async () => {
+  const target = await browser.newPage();
+  await target.routeWebSocket(/\/ws\?/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      const request = JSON.parse(String(message));
+      if (request.method === "skills.save") {
+        socket.send(
+          JSON.stringify({
+            id: request.id,
+            error: { code: "internal", message: "Falha de teste" },
+          }),
+        );
+      } else {
+        server.send(message);
+      }
+    });
+  });
+  try {
+    await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+    await target.getByRole("button", { name: "Agendadas", exact: true }).waitFor();
+    await target.keyboard.press("Meta+,");
+    await target.getByRole("tab", { name: "Geral", exact: true }).waitFor();
+    await target.getByRole("tab", { name: "Habilidades", exact: true }).click();
+    await target.getByRole("button", { name: "New skill", exact: true }).click();
+    await target.getByPlaceholder("name (kebab-case)").fill("test-skill");
+    await target.getByPlaceholder("When to use it").fill("For testing");
+    await target.locator("textarea").fill("Skill body");
+    await target.getByRole("button", { name: "Save", exact: true }).click();
+    const error = target.getByText("Falha de teste", { exact: true });
+    await error.waitFor();
+    await target.getByRole("button", { name: "Cancel", exact: true }).click();
+    expect(await error.count()).toBe(0);
+    await target.getByRole("button", { name: "New skill", exact: true }).click();
+    expect(await error.count()).toBe(0);
+  } finally {
+    await target.close();
+  }
+}, 15000);
+
+test("browser close errors clear after a successful retry", async () => {
+  const target = await browser.newPage();
+  let failBrowserClose = true;
+  await target.routeWebSocket(/\/ws\?/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      const request = JSON.parse(String(message));
+      if (request.method === "browser.status") {
+        socket.send(
+          JSON.stringify({
+            id: request.id,
+            result: { available: true, running: true, tabs: [] },
+          }),
+        );
+      } else if (request.method === "browser.close") {
+        if (failBrowserClose) {
+          failBrowserClose = false;
+          socket.send(
+            JSON.stringify({
+              id: request.id,
+              error: { code: "internal", message: "Falha de teste" },
+            }),
+          );
+        } else {
+          socket.send(JSON.stringify({ id: request.id, result: { ok: true } }));
+        }
+      } else {
+        server.send(message);
+      }
+    });
+  });
+  try {
+    await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+    await target.getByRole("button", { name: "Agendadas", exact: true }).waitFor();
+    await target.keyboard.press("Meta+,");
+    await target.getByRole("tab", { name: "Geral", exact: true }).waitFor();
+    await target.getByRole("tab", { name: "Navegador", exact: true }).click();
+    await target.getByRole("button", { name: "Close browser", exact: true }).waitFor();
+    const error = target.getByText("Falha de teste", { exact: true });
+    await target.getByRole("button", { name: "Close browser", exact: true }).click();
+    await error.waitFor();
+    await target.getByRole("button", { name: "Close browser", exact: true }).click();
+    expect(await error.count()).toBe(0);
+  } finally {
+    await target.close();
+  }
+}, 15000);
+
 test("capture matching prototype states when visual verification is requested", async () => {
   if (!out || !process.env.PHASE2_PROTOTYPE) return;
   const prototype = await browser.newPage({ viewport: { width: 1440, height: 1000 } });

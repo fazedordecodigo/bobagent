@@ -2,6 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import type { ProviderId } from "@upbot/protocol";
 import { resolveCommand, spawnEnv } from "../env/login-path";
 import { spawnChild, waitForChildSpawn } from "../env/spawn";
+import { envOverride } from "../env/vars";
 import { ProviderError, type RemoteLaunch } from "./types";
 
 export const STDERR_TAIL_LINES = 50;
@@ -51,6 +52,21 @@ export function redactSecrets(s: string): string {
 
 export function redactCredential(detail: string, credential: string | null): string {
   return redactSecrets(credential ? detail.replaceAll(credential, "<redacted>") : detail);
+}
+
+/** Logs a failed resume fallback; callers fire onResumeFailed only after the replacement session started. */
+export function logResumeFailed(
+  provider: ProviderId,
+  resumeSessionId: string,
+  error: unknown,
+  credential: string | null,
+): void {
+  const detail = error instanceof Error ? error.message : String(error);
+  console.error("[upbotd] provider.resume_failed", {
+    provider,
+    resumeSessionId,
+    error: truncate(redactCredential(detail, credential), 500),
+  });
 }
 
 export function isVmCredentialRejection(detail: string): boolean {
@@ -118,18 +134,6 @@ export function classifyStartupError(
     fallbackCode,
     `${provider} failed to start${reason ? `: ${reason}` : ""}`,
   );
-}
-
-function envOverride(name: string): string[] | null {
-  const raw = process.env[name];
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0 && parsed.every((s) => typeof s === "string")) {
-      return parsed;
-    }
-  } catch {}
-  return null;
 }
 
 /** Spawn command for a provider; `UPBOT_PROVIDER_COMMAND_<P>` (or the older
@@ -269,26 +273,43 @@ export function spawnProvider(
   };
 }
 
+/** Ends stdin and kills the process; `kill()` already marks it closed by us. */
+export function closeProviderProcess(proc: ProviderProcess): void {
+  try {
+    proc.child.stdin?.end();
+  } catch {}
+  proc.kill();
+}
+
 /** Calls `onLine` with each parsed JSON object read from a newline-delimited stream. */
 export function readJsonLines(
   stream: NodeJS.ReadableStream,
   onLine: (msg: Record<string, unknown>) => void,
 ): void {
-  let buf = "";
+  // Only the current chunk is scanned for '\n'; the incomplete tail is kept
+  // as Buffer slices and concatenated into a line exactly once, so a large
+  // line spread over many chunks costs O(L) instead of O(L^2/chunk).
+  const pending: Buffer[] = [];
   stream.on("data", (d: Buffer) => {
-    buf += d.toString("utf8");
-    let idx = buf.indexOf("\n");
+    const chunk = Buffer.isBuffer(d) ? d : Buffer.from(d);
+    let start = 0;
+    let idx = chunk.indexOf("\n", start);
     while (idx >= 0) {
-      const line = buf.slice(0, idx).trim();
-      buf = buf.slice(idx + 1);
+      const piece = chunk.subarray(start, idx);
+      const line = (pending.length === 0 ? piece : Buffer.concat([...pending, piece]))
+        .toString("utf8")
+        .trim();
+      pending.length = 0;
       if (line) {
         try {
           const msg = JSON.parse(line);
           if (msg && typeof msg === "object") onLine(msg as Record<string, unknown>);
         } catch {}
       }
-      idx = buf.indexOf("\n");
+      start = idx + 1;
+      idx = chunk.indexOf("\n", start);
     }
+    if (start < chunk.length) pending.push(chunk.subarray(start));
   });
 }
 
@@ -315,4 +336,8 @@ export function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise
 
 export function truncate(s: string, n = 2000): string {
   return s.length > n ? `${s.slice(0, n)}…` : s;
+}
+
+export function str(v: unknown): string | null {
+  return typeof v === "string" && v ? v : null;
 }

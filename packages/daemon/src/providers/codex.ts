@@ -3,12 +3,15 @@ import {
   AUTH_RE,
   authMessage,
   classifyStartupError,
+  closeProviderProcess,
   isVmCredentialRejection,
+  logResumeFailed,
   type ProviderProcess,
   providerCommand,
   readJsonLines,
   redactCredential,
   spawnProvider,
+  str,
   truncate,
   vmCredentialRejectedMessage,
   withTimeout,
@@ -50,10 +53,6 @@ function sandboxPolicy(mode: string, roots: string[]): Json {
         excludeTmpdirEnvVar: false,
         excludeSlashTmp: false,
       };
-}
-
-function str(v: unknown): string | null {
-  return typeof v === "string" && v ? v : null;
 }
 
 class RpcFailure extends Error {
@@ -452,11 +451,7 @@ class CodexSession implements ProviderSession {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    this.proc.markClosed();
-    try {
-      this.proc.child.stdin?.end();
-    } catch {}
-    this.proc.kill();
+    closeProviderProcess(this.proc);
   }
 }
 
@@ -563,6 +558,7 @@ export class CodexDriver implements ProviderDriver {
           : {}),
       };
       let res: Json | null = null;
+      let resumeFailed = false;
       if (resumeSessionId) {
         try {
           res = await session.request("thread/resume", {
@@ -571,8 +567,10 @@ export class CodexDriver implements ProviderDriver {
             excludeTurns: true,
           });
           session.resumed = true;
-        } catch {
+        } catch (e) {
           res = null;
+          logResumeFailed("codex", resumeSessionId, e, vmKey);
+          resumeFailed = true;
         }
       }
       res ??= await session.request("thread/start", threadParams);
@@ -583,8 +581,14 @@ export class CodexDriver implements ProviderDriver {
       try {
         const list = await session.request("model/list", {});
         models = Array.isArray(list.data) ? (list.data as Json[]) : [];
-      } catch {}
+      } catch (e) {
+        console.error(
+          "[upbotd] codex model/list failed:",
+          truncate(redactCredential((e as Error).message, vmKey), 500),
+        );
+      }
       session.configOptions = buildConfigOptions(models, str(res.model), str(res.reasoningEffort));
+      if (resumeFailed) hooks.onResumeFailed?.();
       return session;
     } catch (e) {
       proc.kill();

@@ -1,12 +1,10 @@
 import type { VmCredential, VmCredentialKind, VmCredentialProvider } from "@upbot/protocol";
-import type { Vault } from "../vault";
+import { type Vault, VMCRED_PREFIX } from "../vault";
 
 // Provider logins for Firecracker microVM sessions. Stored encrypted in the vault under
 // `vmcred.<provider>` (hidden from vault.list and never shared with agents). The value only
 // travels inside the run spec over SSH stdin and the guest vsock, and becomes environment
 // variables of the provider process inside the VM.
-
-const PREFIX = "vmcred.";
 
 export const VM_CREDENTIAL_ENV: Record<
   VmCredentialProvider,
@@ -25,9 +23,9 @@ export class VmCredentials {
 
   list(): VmCredential[] {
     return this.vault
-      .internalEntries(PREFIX)
+      .internalEntries(VMCRED_PREFIX)
       .map((e) => {
-        const provider = e.name.slice(PREFIX.length);
+        const provider = e.name.slice(VMCRED_PREFIX.length);
         if (!isProvider(provider)) return null;
         const { kind } = JSON.parse(this.vault.revealInternal(e.name)) as {
           kind: VmCredentialKind;
@@ -39,12 +37,12 @@ export class VmCredentials {
 
   set(provider: VmCredentialProvider, kind: VmCredentialKind, value: string): VmCredential {
     if (!VM_CREDENTIAL_ENV[provider][kind]) throw new Error(`${provider} does not accept ${kind}`);
-    this.vault.set(`${PREFIX}${provider}`, JSON.stringify({ kind, value }), []);
+    this.vault.set(`${VMCRED_PREFIX}${provider}`, JSON.stringify({ kind, value }), []);
     return this.list().find((c) => c.provider === provider)!;
   }
 
   delete(provider: VmCredentialProvider): boolean {
-    return this.vault.delete(`${PREFIX}${provider}`);
+    return this.vault.delete(`${VMCRED_PREFIX}${provider}`);
   }
 
   /** Environment variables for a provider session inside a microVM ({} when none is set). */
@@ -52,7 +50,7 @@ export class VmCredentials {
     if (!isProvider(provider)) return {};
     let raw: string;
     try {
-      raw = this.vault.revealInternal(`${PREFIX}${provider}`);
+      raw = this.vault.revealInternal(`${VMCRED_PREFIX}${provider}`);
     } catch {
       return {};
     }

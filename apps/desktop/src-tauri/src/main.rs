@@ -14,6 +14,16 @@ use tokio::sync::Notify;
 
 const READY_PREFIX: &str = "UPBOT_READY ";
 
+fn parse_ready_port(json: &str) -> Result<u16, &'static str> {
+    let value = serde_json::from_str::<serde_json::Value>(json)
+        .map_err(|_| "upbotd READY line is not valid JSON")?;
+    value["port"]
+        .as_u64()
+        .and_then(|port| u16::try_from(port).ok())
+        .filter(|port| *port != 0)
+        .ok_or("upbotd READY has no valid port")
+}
+
 #[derive(Serialize, Clone)]
 struct DaemonConnection {
     port: u16,
@@ -88,20 +98,20 @@ fn spawn_daemon(app: &tauri::App) -> Result<(), String> {
                         let line = stdout_buf[..idx].trim_end().to_string();
                         stdout_buf = stdout_buf[idx + 1..].to_string();
                         if let Some(json) = line.strip_prefix(READY_PREFIX) {
-                            match serde_json::from_str::<serde_json::Value>(json) {
-                                Ok(v) => {
-                                    let port = v["port"].as_u64().unwrap_or(0) as u16;
-                                    {
-                                        let mut inner = state.inner.lock().unwrap();
-                                        inner.conn = Some(DaemonConnection {
-                                            port,
-                                            token: token.clone(),
-                                        });
-                                    }
-                                    state.ready.notify_waiters();
+                            match parse_ready_port(json) {
+                                Ok(port) => {
+                                    let mut inner = state.inner.lock().unwrap();
+                                    inner.conn = Some(DaemonConnection {
+                                        port,
+                                        token: token.clone(),
+                                    });
                                 }
-                                Err(e) => log::error!("bad READY line from upbotd: {e}"),
+                                Err(msg) => {
+                                    log::error!("{msg}");
+                                    state.inner.lock().unwrap().error = Some(msg.to_string());
+                                }
                             }
+                            state.ready.notify_waiters();
                         }
                     }
                 }
@@ -115,9 +125,9 @@ fn spawn_daemon(app: &tauri::App) -> Result<(), String> {
                     log::warn!("upbotd terminated: {status:?}");
                     {
                         let mut inner = state.inner.lock().unwrap();
-                        if inner.conn.is_none() && inner.error.is_none() {
-                            inner.error = Some(format!("upbotd exited: {status:?}"));
-                        }
+                        inner.conn = None;
+                        inner.child = None;
+                        inner.error = Some(format!("upbotd exited: {status:?}"));
                     }
                     state.ready.notify_waiters();
                 }
@@ -159,7 +169,9 @@ fn main() {
         ))
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             notifications::forward_launch(app, &args);
-            let _ = notifications::notifications_open(app.clone());
+            if let Err(e) = notifications::notifications_open(app.clone()) {
+                log::warn!("could not focus main window: {e}");
+            }
         }))
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
@@ -197,8 +209,54 @@ fn main() {
                 let state = app_handle.state::<SharedState>();
                 let mut inner = state.inner.lock().unwrap();
                 if let Some(child) = inner.child.take() {
-                    let _ = child.kill();
+                    if let Err(e) = child.kill() {
+                        log::warn!("could not kill upbotd: {e}");
+                    }
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_ready_port;
+
+    #[test]
+    fn parses_valid_ready_port() {
+        assert_eq!(parse_ready_port(r#"{"port":4321}"#), Ok(4321));
+    }
+
+    #[test]
+    fn rejects_invalid_ready_ports() {
+        for json in [
+            r#"{"port":0}"#,
+            r#"{"port":70000}"#,
+            "{}",
+            r#"{"port":"1"}"#,
+        ] {
+            assert_eq!(
+                parse_ready_port(json),
+                Err("upbotd READY has no valid port")
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_ready_json() {
+        assert_eq!(
+            parse_ready_port("not json"),
+            Err("upbotd READY line is not valid JSON")
+        );
+    }
+
+    #[test]
+    fn does_not_leak_ready_payloads_in_errors() {
+        for json in [
+            r#"{"port":0,"token":"sk-live-SECRET"}"#,
+            "sk-live-SECRET not json",
+        ] {
+            let error = parse_ready_port(json).unwrap_err();
+            assert!(!error.contains("SECRET"));
+        }
+    }
 }
