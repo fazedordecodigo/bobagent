@@ -212,16 +212,6 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
       text,
     },
   });
-  const tg2Msg = (userId: number, text: string) => ({
-    update_id: updateId++,
-    message: {
-      message_id: updateId * 10,
-      chat: { id: userId + 1000 },
-      from: { id: userId, username: `u${userId}` },
-      text,
-    },
-  });
-
   test("create validates tokens; tokens are stored in the vault but hidden", async () => {
     await expect(
       c.request("gateways.create", {
@@ -372,7 +362,7 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
       await waitGateway((current) => current.status === "connected");
 
       tg2FailSend = true;
-      tg2Updates.push(tg2Msg(43, "echo:lost reply"));
+      tg2Updates.push(tgMsg(43, "echo:lost reply"));
       const failedSend = await waitGateway(
         (current) => current.error?.includes("chat not found") === true,
       );
@@ -391,11 +381,11 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
       expect(recovered.error ?? "").toContain("chat not found");
 
       tg2FailSend = false;
-      tg2Updates.push(tg2Msg(43, "echo:delivered"));
+      tg2Updates.push(tgMsg(43, "echo:delivered"));
       await waitFor(() => tg2Sent.find((message) => message.text === "delivered"));
       await waitGateway((current) => current.error === null);
 
-      tg2Updates.push(tg2Msg(43, "slow"));
+      tg2Updates.push(tgMsg(43, "slow"));
       await waitFor(async () => {
         const { items, turns } = (await c.request("chat.history", {
           agentId: relay.id,
@@ -414,14 +404,28 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
           current.status === "error" && current.error?.includes("polling broken") === true,
       );
       expect(slowPollError.status).toBe("error");
+      const from = c.events.length;
       await c.request("chat.cancel", { agentId: relay.id });
       await waitFor(() =>
         tg2Sent.find((message) => message.text === "The agent stopped before replying."),
       );
+      await Bun.sleep(300);
+      const updates = c.events
+        .slice(from)
+        .filter(
+          (event) => event.event === "gateway.updated" && (event.data as Gateway).id === gatewayId,
+        )
+        .map((event) => event.data as Gateway);
+      for (const update of updates) {
+        expect(update.status).toBe("error");
+        expect(update.error).not.toBeNull();
+        expect(update.error ?? "").toContain("polling broken");
+      }
       const cancelled = await waitGateway(
         (current) =>
           current.status === "error" && current.error?.includes("polling broken") === true,
       );
+      expect(cancelled.status).toBe("error");
       expect(cancelled.error ?? "").toContain("polling broken");
       tg2FailPoll = false;
       await waitGateway((current) => current.status === "connected" && current.error === null);
