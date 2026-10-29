@@ -215,9 +215,13 @@ export class MobileServer {
   private async handle(req: Request, server: ReturnType<typeof Bun.serve>): Promise<Response> {
     const ip = server.requestIP(req)?.address ?? null;
     const url = new URL(req.url);
+    const path = AUDIT_PATHS.has(url.pathname) ? url.pathname : "unknown";
+    const httpMethod = AUDIT_HTTP_METHODS.has(req.method) ? req.method : "unknown";
     const origin = req.headers.get("origin");
-    if (origin !== null && origin !== url.origin)
+    if (origin !== null && origin !== url.origin) {
+      emit("mobile.origin_denied", { path, method: httpMethod, ip });
       return new Response("forbidden origin", { status: 403 });
+    }
     const headers = { "cache-control": "no-store", "x-content-type-options": "nosniff" };
     if (req.method === "GET" && url.pathname === "/") {
       return new Response(MOBILE_HTML, {
@@ -274,8 +278,8 @@ export class MobileServer {
     const device = this.device(req, url);
     if (url.pathname.startsWith("/api/") && !device) {
       emit("mobile.unauthorized", {
-        path: AUDIT_PATHS.has(url.pathname) ? url.pathname : "unknown",
-        method: AUDIT_HTTP_METHODS.has(req.method) ? req.method : "unknown",
+        path,
+        method: httpMethod,
         reason: this.requestToken(req, url) ? "bad_token" : "missing_token",
         ip,
       });

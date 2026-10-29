@@ -141,6 +141,30 @@ describe("mobile companion e2e", () => {
       expect(stderrBuf).not.toContain(secret);
   });
 
+  test("foreign origins are audited before pairing, authentication and static routing", async () => {
+    const originSecret = "origin-secret-canary";
+    const pathSecret = "origin-path-secret-canary";
+    for (const [path, body, token, route, method] of [
+      ["/api/rpc", { method: "agents.list" }, device, "/api/rpc", "POST"],
+      ["/api/pair", { code: "000000" }, "", "/api/pair", "POST"],
+      ["/api/events", undefined, "", "/api/events", "GET"],
+      ["/", undefined, "", "/", "GET"],
+      [`/api/${pathSecret}`, undefined, "", "unknown", "GET"],
+    ] as const) {
+      const after = stderrBuf.length;
+      expect(
+        (await api(path, body, token, { origin: `https://${originSecret}.example` })).status,
+      ).toBe(403);
+      await waitForLog(
+        `mobile.origin_denied ${JSON.stringify({ path: route, method, ip: "127.0.0.1" })}`,
+        after,
+      );
+    }
+    expect(stderrBuf).not.toContain(originSecret);
+    expect(stderrBuf).not.toContain(pathSecret);
+    expect(stderrBuf).not.toContain(device);
+  });
+
   test("devices chat through an allowlist of methods and get live events", async () => {
     expect((await api("/api/rpc", { method: "agents.list", params: {} }, "nope")).status).toBe(401);
     await waitForLog('mobile.unauthorized {"path":"/api/rpc"');
