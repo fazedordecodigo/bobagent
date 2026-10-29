@@ -11,7 +11,7 @@ import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Agent } from "@upbot/protocol";
 import { ProviderId } from "@upbot/protocol";
 import type { AgentStore } from "./agents";
-import type { ApprovalService } from "./approvals";
+import { type ApprovalService, GateRejection } from "./approvals";
 import type { AppsService } from "./apps";
 import type { BrowserService } from "./browser";
 import type { ChannelService } from "./channels";
@@ -509,23 +509,37 @@ export class Bridge {
   }
 
   async handle(agentId: string, body: Json): Promise<Json> {
-    if (body.method === "tools/list")
-      return {
-        tools: [...BRIDGE_TOOLS, ...((await this.apps?.toolsFor(agentId).catch(() => [])) ?? [])],
-      };
+    if (body.method === "tools/list") {
+      const appTools = await this.apps?.toolsFor(agentId).catch((e) => {
+        console.error("[upbotd] bridge tools/list failed", { agentId, error: e });
+        return [];
+      });
+      return { tools: [...BRIDGE_TOOLS, ...(appTools ?? [])] };
+    }
     if (body.method !== "tools/call")
       throw new Error(`unknown bridge method ${String(body.method)}`);
     const params = (body.params ?? {}) as Json;
     const args = (params.arguments ?? {}) as Json;
+    const startedAt = Date.now();
+    let name = "";
+    let isApp = false;
     let r: ToolResult;
     try {
-      const name = String(params.name);
-      const isApp = this.apps?.isAppTool(name) ?? false;
+      name = String(params.name);
+      isApp = this.apps?.isAppTool(name) ?? false;
       await this.approvals?.gate(agentId, name, args, isApp);
       r =
         (isApp ? await this.apps!.call(agentId, name, args) : null) ??
         (await this.call(agentId, name, args));
     } catch (e) {
+      console.error("[upbotd] bridge tool failed", {
+        agentId,
+        tool: name,
+        isApp,
+        durationMs: Date.now() - startedAt,
+        reason: e instanceof GateRejection ? e.reason : "error",
+        error: e,
+      });
       r = { text: (e as Error).message, isError: true };
     }
     return { content: [{ type: "text", text: r.text }], isError: r.isError === true };
