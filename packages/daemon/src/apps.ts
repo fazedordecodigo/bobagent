@@ -169,6 +169,12 @@ export function appToolNames(slug: string, tools: Tool[]): Map<string, Tool> {
   return new Map(named);
 }
 
+function redactSecrets(values: string[], text: string): string {
+  let out = text;
+  for (const v of values) out = out.split(v).join("[redacted]");
+  return out;
+}
+
 /** A failed app MCP call; the message has the app's secrets redacted. */
 export class AppToolError extends Error {
   override name = "AppToolError";
@@ -441,16 +447,19 @@ export class AppsService {
     return l.starting;
   }
 
+  private secretValues(id: string): string[] {
+    return Object.values(this.secrets(id, this.config(this.row(id)))).filter(Boolean);
+  }
+
+  /** Fails closed: when the app's secrets can't be read (e.g. it was deleted), nothing is shown. */
   private redact(id: string, text: string): string {
+    let values: string[];
     try {
-      const c = this.config(this.row(id));
-      let out = text;
-      for (const v of Object.values(this.secrets(id, c)))
-        if (v) out = out.split(v).join("[redacted]");
-      return out;
+      values = this.secretValues(id);
     } catch {
-      return text;
+      return "[app details withheld]";
     }
+    return redactSecrets(values, text);
   }
 
   private appsFor(agentId: string): Row[] {
@@ -510,16 +519,19 @@ export class AppsService {
     const l = this.live.get(r.id)!;
     const tool = appToolNames(slug, l.tools).get(name);
     if (!tool) throw new Error(`unknown tool ${name}`);
+    // Snapshot before the call: the app may be updated or deleted while it is pending.
+    const secrets = this.secretValues(r.id);
     let res: Awaited<ReturnType<Client["callTool"]>>;
     try {
       res = await l.client!.callTool({ name: tool.name, arguments: args });
     } catch (e) {
-      throw new AppToolError(this.redact(r.id, (e as Error)?.message ?? String(e)).slice(0, 500));
+      const message = redactSecrets(secrets, (e as Error)?.message ?? String(e)).slice(0, 500);
+      throw new AppToolError(message);
     }
     const content = (res.content ?? []) as { type: string; text?: string }[];
     const text = content
       .map((c) => (c.type === "text" ? (c.text ?? "") : `[${c.type} content]`))
       .join("\n");
-    return { text: this.redact(r.id, text).slice(0, 100_000), isError: res.isError === true };
+    return { text: redactSecrets(secrets, text).slice(0, 100_000), isError: res.isError === true };
   }
 }
