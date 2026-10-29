@@ -1,5 +1,13 @@
 import type { AgentStatusInfo, ChatItem, QueueState, Turn } from "@upbot/protocol";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import type { DaemonClient } from "../lib/daemon";
 
 export type ChatState = {
@@ -77,21 +85,31 @@ export function useChat(client: DaemonClient, agentId: string | null) {
       }),
       client.on("item.updated", (item) => {
         if (!matches(item.agentId)) return;
-        setState((s) => ({
-          ...s,
-          items: s.items.map((i) => (i.id === item.id ? item : i)),
-        }));
+        setState((s) => {
+          // Recent items change most often — scan backwards and replace one index.
+          for (let i = s.items.length - 1; i >= 0; i--) {
+            if (s.items[i]?.id !== item.id) continue;
+            const items = s.items.slice();
+            items[i] = item;
+            return { ...s, items };
+          }
+          return s;
+        });
       }),
       client.on("item.delta", (d) => {
         if (!matches(d.agentId)) return;
-        setState((s) => ({
-          ...s,
-          items: s.items.map((i) =>
-            i.id === d.itemId && (i.kind === "agent_message" || i.kind === "agent_thought")
-              ? { ...i, text: i.text + d.text }
-              : i,
-          ),
-        }));
+        setState((s) => {
+          // The streaming item is almost always the last one — scan backwards.
+          for (let i = s.items.length - 1; i >= 0; i--) {
+            const item = s.items[i];
+            if (item?.id !== d.itemId) continue;
+            if (item.kind !== "agent_message" && item.kind !== "agent_thought") return s;
+            const items = s.items.slice();
+            items[i] = { ...item, text: item.text + d.text };
+            return { ...s, items };
+          }
+          return s;
+        });
       }),
       client.on("turn.started", (t) => {
         if (!matches(t.agentId)) return;
@@ -162,4 +180,29 @@ export function useChat(client: DaemonClient, agentId: string | null) {
   );
 
   return { ...state, loadEarlier, queuePause, queueResume, queueRemove };
+}
+
+export type ChatApi = ReturnType<typeof useChat>;
+
+// Keeps the per-token setState inside this component: its children prop is a
+// stable element tree, so a delta re-renders only the context consumers.
+export function ChatProvider({
+  client,
+  agentId,
+  children,
+}: {
+  client: DaemonClient;
+  agentId: string | null;
+  children: ReactNode;
+}) {
+  const chat = useChat(client, agentId);
+  return <ChatContext.Provider value={chat}>{children}</ChatContext.Provider>;
+}
+
+const ChatContext = createContext<ChatApi | null>(null);
+
+export function useChatApi(): ChatApi {
+  const chat = useContext(ChatContext);
+  if (!chat) throw new Error("useChatApi must be used inside ChatProvider");
+  return chat;
 }
