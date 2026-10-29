@@ -99,7 +99,9 @@ function onEvent({ event, data }) {
       it.text = (it.text || "") + data.text;
       const node = itemEls.get(data.itemId);
       if (node && (it.kind === "user_message" || it.kind === "agent_message")) {
-        node.appendChild(document.createTextNode(data.text));
+        const last = node.lastChild;
+        if (last && last.nodeType === 3) last.appendData(data.text);
+        else node.appendChild(document.createTextNode(data.text));
         queueScroll();
       } else if (node) {
         const fresh = itemNode(it);
