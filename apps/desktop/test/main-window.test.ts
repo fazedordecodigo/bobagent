@@ -1108,8 +1108,84 @@ test("cached approval and draft cards remain visible when refreshes fail", async
   }
 }, 20000);
 
+test("draft send logs update and send failures under their own scopes", async () => {
+  const target = await browser.newPage();
+  target.setDefaultTimeout(5000);
+  const consoleText: string[] = [];
+  target.on("console", (message) => consoleText.push(message.text()));
+  const draft: EmailDraft = {
+    id: "send-scope-draft",
+    agentId: bot.id,
+    accountId: "test-account",
+    to: ["review@example.com"],
+    cc: [],
+    subject: "Scope check",
+    body: "Draft body",
+    inReplyTo: null,
+    status: "pending",
+    error: null,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  let failUpdate = true;
+  const methods: string[] = [];
+  await target.addInitScript(
+    ({ id }) => {
+      localStorage.setItem("upbot.agent", id);
+      localStorage.setItem("upbot.view", "chat");
+    },
+    { id: bot.id },
+  );
+  await target.routeWebSocket(/\/ws\?/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      const request = JSON.parse(String(message));
+      methods.push(request.method);
+      const reply = (body: object) => socket.send(JSON.stringify({ id: request.id, ...body }));
+      if (request.method === "email.drafts.list") reply({ result: [draft] });
+      else if (request.method === "email.drafts.update")
+        reply(
+          failUpdate
+            ? { error: { code: "internal", message: "update failed" } }
+            : { result: draft },
+        );
+      else if (request.method === "email.drafts.send")
+        reply({ error: { code: "internal", message: "send failed" } });
+      else server.send(message);
+    });
+    server.onMessage((message) => socket.send(message));
+    socket.onClose(() => server.close());
+  });
+  try {
+    await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+    const card = target.getByTestId("email-draft");
+    await card.waitFor();
+    const updateLog = target.waitForEvent("console", {
+      predicate: (message) => message.text().includes("[desktop] email.drafts.update_failed"),
+    });
+    await card.getByRole("button", { name: "Send", exact: true }).click();
+    await updateLog;
+    await card.getByText("update failed", { exact: true }).waitFor();
+    expect(methods).not.toContain("email.drafts.send");
+    expect(consoleText.join("\n")).not.toContain("email.drafts.send_failed");
+
+    failUpdate = false;
+    const sendLog = target.waitForEvent("console", {
+      predicate: (message) => message.text().includes("[desktop] email.drafts.send_failed"),
+    });
+    await card.getByRole("button", { name: "Send", exact: true }).click();
+    await sendLog;
+    await card.getByText("send failed", { exact: true }).waitFor();
+    expect(methods).toContain("email.drafts.send");
+  } finally {
+    await target.close();
+  }
+}, 15000);
+
 test("skill save errors clear on cancel and when creating another skill", async () => {
   const target = await browser.newPage();
+  const consoleText: string[] = [];
+  target.on("console", (message) => consoleText.push(message.text()));
   await target.routeWebSocket(/\/ws\?/, (socket) => {
     const server = socket.connectToServer();
     socket.onMessage((message) => {
@@ -1139,6 +1215,8 @@ test("skill save errors clear on cancel and when creating another skill", async 
     await target.getByRole("button", { name: "Save", exact: true }).click();
     const error = target.getByText("Falha de teste", { exact: true });
     await error.waitFor();
+    expect(consoleText.join("\n")).toContain("[desktop] skills.save_failed");
+    expect(consoleText.join("\n")).not.toContain("test-skill");
     await target.getByRole("button", { name: "Cancel", exact: true }).click();
     expect(await error.count()).toBe(0);
     await target.getByRole("button", { name: "New skill", exact: true }).click();
