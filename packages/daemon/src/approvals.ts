@@ -1,8 +1,8 @@
 import type { Database } from "bun:sqlite";
 import type { Approval, ApprovalDecision, ApprovalRule } from "@upbot/protocol";
-import { isSensitivePermission } from "@upbot/protocol";
-import { classifyAppTool } from "./app-permissions";
+import { classifyAppTool, isSensitivePermission } from "@upbot/protocol";
 import type { AppsService } from "./apps";
+import { getSetting, setSetting } from "./db";
 import { RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
 import type { Vault } from "./vault";
@@ -47,16 +47,11 @@ export class ApprovalService {
   ) {}
 
   rules(): ApprovalRule[] {
-    const r = this.db.query("SELECT value FROM settings WHERE key = 'approval_rules'").get() as {
-      value: string;
-    } | null;
-    return r ? (JSON.parse(r.value) as ApprovalRule[]) : [];
+    return getSetting<ApprovalRule[]>(this.db, "approval_rules", []);
   }
 
   setRules(rules: ApprovalRule[]): ApprovalRule[] {
-    this.db
-      .query("INSERT OR REPLACE INTO settings (key, value) VALUES ('approval_rules', ?)")
-      .run(JSON.stringify(rules));
+    setSetting(this.db, "approval_rules", rules);
     this.broadcast("approvals.rulesChanged", {});
     return rules;
   }
@@ -143,7 +138,11 @@ export class ApprovalService {
     return done;
   }
 
-  async respond(p: { id: string; decision: ApprovalDecision; value?: string }): Promise<Approval> {
+  async respond(p: {
+    id: string;
+    decision: ApprovalDecision;
+    value?: string | undefined;
+  }): Promise<Approval> {
     const a = this.pending.get(p.id);
     if (!a) throw new RpcError("not_found", "approval not found or no longer pending");
     if (this.responding.has(p.id))
@@ -162,12 +161,10 @@ export class ApprovalService {
         if (p.decision === "deny") return this.finish(a.id, "denied")!;
         if (!p.value) throw new RpcError("bad_request", "enter the secret value");
         const name = a.secretName!;
-        let agentIds = [a.agentId];
-        try {
-          const existing = this.vault.list().find((v) => v.name === name);
-          if (existing) agentIds = [...new Set([...existing.agentIds, a.agentId])];
-        } catch {}
+        const existing = this.vault.get(name);
+        const agentIds = existing ? [...new Set([...existing.agentIds, a.agentId])] : [a.agentId];
         this.vault.set(name, p.value, agentIds);
+        this.broadcast("vault.changed", {});
         return this.finish(a.id, "approved")!;
       }
       if (a.kind === "takeover")

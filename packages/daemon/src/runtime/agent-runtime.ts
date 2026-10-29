@@ -11,6 +11,7 @@ import type {
 } from "@upbot/protocol";
 import type { AgentStore } from "../agents";
 import type { ChatStore, QueueSource, QueueStore } from "../chat-store";
+import { envPositiveNumber } from "../env/vars";
 import { checkProviderAvailable, DEFAULT_MODE, getDriver } from "../providers";
 import { withTimeout } from "../providers/process";
 import {
@@ -37,11 +38,10 @@ function compactThreshold(): number | null {
 }
 
 function compactTimeoutMs(): number {
-  const n = Number(process.env.UPBOT_COMPACT_TIMEOUT_MS);
-  return Number.isFinite(n) && n > 0 ? n : 180_000;
+  return envPositiveNumber("UPBOT_COMPACT_TIMEOUT_MS", 180_000);
 }
 
-function xmlAttr(s: string): string {
+export function xmlAttr(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
 
@@ -59,10 +59,40 @@ export class RpcError extends Error {
   constructor(
     readonly code: string,
     message: string,
+    options?: { cause?: unknown },
   ) {
-    super(message);
+    super(message, options);
     this.name = "RpcError";
   }
+}
+
+const ERROR_TYPE_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+const ERRNO_RE = /^E[A-Z]{2,15}$/;
+
+/** Bounded diagnostics for an untrusted error: never its message, stack or payload. */
+export function errorFields(e: unknown): string {
+  let type = e === null ? "null" : typeof e;
+  try {
+    const ctor =
+      typeof e === "object" && e !== null
+        ? (Object.getPrototypeOf(e) as { constructor?: { name?: unknown } } | null)?.constructor
+            ?.name
+        : undefined;
+    if (typeof ctor === "string" && ERROR_TYPE_RE.test(ctor)) type = ctor;
+  } catch {}
+
+  let code: string | undefined;
+  try {
+    if (e instanceof RpcError) {
+      if (/^[a-z_]{1,32}$/.test(e.code)) code = e.code;
+    } else if (e instanceof ProviderError) {
+      code = e.code;
+    } else {
+      const c = (e as { code?: unknown } | null)?.code;
+      if (typeof c === "string" && ERRNO_RE.test(c)) code = c;
+    }
+  } catch {}
+  return code ? `errorType=${type} code=${code}` : `errorType=${type}`;
 }
 
 type PendingEntry = {
@@ -78,6 +108,12 @@ type PendingEntry = {
 const cancelGraceMs = () =>
   Math.max(0, Number.parseInt(process.env.UPBOT_CANCEL_GRACE_MS ?? "", 10) || 10_000);
 
+/** How often the in-memory streamed text is flushed to SQLite mid-stream. */
+const TEXT_FLUSH_MS = 150;
+
+/** Pending streamed bytes that trigger an immediate flush (bounds crash loss). */
+const TEXT_FLUSH_MAX_PENDING_BYTES = 8 * 1024;
+
 export class AgentRuntime {
   status: AgentStatus = "idle";
   statusError: string | null = null;
@@ -88,7 +124,18 @@ export class AgentRuntime {
   private sessionPromptCount = 0;
   private sessionConfigApplied = false;
   private configOptions: ConfigOption[] = [];
-  private openTextItem: { id: string; kind: "agent_message" | "agent_thought" } | null = null;
+  private openTextItem: {
+    id: string;
+    seq: number;
+    kind: "agent_message" | "agent_thought";
+    /** Accumulated text; the in-memory source of truth until flushed. */
+    text: string;
+    /** Bytes appended since the last successful flush. */
+    pendingBytes: number;
+  } | null = null;
+  private textFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  // toolCallId -> cached item for the running turn; skips the items lookup entirely
+  private toolCallItems = new Map<string, ChatItem>();
   private pending = new Map<string, PendingEntry>();
   private cancelTimer: ReturnType<typeof setTimeout> | null = null;
   private draining = false;
@@ -206,7 +253,8 @@ export class AgentRuntime {
       const turnRow = this.store.createTurn(this.agent.id, next.id);
       this.queue.markStarted(next.id, turnRow.id);
       this.turn = { id: turnRow.id, cancelled: false, byUser: false };
-      this.openTextItem = null;
+      this.closeTextItem();
+      this.toolCallItems.clear();
       this.turnHops = next.hops ?? 0;
       this.turnChannelId = next.channel_id ?? null;
       const meta = next.meta_json ? (JSON.parse(next.meta_json) as Record<string, unknown>) : {};
@@ -223,14 +271,18 @@ export class AgentRuntime {
         text: next.text,
         ...(sender ? { from: sender } : {}),
         ...(next.channel_id ? { channelId: next.channel_id } : {}),
-        ...(next.meta_json ? (JSON.parse(next.meta_json) as Record<string, unknown>) : {}),
+        ...meta,
       });
       this.setStatus("starting");
       this.broadcast("turn.started", turnRow);
       this.broadcast("item.created", userItem);
       this.emitQueue();
       const promptText = next.prompt ?? (sender ? wrapAgentMessage(sender, next.text) : next.text);
-      this.runTurn(promptText, turnRow.id).catch(() => {});
+      this.runTurn(promptText, turnRow.id).catch((e) =>
+        console.error(
+          `[upbotd] turn failed unexpectedly: agent=${this.agent.id} turn=${turnRow.id} ${errorFields(e)}`,
+        ),
+      );
     } finally {
       this.draining = false;
     }
@@ -371,7 +423,11 @@ export class AgentRuntime {
           const { writeFileSync, mkdirSync } = await import("node:fs");
           mkdirSync(dbgDir, { recursive: true });
           writeFileSync(join(dbgDir, `${this.agent.id}-${turn.id}.txt`), promptText);
-        } catch {}
+        } catch (e) {
+          console.error(
+            `[upbotd] failed to write debug prompt: agent=${this.agent.id} turn=${turn.id} ${errorFields(e)}`,
+          );
+        }
       }
       const { stopReason } = await session.prompt(promptText);
       if (this.turn !== turn) return;
@@ -381,7 +437,10 @@ export class AgentRuntime {
         this.finishTurn(turn, "completed", stopReason, null);
       }
     } catch (e) {
-      if (this.turn !== turn) return;
+      if (this.turn !== turn) {
+        if (!turn.cancelled) throw e;
+        return;
+      }
       if (turn.cancelled) {
         this.finishTurn(turn, "cancelled", "cancelled", null);
         return;
@@ -409,7 +468,7 @@ export class AgentRuntime {
     const ended = this.store.endTurn(turn.id, status, stopReason, error);
     this.broadcast("turn.ended", ended);
     if (this.turn === turn) this.turn = null;
-    this.openTextItem = null;
+    this.closeTextItem();
     if (this.status !== "error") this.setStatus("idle");
     // queue policy: user stop pauses the queue; failed turn auto-pauses it
     if ((status === "cancelled" && turn.byUser) || status === "failed") {
@@ -420,7 +479,9 @@ export class AgentRuntime {
       }
     }
     if (status === "completed" && this.shouldAutoCompact()) {
-      this.compact("auto").catch(() => {});
+      this.compact("auto").catch((e) =>
+        console.error(`[upbotd] auto-compaction failed: agent=${this.agent.id} ${errorFields(e)}`),
+      );
       return;
     }
     this.drain();
@@ -516,11 +577,22 @@ export class AgentRuntime {
     }
   }
 
-  async setConfig(configId: string, value: string): Promise<ConfigOption[]> {
+  async setConfig(configId: string, value: string | null): Promise<ConfigOption[]> {
     if (this.turn) throw new RpcError("busy", "a turn is running for this agent");
     const session = await this.ensureSession();
     const opt = session.configOptions.find((o) => o.id === configId);
     if (!opt) throw new RpcError("bad_request", `unknown configId ${configId}`);
+    if (value === null) {
+      if (!Object.hasOwn(this.agent.config, configId)) return session.configOptions;
+      const config = { ...this.agent.config };
+      delete config[configId];
+      this.agents.setConfig(this.agent.id, config);
+      this.agent = { ...this.agent, config };
+      this.store.clearAgentSession(this.agent.id);
+      this.dropSession();
+      this.broadcast("agent.updated", this.agent);
+      return this.configOptionsList();
+    }
     if (!opt.options.some((v) => v.value === value)) {
       throw new RpcError("bad_request", `invalid value ${value} for ${configId}`);
     }
@@ -670,7 +742,7 @@ export class AgentRuntime {
         this.appendChunk("agent_thought", u.text);
         break;
       case "tool_call": {
-        this.openTextItem = null;
+        this.closeTextItem();
         const item = this.store.createItem(this.agent.id, turn.id, "tool_call", {
           toolCallId: u.toolCallId,
           title: u.title,
@@ -678,19 +750,25 @@ export class AgentRuntime {
           status: u.status,
           detail: u.detail,
         });
+        this.toolCallItems.set(u.toolCallId, item);
         this.broadcast("item.created", item);
         break;
       }
       case "tool_call_update": {
-        const item = this.store.findToolCallItem(turn.id, u.toolCallId);
+        const item =
+          this.toolCallItems.get(u.toolCallId) ??
+          this.store.findToolCallItem(turn.id, u.toolCallId);
         if (item?.kind !== "tool_call") return;
-        const updated = this.store.updateItemData(item.id, {
+        const data = {
           toolCallId: item.toolCallId,
           title: u.title ?? item.title,
           toolKind: item.toolKind,
           status: u.status ?? item.status,
           detail: u.detail === undefined ? item.detail : u.detail,
-        });
+        };
+        const updatedAt = this.store.writeItemData(item.id, data);
+        const updated = { ...item, ...data, updatedAt } as ChatItem;
+        this.toolCallItems.set(u.toolCallId, updated);
         this.broadcast("item.updated", updated);
         break;
       }
@@ -703,13 +781,87 @@ export class AgentRuntime {
     const turn = this.turn;
     if (!turn) return;
     if (this.openTextItem && this.openTextItem.kind === kind) {
-      const item = this.store.appendItemText(this.openTextItem.id, text);
+      const item = this.openTextItem;
+      item.text += text;
+      item.pendingBytes += Buffer.byteLength(text, "utf8");
+      if (item.pendingBytes >= TEXT_FLUSH_MAX_PENDING_BYTES) {
+        this.tryFlushTextItem();
+      } else {
+        this.scheduleTextFlush();
+      }
       this.broadcast("item.delta", { agentId: this.agent.id, itemId: item.id, text });
     } else {
+      this.closeTextItem();
       const item = this.store.createItem(this.agent.id, turn.id, kind, { text });
-      this.openTextItem = { id: item.id, kind };
+      this.openTextItem = { id: item.id, seq: item.seq, kind, text, pendingBytes: 0 };
       this.broadcast("item.created", item);
     }
+  }
+
+  /** Writes any pending streamed text now (e.g. before a history read). */
+  flushStreamText(beforeSeq?: number): void {
+    if (beforeSeq !== undefined && this.openTextItem && this.openTextItem.seq >= beforeSeq) return;
+    this.flushTextItem();
+  }
+
+  private scheduleTextFlush(): void {
+    if (this.textFlushTimer) return;
+    this.textFlushTimer = setTimeout(() => {
+      this.textFlushTimer = null;
+      this.tryFlushTextItem();
+    }, TEXT_FLUSH_MS);
+    this.textFlushTimer.unref?.();
+  }
+
+  /** Persists the open streaming item's accumulated text, if chunks are pending. */
+  private flushTextItem(): void {
+    const item = this.openTextItem;
+    if (!item || item.pendingBytes === 0) return;
+    this.store.setItemText(item.id, item.text);
+    item.pendingBytes = 0;
+  }
+
+  private tryFlushTextItem(): void {
+    try {
+      this.flushTextItem();
+    } catch (e) {
+      this.onStoreError(e);
+    }
+  }
+
+  /** A background flush failure: fail the turn instead of killing the daemon. */
+  private onStoreError(e: unknown): void {
+    const message = e instanceof Error ? e.message : String(e);
+    const turn = this.turn;
+    if (!turn || this.status === "error") return;
+    // don't retry the failing write while closing the item/turn
+    if (this.openTextItem) this.openTextItem.pendingBytes = 0;
+    try {
+      const errItem = this.store.createItem(this.agent.id, turn.id, "error", { message });
+      this.broadcast("item.created", errItem);
+    } catch {}
+    try {
+      this.finishTurn(turn, "failed", null, message);
+    } catch {}
+    // the prompt may still be running against a broken store: drop the provider
+    // and always clear the turn so the queue can't wedge on a phantom run
+    this.dropSession();
+    if (this.turn === turn) this.turn = null;
+    this.setStatus("error", message);
+  }
+
+  /** Flushes and closes the open streaming item (kind change, tool call, turn end, dispose). */
+  private closeTextItem(): void {
+    if (this.textFlushTimer) {
+      clearTimeout(this.textFlushTimer);
+      this.textFlushTimer = null;
+    }
+    try {
+      this.flushTextItem();
+    } catch (e) {
+      console.error("[upbotd] failed to persist streamed text:", (e as Error).message);
+    }
+    this.openTextItem = null;
   }
 
   private onProcessExit(error: string | null): void {
@@ -743,6 +895,7 @@ export class AgentRuntime {
       this.cancelTimer = null;
     }
     const turn = this.turn;
+    if (!turn) this.closeTextItem();
     if (turn) {
       turn.cancelled = true;
       this.finishTurn(turn, "cancelled", "cancelled", null);
@@ -766,8 +919,4 @@ export class AgentRuntime {
   async kill(): Promise<void> {
     await this.dispose();
   }
-}
-
-export function isProviderError(e: unknown): e is ProviderError {
-  return e instanceof ProviderError;
 }

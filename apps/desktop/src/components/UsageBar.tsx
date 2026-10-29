@@ -1,6 +1,7 @@
-import type { AgentUsage } from "@upbot/protocol";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 
 const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 
@@ -13,26 +14,13 @@ export function UsageBar({
   agentId: string;
   busy: boolean;
 }) {
-  const [usage, setUsage] = useState<AgentUsage | null>(null);
+  const { data: usage, error: loadError } = useDaemonQuery(
+    client,
+    "agents.usage",
+    { agentId },
+    { events: { "agent.usage": (u) => u.agentId === agentId } },
+  );
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    setUsage(null);
-    client
-      .request("agents.usage", { agentId })
-      .then((u) => {
-        if (alive) setUsage(u);
-      })
-      .catch(() => {});
-    const off = client.on("agent.usage", (u) => {
-      if (u.agentId === agentId) setUsage(u);
-    });
-    return () => {
-      alive = false;
-      off();
-    };
-  }, [client, agentId]);
 
   if (!usage) return null;
   const pct =
@@ -41,9 +29,7 @@ export function UsageBar({
       : null;
   const compact = () => {
     setError(null);
-    client
-      .request("agents.compact", { agentId })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    client.request("agents.compact", { agentId }).catch((e) => setError(errorMessage(e)));
   };
   return (
     <div
@@ -68,7 +54,7 @@ export function UsageBar({
       <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={compact}>
         Compactar
       </button>
-      {error && <span role="alert">Erro ao compactar</span>}
+      {(error || loadError) && <span role="alert">{error ? "Erro ao compactar" : loadError}</span>}
     </div>
   );
 }

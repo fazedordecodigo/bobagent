@@ -1,5 +1,6 @@
+import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Agent, ChatItem, Page, Turn } from "@upbot/protocol";
 import {
@@ -36,6 +37,12 @@ describe("pages e2e", () => {
     };
     const msg = items.filter((i) => i.turnId === t.id && i.kind === "agent_message").pop();
     return msg && "text" in msg ? msg.text : "";
+  }
+
+  const pageId = (out: string) => /\(id ([^,]+), version/.exec(out)?.[1];
+
+  async function page(id: string) {
+    return ((await c.request("pages.list", {})) as Page[]).find((p) => p.id === id);
   }
 
   beforeAll(async () => {
@@ -106,5 +113,72 @@ describe("pages e2e", () => {
     await c.request("pages.delete", { id: page!.id });
     expect(existsSync(join(agentsRoot, "Workspace", "Pages", page!.id))).toBe(false);
     expect(await c.request("pages.list", {})).toEqual([]);
+  });
+
+  test("title and description are capped on create and on update", async () => {
+    const longTitle = "t".repeat(300);
+    const longDesc = "d".repeat(1500);
+    const out = await tool(a, "page_publish", {
+      title: longTitle,
+      description: longDesc,
+      html: "<p>1</p>",
+    });
+    const id = pageId(out);
+    expect(id).toBeDefined();
+    const created = await page(id!);
+    expect(created!.title).toBe("t".repeat(200));
+    expect(created!.description).toBe("d".repeat(1000));
+
+    await tool(a, "page_publish", {
+      id: id!,
+      title: ` ${"u".repeat(300)}`,
+      description: `${longDesc}!`,
+      html: "<p>2</p>",
+    });
+    const v2 = await page(id!);
+    expect(v2!.title).toBe("u".repeat(200));
+    expect(v2!.description).toBe("d".repeat(1000));
+  });
+
+  test("legacy page metadata is capped on update", async () => {
+    const id = crypto.randomUUID();
+    const now = Date.now();
+    const db = new Database(join(dataDir, "upbot.db"));
+    db.exec("PRAGMA busy_timeout=5000");
+    db.query(
+      "INSERT INTO pages (id, agent_id, title, description, version, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)",
+    ).run(id, a.id, "L".repeat(300), "x".repeat(1500), now, now);
+    db.close();
+    mkdirSync(join(agentsRoot, "Workspace", "Pages", id), { recursive: true });
+
+    await tool(a, "page_publish", { id, html: "<p>new</p>" });
+
+    const updated = await page(id);
+    expect(updated!.title).toBe("L".repeat(200));
+    expect(updated!.description).toBe("x".repeat(1000));
+    expect(updated!.version).toBe(2);
+  });
+
+  test("metadata limits never split a surrogate pair", async () => {
+    const out = await tool(a, "page_publish", {
+      title: `${"a".repeat(199)}😀`,
+      description: `${"d".repeat(999)}😀`,
+      html: "<p>1</p>",
+    });
+    const id = pageId(out);
+    expect(id).toBeDefined();
+    const created = await page(id!);
+    expect(created!.title).toBe("a".repeat(199));
+    expect(created!.description).toBe("d".repeat(999));
+
+    await tool(a, "page_publish", {
+      id: id!,
+      title: `${"b".repeat(199)}😀`,
+      description: `${"e".repeat(999)}😀`,
+      html: "<p>2</p>",
+    });
+    const updated = await page(id!);
+    expect(updated!.title).toBe("b".repeat(199));
+    expect(updated!.description).toBe("e".repeat(999));
   });
 });

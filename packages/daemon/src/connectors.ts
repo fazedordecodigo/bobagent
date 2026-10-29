@@ -1,6 +1,7 @@
 import type { ChildProcess } from "node:child_process";
 import { resolveCommand, spawnEnv } from "./env/login-path";
 import { spawnChild } from "./env/spawn";
+import { envStringArray } from "./env/vars";
 import type { Vault } from "./vault";
 
 // Connectors use vault secrets the agent was granted, without returning the secret itself:
@@ -9,17 +10,6 @@ import type { Vault } from "./vault";
 
 const OUTPUT_LIMIT = 50_000;
 const BW_FIELDS = new Set(["password", "username", "notes", "totp", "uri", "item"]);
-
-function command(envName: string, fallback: string[]): string[] {
-  const raw = process.env[envName];
-  if (raw) {
-    try {
-      const v = JSON.parse(raw);
-      if (Array.isArray(v) && v.every((x) => typeof x === "string")) return v;
-    } catch {}
-  }
-  return fallback;
-}
 
 async function run(cmd: string[], env: Record<string, string>): Promise<string> {
   let proc: ChildProcess;
@@ -92,7 +82,7 @@ export class Connectors {
     const token = this.secret("connector.1password", agentId).trim();
     if (!/^op:\/\/[^\s]+$/.test(reference))
       throw new Error("`reference` must look like op://vault/item/field");
-    return run([...command("UPBOT_OP_COMMAND", ["op"]), "read", reference], {
+    return run([...(envStringArray("UPBOT_OP_COMMAND") ?? ["op"]), "read", reference], {
       ...(token && token !== "desktop" ? { OP_SERVICE_ACCOUNT_TOKEN: token } : {}),
     });
   }
@@ -102,7 +92,7 @@ export class Connectors {
     if (!BW_FIELDS.has(field))
       throw new Error(`\`field\` must be one of ${[...BW_FIELDS].join(", ")}`);
     if (!item.trim()) throw new Error("`item` is required");
-    return run([...command("UPBOT_BW_COMMAND", ["bw"]), "get", field, item], {
+    return run([...(envStringArray("UPBOT_BW_COMMAND") ?? ["bw"]), "get", field, item], {
       BW_SESSION: session,
     });
   }

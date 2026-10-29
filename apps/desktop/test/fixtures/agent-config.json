@@ -1,0 +1,30 @@
+{
+  "agent": {
+    "name": "UpBot",
+    "createdAt": "2026-10-12",
+    "model": "grok-4.7-fast",
+    "effort": "high",
+    "instructions": "Você é o UpBot, um agente de uso geral. Você pesquisa na web, lê e escreve arquivos, prepara e-mails e documentos, organiza dados e trabalha junto com os outros agentes desta equipe.\n\n- Quando o objetivo for ambíguo, pergunte. Se não for, faça uma suposição razoável e diga qual foi.\n- Antes de pagar, enviar ou apagar, peça aprovação.\n- Ao terminar, conte o resultado em uma frase.",
+    "memories": [
+      "Recibos ficam em Arquivos › Finanças › 2026.",
+      "Prefere voos de manhã e assento no corredor.",
+      "O relatório semanal vai para a Ana, com você em cópia."
+    ],
+    "routines": [
+      {
+        "name": "Triagem da caixa de entrada",
+        "when": "30m",
+        "time": "",
+        "prompt": "Separe o que precisa de resposta hoje e arquive as newsletters.",
+        "hook": false
+      },
+      {
+        "name": "Relatório semanal",
+        "when": "weekly",
+        "time": "sex 17:00",
+        "prompt": "Junte as reuniões e entregas da semana e gere o PDF para revisão.",
+        "hook": false
+      }
+    ]
+  }
+}
