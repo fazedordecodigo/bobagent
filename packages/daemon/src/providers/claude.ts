@@ -2,12 +2,14 @@ import type { ConfigOption, PermissionOption } from "@upbot/protocol";
 import {
   AUTH_RE,
   authMessage,
+  closeProviderProcess,
   isVmCredentialRejection,
   type ProviderProcess,
   providerCommand,
   readJsonLines,
   redactCredential,
   spawnProvider,
+  str,
   truncate,
   vmCredentialRejectedMessage,
   withTimeout,
@@ -57,10 +59,6 @@ const TOOL_KINDS: Record<string, string> = {
   ExitPlanMode: "switch_mode",
   EnterPlanMode: "switch_mode",
 };
-
-function str(v: unknown): string | null {
-  return typeof v === "string" && v ? v : null;
-}
 
 export function claudeToolTitle(name: string, input: unknown): string {
   const i = (input ?? {}) as Json;
@@ -393,11 +391,7 @@ class ClaudeSession implements ProviderSession {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    this.proc.markClosed();
-    try {
-      this.proc.child.stdin?.end();
-    } catch {}
-    this.proc.kill();
+    closeProviderProcess(this.proc);
   }
 }
 

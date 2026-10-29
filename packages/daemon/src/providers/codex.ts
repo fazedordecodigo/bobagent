@@ -2,12 +2,14 @@ import type { ConfigOption, PermissionOption, ToolCallStatus } from "@upbot/prot
 import {
   AUTH_RE,
   authMessage,
+  closeProviderProcess,
   isVmCredentialRejection,
   type ProviderProcess,
   providerCommand,
   readJsonLines,
   redactCredential,
   spawnProvider,
+  str,
   truncate,
   vmCredentialRejectedMessage,
   withTimeout,
@@ -49,10 +51,6 @@ function sandboxPolicy(mode: string, roots: string[]): Json {
         excludeTmpdirEnvVar: false,
         excludeSlashTmp: false,
       };
-}
-
-function str(v: unknown): string | null {
-  return typeof v === "string" && v ? v : null;
 }
 
 class RpcFailure extends Error {
@@ -445,11 +443,7 @@ class CodexSession implements ProviderSession {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    this.proc.markClosed();
-    try {
-      this.proc.child.stdin?.end();
-    } catch {}
-    this.proc.kill();
+    closeProviderProcess(this.proc);
   }
 }
 
