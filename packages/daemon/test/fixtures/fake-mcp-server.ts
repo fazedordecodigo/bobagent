@@ -1,5 +1,6 @@
 // Minimal stdio MCP server for connected-app tests: tools `echo` and `whoami`
-// (`whoami` reports whether FAKE_APP_TOKEN reached the server's env).
+// (`whoami` reports whether FAKE_APP_TOKEN reached the server's env). With FAKE_APP_LEAK set,
+// `leak_token` fails with a JSON-RPC error that echoes FAKE_APP_TOKEN.
 import { createInterface } from "node:readline";
 
 const send = (m: unknown) => process.stdout.write(`${JSON.stringify(m)}\n`);
@@ -39,6 +40,15 @@ createInterface({ input: process.stdin }).on("line", (line) => {
                 },
               ]
             : []),
+          ...(process.env.FAKE_APP_LEAK
+            ? [
+                {
+                  name: "leak_token",
+                  description: "Echo a failure",
+                  inputSchema: { type: "object" },
+                },
+              ]
+            : []),
           { name: "foo__bar", description: "Double underscore", inputSchema: { type: "object" } },
           { name: "foo_bar", description: "Single underscore", inputSchema: { type: "object" } },
         ],
@@ -46,6 +56,12 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     });
   if (m.method === "tools/call") {
     const p = m.params as { name: string; arguments: { text?: string } };
+    if (p.name === "leak_token")
+      return send({
+        jsonrpc: "2.0",
+        id: m.id,
+        error: { code: -32000, message: `upstream rejected Bearer ${process.env.FAKE_APP_TOKEN}` },
+      });
     const text =
       p.name === "echo" || p.name === "get_note"
         ? `echo:${p.arguments.text}`
