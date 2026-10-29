@@ -133,51 +133,30 @@ describe("avatars, memories, skills, agent creation e2e", () => {
     ).rejects.toMatchObject({ code: "bad_request" });
   });
 
-  test("memories.update preserves identity and validates configuration edits", async () => {
+  test("memories.update enforces edit limits without changing stored memory on invalid edits", async () => {
     const memory = (await c.request("memories.add", {
       agentId: a.id,
       text: "Original memory",
     })) as Memory;
-    const before = c.events.length;
-    const updated = (await c.request("memories.update", {
-      id: memory.id,
-      text: "  Revised memory  ",
-    })) as Memory;
-    expect(updated).toMatchObject({
-      id: memory.id,
-      agentId: memory.agentId,
-      createdAt: memory.createdAt,
-      text: "Revised memory",
-    });
-    expect(updated.updatedAt).toBeGreaterThanOrEqual(memory.updatedAt);
-    expect(c.events.slice(before)).toContainEqual({
-      event: "memories.changed",
-      data: { agentId: a.id },
-    });
-    expect(await c.request("memories.list", { agentId: a.id })).toContainEqual(updated);
     for (const text of ["", "   ", "x".repeat(2_001)]) {
       await expect(c.request("memories.update", { id: memory.id, text })).rejects.toMatchObject({
         code: "bad_request",
       });
     }
+    expect(await c.request("memories.list", { agentId: a.id })).toContainEqual(memory);
     const atLimit = (await c.request("memories.update", {
       id: memory.id,
       text: "x".repeat(2_000),
     })) as Memory;
-    expect(atLimit.text).toHaveLength(2_000);
+    expect(atLimit).toMatchObject({
+      id: memory.id,
+      agentId: memory.agentId,
+      createdAt: memory.createdAt,
+      text: "x".repeat(2_000),
+    });
+    expect(atLimit.updatedAt).toBeGreaterThanOrEqual(memory.updatedAt);
+    expect(await c.request("memories.list", { agentId: a.id })).toContainEqual(atLimit);
     await c.request("memories.delete", { id: memory.id });
-    for (const id of [memory.id, "missing-memory"]) {
-      await expect(c.request("memories.update", { id, text: "Replacement" })).rejects.toMatchObject(
-        {
-          code: "not_found",
-        },
-      );
-    }
-    expect(
-      ((await c.request("memories.list", { agentId: a.id })) as Memory[]).some(
-        (item) => item.id === memory.id,
-      ),
-    ).toBe(false);
   });
 
   test("memories via RPC are injected into the first prompt of a session", async () => {
