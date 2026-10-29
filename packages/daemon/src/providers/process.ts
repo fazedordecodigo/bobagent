@@ -54,6 +54,21 @@ export function redactCredential(detail: string, credential: string | null): str
   return redactSecrets(credential ? detail.replaceAll(credential, "<redacted>") : detail);
 }
 
+/** Logs a failed resume fallback; callers fire onResumeFailed only after the replacement session started. */
+export function logResumeFailed(
+  provider: ProviderId,
+  resumeSessionId: string,
+  error: unknown,
+  credential: string | null,
+): void {
+  const detail = error instanceof Error ? error.message : String(error);
+  console.error("[upbotd] provider.resume_failed", {
+    provider,
+    resumeSessionId,
+    error: truncate(redactCredential(detail, credential), 500),
+  });
+}
+
 export function isVmCredentialRejection(detail: string): boolean {
   return AUTH_RE.test(detail) || VM_CREDENTIAL_REJECTION_RE.test(detail);
 }
