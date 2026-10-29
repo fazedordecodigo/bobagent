@@ -4,7 +4,7 @@ import type { AgentStore } from "./agents";
 import { MAX_HOPS } from "./bridge";
 import type { ChatStore } from "./chat-store";
 import type { Broadcast } from "./rpc";
-import { RpcError } from "./runtime/agent-runtime";
+import { RpcError, xmlAttr } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
 
 // Channels: a shared conversation between the user and several agents. User posts go
@@ -45,10 +45,6 @@ function rowToMessage(r: MessageRow): ChannelMessage {
     createdAt: r.created_at,
     replyTo: r.reply_to ?? null,
   };
-}
-
-function xmlAttr(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
 
 export class ChannelService {
@@ -116,7 +112,7 @@ export class ChannelService {
     }
   }
 
-  create(p: { name: string; memberIds: string[]; ownerId?: string | null }): Channel {
+  create(p: { name: string; memberIds: string[]; ownerId?: string | null | undefined }): Channel {
     const memberIds = [...new Set(p.memberIds)];
     const ownerId = p.ownerId ?? memberIds[0] ?? null;
     this.checkMembers(memberIds, ownerId);
@@ -362,12 +358,7 @@ ${text}`;
       return;
     }
     if (turn.status !== "completed") return;
-    const items = this.chat.itemsForTurn(turn.id);
-    const reply = items
-      .filter((i) => i.kind === "agent_message")
-      .map((i) => ("text" in i ? i.text : ""))
-      .join("\n\n")
-      .trim();
+    const reply = this.chat.finalReply(turn.id);
     if (!reply) return;
     this.append(ch.id, "agent", turn.agentId, reply);
     const hops = queueRow.hops + 1;
@@ -423,17 +414,6 @@ ${text}`;
     const out = this.update(channelId, { ownerId });
     this.append(channelId, "system", null, `Owner is now ${this.name(ownerId)}.`);
     return out;
-  }
-
-  setMembers(channelId: string, memberIds: string[]): Channel {
-    const ch = this.get(channelId);
-    const ids = [...new Set(memberIds)];
-    const ownerId = ch.ownerId && ids.includes(ch.ownerId) ? ch.ownerId : (ids[0] ?? null);
-    this.checkMembers(ids, ownerId);
-    this.db.query("DELETE FROM channel_members WHERE channel_id = ?").run(channelId);
-    const ins = this.db.query("INSERT INTO channel_members (channel_id, agent_id) VALUES (?, ?)");
-    for (const m of ids) ins.run(channelId, m);
-    return this.update(channelId, { ownerId });
   }
 
   archive(channelId: string): Channel {

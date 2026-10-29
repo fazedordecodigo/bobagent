@@ -134,12 +134,7 @@ export class SubagentService {
     const r = this.row(turn.agentId);
     if (!r || r.status !== "running" || !queueRow || queueRow.from_agent_id !== r.parent_id) return;
     if (turn.status === "completed") {
-      const text = this.chat
-        .itemsForTurn(turn.id)
-        .filter((i) => i.kind === "agent_message")
-        .map((i) => ("text" in i ? i.text : ""))
-        .join("\n\n")
-        .trim();
+      const text = this.chat.finalReply(turn.id);
       await this.finish(r, "done", text || "(no reply)");
     } else {
       await this.finish(r, "failed", `${turn.status}: ${turn.error ?? "no result"}`);
