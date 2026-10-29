@@ -86,17 +86,23 @@ export class Rpc {
         },
       });
     }
+    const startedAt = performance.now();
     try {
       const result = await this.dispatch(method as MethodName, paramsRes.data);
       return JSON.stringify({ id, result });
     } catch (e) {
+      const durationMs = Math.round(performance.now() - startedAt);
       if (e instanceof RpcError) {
+        if (e.code === "internal" || e.code === "busy" || e.cause !== undefined) {
+          console.error("[upbotd] rpc failed", { method, code: e.code, durationMs, error: e });
+        }
         return JSON.stringify({ id, error: { code: e.code, message: e.message } });
       }
       if (e instanceof ProviderError) {
+        console.error("[upbotd] rpc failed", { method, code: e.code, durationMs, error: e });
         return JSON.stringify({ id, error: { code: e.code, message: e.message } });
       }
-      console.error("[upbotd] handler error", e);
+      console.error("[upbotd] handler error", { method, durationMs, error: e });
       return JSON.stringify({ id, error: { code: "internal", message: "internal error" } });
     }
   }
@@ -252,7 +258,7 @@ export class Rpc {
           queueMicrotask(() => this.broadcast("hosts.changed", {}));
           return h;
         } catch (e) {
-          throw new RpcError("bad_request", (e as Error).message);
+          throw new RpcError("bad_request", (e as Error).message, { cause: e });
         }
       }
       case "vmCredentials.list":
@@ -286,7 +292,7 @@ export class Rpc {
         try {
           placed = this.extras.hosts.setPlacement(p);
         } catch (e) {
-          throw new RpcError("bad_request", (e as Error).message);
+          throw new RpcError("bad_request", (e as Error).message, { cause: e });
         }
         await this.runtimes.restartSession(p.agentId);
         queueMicrotask(() => this.broadcast("placement.updated", placed));
@@ -317,7 +323,7 @@ export class Rpc {
           r = await this.extras.marketplace.install(p.source, p.id, p.provider);
         } catch (e) {
           if (e instanceof RpcError) throw e;
-          throw new RpcError("bad_request", (e as Error).message);
+          throw new RpcError("bad_request", (e as Error).message, { cause: e });
         }
         if (r.skills.length) this.broadcast("skills.changed", {});
         if (r.agent) {
@@ -421,7 +427,7 @@ export class Rpc {
         try {
           await this.extras.voice.speak((params as { text: string }).text);
         } catch (e) {
-          throw new RpcError("bad_request", (e as Error).message);
+          throw new RpcError("bad_request", (e as Error).message, { cause: e });
         }
         return { ok: true };
       case "voice.stop":
@@ -432,7 +438,7 @@ export class Rpc {
         try {
           return { text: await this.extras.voice.transcribe(p.audioBase64, p.mime) };
         } catch (e) {
-          throw new RpcError("bad_request", (e as Error).message);
+          throw new RpcError("bad_request", (e as Error).message, { cause: e });
         }
       }
       case "browser.status":
@@ -504,7 +510,7 @@ export class Rpc {
           this.broadcast("skills.changed", {});
           return s;
         } catch (e) {
-          throw new RpcError("bad_request", (e as Error).message);
+          throw new RpcError("bad_request", (e as Error).message, { cause: e });
         }
       }
       case "skills.delete": {
