@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 import { resetPathCache } from "../src/env/login-path";
 import { loadVaultKey } from "../src/vault";
 
@@ -215,19 +215,16 @@ test.skipIf(process.platform !== "darwin")(
   () => {
     const directory = testRoot();
     const dataDir = join(directory, "data");
-    const binDir = join(directory, "bin");
-    const logFile = join(directory, "security.log");
-    const security = join(binDir, "security");
-    mkdirSync(binDir);
-    writeFileSync(
-      security,
-      '#!/bin/sh\nprintf \'%s\\n\' "$1" >> "$KEYCHAIN_TEST_LOG"\ncase "$1" in\n  find-generic-password) exit 44 ;;\n  add-generic-password) exit 45 ;;\nesac\nexit 0\n',
-      { mode: 0o700 },
-    );
-    chmodSync(security, 0o700);
-    setEnv("PATH", [binDir, process.env.PATH ?? ""].filter(Boolean).join(delimiter));
-    setEnv("KEYCHAIN_TEST_LOG", logFile);
     setEnv("UPBOT_VAULT_KEY", undefined);
+    const calls: string[] = [];
+    const spawn = spyOn(Bun, "spawnSync").mockImplementation(((cmd: string[]) => {
+      calls.push(cmd[1] ?? "");
+      return {
+        exitCode: cmd[1] === "find-generic-password" ? 44 : 45,
+        stdout: Buffer.from(""),
+        stderr: Buffer.from(""),
+      };
+    }) as never);
     const error = spyOn(console, "error").mockImplementation(() => {});
 
     try {
@@ -241,13 +238,13 @@ test.skipIf(process.platform !== "darwin")(
       expect(JSON.stringify(error.mock.calls)).not.toContain(keyHex);
       expect(readFileSync(file, "utf8")).toBe(keyHex);
       expect(statSync(file).mode & 0o777).toBe(0o600);
-      const calls = readFileSync(logFile, "utf8").trim().split("\n");
       expect(calls).toEqual([
         "find-generic-password",
         "find-generic-password",
         "add-generic-password",
       ]);
     } finally {
+      spawn.mockRestore();
       error.mockRestore();
     }
   },
