@@ -44,7 +44,14 @@ export class ApprovalService {
     private runtimes: () => RuntimeManager,
     private broadcast: Broadcast,
     private apps: AppsService,
-  ) {}
+  ) {
+    apps.onPermissionsChanged = (e) =>
+      this.audit("approval.app_permissions_changed", {
+        appId: e.appId,
+        source: e.source,
+        changes: e.changes,
+      });
+  }
 
   rules(): ApprovalRule[] {
     const r = this.db.query("SELECT value FROM settings WHERE key = 'approval_rules'").get() as {

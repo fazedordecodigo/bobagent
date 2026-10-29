@@ -171,6 +171,11 @@ export function appToolNames(slug: string, tools: Tool[]): Map<string, Tool> {
 
 export class AppsService {
   private live = new Map<string, Live>();
+  onPermissionsChanged?: (e: {
+    appId: string;
+    source: "connect" | "update" | "restore";
+    changes: { permission: AppPermissionKind; from: AppPermissionLevel; to: AppPermissionLevel }[];
+  }) => void;
 
   constructor(
     private db: Database,
@@ -228,6 +233,25 @@ export class AppsService {
 
   private changed() {
     this.broadcast("apps.changed", {});
+  }
+
+  private reportPermissionChanges(
+    appId: string,
+    source: "connect" | "update" | "restore",
+    from: ConnectedApp["permissions"],
+    to: ConnectedApp["permissions"],
+  ): void {
+    const changes = (Object.keys(defaultAppPermissions) as AppPermissionKind[])
+      .filter((permission) => from[permission] !== to[permission])
+      .map((permission) => ({
+        permission,
+        from: from[permission],
+        to: to[permission],
+      }));
+    if (!changes.length) return;
+    try {
+      this.onPermissionsChanged?.({ appId, source, changes });
+    } catch {}
   }
 
   connect(p: {
@@ -295,6 +319,7 @@ export class AppsService {
         "INSERT INTO connected_apps (id, catalog_id, config_json, permissions_json, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)",
       )
       .run(id, p.catalogId, JSON.stringify(config), JSON.stringify(permissions), Date.now());
+    this.reportPermissionChanges(id, "connect", defaultAppPermissions, permissions);
     this.changed();
     void this.ensure(id).catch(() => {});
     return this.get(id);
@@ -308,7 +333,8 @@ export class AppsService {
     secrets?: Record<string, string>;
   }): Promise<ConnectedApp> {
     const r = this.row(p.id);
-    const permissions = AppPermissions.parse({ ...this.toApp(r).permissions, ...p.permissions });
+    const previousPermissions = this.toApp(r).permissions;
+    const permissions = AppPermissions.parse({ ...previousPermissions, ...p.permissions });
     const c = this.config(r);
     if (p.agentIds) c.agentIds = p.agentIds;
     if (p.secrets) {
@@ -323,6 +349,7 @@ export class AppsService {
         "UPDATE connected_apps SET config_json = ?, permissions_json = ?, enabled = ? WHERE id = ?",
       )
       .run(JSON.stringify(c), JSON.stringify(permissions), enabled ? 1 : 0, p.id);
+    this.reportPermissionChanges(p.id, "update", previousPermissions, permissions);
     if (p.secrets || !enabled) await this.stop(p.id);
     this.changed();
     if (enabled) void this.ensure(p.id).catch(() => {});
@@ -336,6 +363,7 @@ export class AppsService {
     this.db
       .query("UPDATE connected_apps SET permissions_json = ? WHERE id = ?")
       .run(JSON.stringify(restored), id);
+    this.reportPermissionChanges(id, "restore", permissions, restored);
     this.changed();
   }
 

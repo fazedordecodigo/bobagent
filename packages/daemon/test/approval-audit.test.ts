@@ -137,6 +137,33 @@ test("approval.auto_denied records off-permission denials in gate", async () => 
   });
 });
 
+test("app permission changes record stored diffs", async () => {
+  await withApprovals(async ({ apps, db }) => {
+    await apps.update({ id: "notes", permissions: { write: "off", read: "ask" } });
+    expect(rows(db, "approval.app_permissions_changed").map(json)).toMatchObject([
+      {
+        appId: "notes",
+        source: "update",
+        changes: [
+          { permission: "read", from: "allow", to: "ask" },
+          { permission: "write", from: "ask", to: "off" },
+        ],
+      },
+    ]);
+
+    await apps.update({ id: "notes", permissions: { write: "off", read: "ask" } });
+    expect(rows(db, "approval.app_permissions_changed")).toHaveLength(1);
+
+    await apps.update({ id: "notes", permissions: { write: "allow" } });
+    apps.restorePermission("notes", "write", "ask");
+    expect(rows(db, "approval.app_permissions_changed").map(json).at(-1)).toMatchObject({
+      appId: "notes",
+      source: "restore",
+      changes: [{ permission: "write", from: "allow", to: "ask" }],
+    });
+  });
+});
+
 test("approval.permission_escalated records always decisions for apps and tool rules", async () => {
   await withApprovals(async ({ approvals, apps, db }) => {
     const g1 = approvals.gate("bot", "notes-create_note", {}, true);
