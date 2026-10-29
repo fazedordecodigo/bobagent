@@ -30,8 +30,18 @@ type Row = {
 };
 
 export const MAX_PAGE_BYTES = 5 * 1024 * 1024;
+const MAX_TITLE = 200;
+const MAX_DESCRIPTION = 1000;
+const PAGE_SIZE_ERROR = `pages are limited to ${MAX_PAGE_BYTES / (1024 * 1024)} MB`;
 export const PAGE_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'";
+
+function clampText(s: string, max: number): string {
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max);
+  const last = cut.charCodeAt(max - 1);
+  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+}
 
 function inside(root: string, p: string): boolean {
   const rel = relative(root, p);
@@ -96,7 +106,7 @@ export class PageLibrary {
     if (!roots.some((r) => inside(r, p)))
       throw new Error("`file` must be inside your workspace or the shared workspace");
     if (!statSync(p).isFile()) throw new Error("`file` must be a regular file");
-    if (statSync(p).size > MAX_PAGE_BYTES) throw new Error("pages are limited to 5 MB");
+    if (statSync(p).size > MAX_PAGE_BYTES) throw new Error(PAGE_SIZE_ERROR);
     return readFileSync(p, "utf8");
   }
 
@@ -104,9 +114,12 @@ export class PageLibrary {
     me: Agent,
     p: { id?: string; title?: string; description?: string; html?: string; file?: string },
   ): Page {
+    const title = p.title === undefined ? undefined : clampText(p.title.trim(), MAX_TITLE);
+    const description =
+      p.description === undefined ? undefined : clampText(p.description, MAX_DESCRIPTION);
     const html = p.file ? this.readSource(me, p.file) : (p.html ?? "");
     if (!html.trim()) throw new Error("pass `html` or `file`");
-    if (Buffer.byteLength(html) > MAX_PAGE_BYTES) throw new Error("pages are limited to 5 MB");
+    if (Buffer.byteLength(html) > MAX_PAGE_BYTES) throw new Error(PAGE_SIZE_ERROR);
     const now = Date.now();
     if (p.id) {
       const prev = this.get(p.id);
@@ -119,11 +132,15 @@ export class PageLibrary {
         .query(
           "UPDATE pages SET title = ?, description = ?, version = version + 1, updated_at = ? WHERE id = ?",
         )
-        .run(p.title?.trim() || prev.title, p.description ?? prev.description, now, prev.id);
+        .run(
+          title || clampText(prev.title, MAX_TITLE),
+          description ?? clampText(prev.description, MAX_DESCRIPTION),
+          now,
+          prev.id,
+        );
       this.broadcast("pages.changed", {});
       return this.get(prev.id);
     }
-    const title = p.title?.trim();
     if (!title) throw new Error("`title` is required for a new page");
     const id = crypto.randomUUID();
     mkdirSync(this.dir(id), { recursive: true });
@@ -132,7 +149,7 @@ export class PageLibrary {
       .query(
         "INSERT INTO pages (id, agent_id, title, description, version, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)",
       )
-      .run(id, me.id, title.slice(0, 200), (p.description ?? "").slice(0, 1000), now, now);
+      .run(id, me.id, title, description ?? "", now, now);
     this.broadcast("pages.changed", {});
     return this.get(id);
   }

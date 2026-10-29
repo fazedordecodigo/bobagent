@@ -66,14 +66,17 @@ export function useChat(client: DaemonClient, agentId: string | null) {
     });
     seqCursor.current = null;
     if (!agentId) return;
-    load().catch(() => {});
-    client
-      .request("agents.statuses", {})
-      .then((st) => {
-        const info = st[agentId];
-        if (info) setState((s) => ({ ...s, status: info }));
-      })
-      .catch(() => {});
+    const sync = () => {
+      load().catch(() => {});
+      client
+        .request("agents.statuses", {})
+        .then((st) => {
+          const info = st[agentId];
+          if (info) setState((s) => ({ ...s, status: info }));
+        })
+        .catch(() => {});
+    };
+    sync();
 
     const matches = (id: string | undefined | null) => id === agentId;
     const offs = [
@@ -135,16 +138,7 @@ export function useChat(client: DaemonClient, agentId: string | null) {
         if (!matches(q.agentId)) return;
         setState((s) => ({ ...s, queue: q }));
       }),
-      client.onReconnect(() => {
-        load().catch(() => {});
-        client
-          .request("agents.statuses", {})
-          .then((st) => {
-            const info = st[agentId];
-            if (info) setState((s) => ({ ...s, status: info }));
-          })
-          .catch(() => {});
-      }),
+      client.onReconnect(sync),
     ];
     return () => {
       for (const off of offs) off();
@@ -153,10 +147,12 @@ export function useChat(client: DaemonClient, agentId: string | null) {
 
   const loadEarlier = useCallback(async () => {
     if (!agentId || seqCursor.current === null) return;
+    const forAgent = agentId;
     const res = await client.request("chat.history", {
-      agentId,
+      agentId: forAgent,
       beforeSeq: seqCursor.current,
     });
+    if (activeAgent.current !== forAgent) return; // stale load after switching agents
     if (res.items.length > 0) seqCursor.current = res.items[0]?.seq ?? null;
     setState((s) => ({
       ...s,

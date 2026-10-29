@@ -28,13 +28,13 @@ export function UpdateButton() {
     }
   };
   const label = {
-    idle: "Check for updates",
-    checking: "Checking…",
-    none: "Up to date",
-    available: `Install ${update?.version ?? "update"}`,
-    installing: "Installing…",
-    done: "Restart UpBot to finish",
-    error: "Update check failed",
+    idle: "Verificar atualizações",
+    checking: "Verificando…",
+    none: "Tudo atualizado",
+    available: `Instalar ${update?.version ?? "atualização"}`,
+    installing: "Instalando…",
+    done: "Reinicie o UpBot para concluir",
+    error: "Falha ao verificar atualizações",
   }[state];
   return (
     <button

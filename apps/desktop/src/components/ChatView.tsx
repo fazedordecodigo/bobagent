@@ -107,7 +107,7 @@ export function ChatView({
   );
 
   const retry = useCallback(() => {
-    if (latestUser?.kind === "user_message") void send(latestUser.text, []);
+    if (latestUser?.kind === "user_message") void send(latestUser.text, []).catch(() => {});
   }, [latestUser, send]);
 
   const respondPermission = useCallback(
@@ -212,7 +212,11 @@ export function ChatView({
         hint={hint}
         hintError={sendError}
         onSend={send}
-        onStop={() => void client.request("chat.cancel", { agentId: agent.id }).catch(() => {})}
+        onStop={() =>
+          void client.request("chat.cancel", { agentId: agent.id }).catch((e) => {
+            setSendError(errorMessage(e));
+          })
+        }
         onTranscribe={
           voice.stt
             ? async (audioBase64, mime) =>

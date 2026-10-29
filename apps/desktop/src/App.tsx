@@ -26,6 +26,7 @@ import { errorMessage } from "./lib/errors";
 import { nativeCommand } from "./lib/native";
 import { useNativeNotifications } from "./lib/native-notifications";
 import { mod } from "./lib/platform";
+import { readStorage, writeStorage } from "./lib/storage";
 import { role, statusProvider } from "./lib/ui";
 
 type View =
@@ -41,20 +42,6 @@ type View =
   | "channel-new";
 type RailView = Extract<View, "chat" | "agents" | "tasks" | "settings">;
 const RAIL_VIEWS: RailView[] = ["chat", "agents", "tasks", "settings"];
-
-function readStorage(key: string) {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeStorage(key: string, value: string) {
-  try {
-    localStorage.setItem(key, value);
-  } catch {}
-}
 
 function readView(): RailView {
   const stored = readStorage("upbot.view");
@@ -115,11 +102,14 @@ export default function App() {
       client.onReconnect(() => {
         void refresh().catch(() => {});
       }),
+      client.onFailure((e) => {
+        setError(e.message);
+      }),
     ];
     return () => {
       for (const off of offs) off();
     };
-  }, [client, refresh]);
+  }, [client, refresh, setError]);
 
   const overview = useOverview(client, agents, statuses, clientReady);
   const selected = agents.find((agent) => agent.id === selectedId) ?? null;
@@ -157,7 +147,7 @@ export default function App() {
         navigate("agent-settings");
       } catch (e) {
         showAgentUndoToast(
-          `Não deu para desfazer: ${e instanceof Error ? e.message : String(e)}`,
+          `Não deu para desfazer: ${errorMessage(e)}`,
           () => void restoreDeletedAgent(agentId),
         );
       }

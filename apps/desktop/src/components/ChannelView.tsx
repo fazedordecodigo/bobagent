@@ -33,7 +33,7 @@ export function ChannelView({
       .then((r) => {
         if (alive) setMessages(r.messages);
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(errorMessage(e)));
     const off = client.on("channel.message", (m) => {
       if (m.channelId !== channel.id) return;
       setMessages((prev) => (prev.some((p) => p.id === m.id) ? prev : [...prev, m]));

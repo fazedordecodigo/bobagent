@@ -135,6 +135,7 @@ export class DaemonClient {
 export type DaemonHandle = {
   proc: ReturnType<typeof Bun.spawn>;
   port: number;
+  stderrText?: Promise<string>;
 };
 
 export async function startDaemon(
@@ -142,6 +143,7 @@ export async function startDaemon(
   agentsRoot: string,
   token: string,
   env: Record<string, string> = {},
+  captureStderr = false,
 ): Promise<DaemonHandle> {
   const proc = Bun.spawn(["bun", DAEMON, "--data-dir", dataDir, "--agents-root", agentsRoot], {
     env: { ...process.env, UPBOT_DEFAULT_BOT: "off", ...env },
@@ -150,6 +152,9 @@ export async function startDaemon(
     stderr: "pipe",
     cwd: ROOT,
   });
+  const stderrText = captureStderr
+    ? new Response(proc.stderr as ReadableStream<Uint8Array>).text()
+    : undefined;
   // token is delivered on the first stdin line, never via env
   const sink = proc.stdin as { write: (s: string) => void; flush: () => void };
   sink.write(`${token}\n`);
@@ -182,7 +187,7 @@ export async function startDaemon(
     pump().catch(reject);
   });
   reader.releaseLock();
-  return { proc, port };
+  return stderrText ? { proc, port, stderrText } : { proc, port };
 }
 
 export function waitForExit(proc: ReturnType<typeof Bun.spawn>, ms: number): Promise<number> {
