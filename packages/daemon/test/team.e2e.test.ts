@@ -43,7 +43,10 @@ describe("teams via relay e2e", () => {
     return (await r.json()) as { id: string; token: string };
   };
 
-  async function daemon(): Promise<DaemonClient> {
+  async function daemon(
+    env: Record<string, string> = {},
+    log?: { text: string },
+  ): Promise<DaemonClient> {
     const [d, a, s] = [tmp("tm-data-"), tmp("tm-agents-"), tmp("tm-fake-")];
     dirs.push(d, a, s);
     const token = `tm-${crypto.randomUUID()}`;
@@ -51,8 +54,16 @@ describe("teams via relay e2e", () => {
       UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: s,
       UPBOT_VAULT_KEY: "ef".repeat(32),
+      ...env,
     });
     daemons.push(h);
+    if (log) {
+      const decoder = new TextDecoder();
+      void (async () => {
+        for await (const chunk of h.proc.stderr as ReadableStream<Uint8Array>)
+          log.text += decoder.decode(chunk);
+      })().catch(() => {});
+    }
     const c = await DaemonClient.connect(h.port, token);
     clients.push(c);
     return c;
@@ -176,6 +187,74 @@ describe("teams via relay e2e", () => {
         text: "echo:sneaky",
       }),
     ).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  describe("a third member with a slow and a broken shared agent", () => {
+    const caraLog = { text: "" };
+    let cara: DaemonClient;
+    let caraSlow: Agent;
+    let caraBroken: Agent;
+    let caraMemberId: string;
+
+    const caraIn = async (requestId: string) =>
+      ((await cara.request("team.messages", {})) as TeamMessage[]).find(
+        (x) => x.requestId === requestId && x.direction === "in",
+      );
+    const bobOut = async (requestId: string) =>
+      ((await bob.request("team.messages", {})) as TeamMessage[]).find(
+        (x) => x.requestId === requestId && x.direction === "out",
+      );
+
+    beforeAll(async () => {
+      cara = await daemon(
+        { UPBOT_ACP_COMMAND_CURSOR: JSON.stringify(["upbot-missing-provider-cli"]) },
+        caraLog,
+      );
+      caraSlow = (await cara.request("agents.create", {
+        name: "Slow",
+        provider: "devin",
+        instructions: "",
+      })) as Agent;
+      caraBroken = (await cara.request("agents.create", {
+        name: "Broken",
+        provider: "cursor",
+        instructions: "",
+      })) as Agent;
+      const c = await invite("Cara");
+      caraMemberId = c.id;
+      await cara.request("team.connect", { url: relayUrl, token: c.token });
+      await until(async () =>
+        ((await cara.request("team.status", {})) as TeamStatus).connected ? true : undefined,
+      );
+      await cara.request("team.share", { agentIds: [caraSlow.id, caraBroken.id] });
+      await until(async () => {
+        const s = (await bob.request("team.status", {})) as TeamStatus;
+        return s.members.find((x) => x.id === caraMemberId)?.agents.length === 2 ? true : undefined;
+      });
+    });
+
+    test("a request the shared agent cannot start fails on both sides", async () => {
+      const sent = (await bob.request("team.send", {
+        memberId: caraMemberId,
+        agentId: caraBroken.id,
+        text: "echo:never runs",
+      })) as TeamMessage;
+      const failed = await until(async () => {
+        const m = await bobOut(sent.requestId);
+        return m?.status === "failed" ? m : undefined;
+      });
+      expect(failed.reply).toContain("upbot-missing-provider-cli");
+      const inbound = await until(async () => {
+        const m = await caraIn(sent.requestId);
+        return m?.status === "failed" ? m : undefined;
+      });
+      expect(inbound.reply).toBe(failed.reply);
+      await until(async () => (caraLog.text.includes("team request rejected") ? true : undefined));
+      const line = caraLog.text.split("\n").find((l) => l.includes("team request rejected"));
+      expect(line).toBe(
+        `[upbotd] team request rejected requestId=${sent.requestId} agentId=${caraBroken.id} reason=provider_unavailable`,
+      );
+    });
   });
 
   test("removed members are disconnected", async () => {

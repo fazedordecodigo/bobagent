@@ -198,6 +198,11 @@ export class TeamClient {
     return msg;
   }
 
+  private emitRow(id: string) {
+    const r = this.db.query("SELECT * FROM team_messages WHERE id = ?").get(id) as MsgRow | null;
+    if (r) this.broadcast("team.message", toMessage(r));
+  }
+
   private sendShare() {
     if (!this.connected || !this.ws) return;
     const ids = this.config()?.sharedAgentIds ?? [];
@@ -297,9 +302,9 @@ export class TeamClient {
   }) {
     const shared = this.config()?.sharedAgentIds ?? [];
     const agent = this.agents.get(m.agentId);
-    const fail = (text: string) => {
+    const fail = (text: string, reason: string) => {
       console.error(
-        `[upbotd] team request rejected requestId=${m.requestId} agentId=${m.agentId} reason=${text}`,
+        `[upbotd] team request rejected requestId=${m.requestId} agentId=${m.agentId} reason=${reason}`,
       );
       this.ws?.send(
         JSON.stringify({
@@ -312,10 +317,10 @@ export class TeamClient {
       );
     };
     if (!agent || !shared.includes(agent.id)) {
-      fail("that agent is not shared");
+      fail("that agent is not shared", "not_shared");
       return;
     }
-    this.record({
+    const row = this.record({
       requestId: m.requestId,
       direction: "in",
       memberId: m.from.memberId,
@@ -340,7 +345,13 @@ export class TeamClient {
         },
       });
     } catch (e) {
-      fail((e as Error).message);
+      const text = (e as Error).message;
+      const code = (e as { code?: unknown }).code;
+      fail(text, typeof code === "string" && /^[a-z_]{1,40}$/.test(code) ? code : "error");
+      this.db
+        .query("UPDATE team_messages SET reply = ?, status = 'failed' WHERE id = ?")
+        .run(text, row.id);
+      this.emitRow(row.id);
     }
   }
 
