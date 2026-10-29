@@ -206,21 +206,30 @@ export function readJsonLines(
   stream: NodeJS.ReadableStream,
   onLine: (msg: Record<string, unknown>) => void,
 ): void {
-  let buf = "";
+  // Only the current chunk is scanned for '\n'; the incomplete tail is kept
+  // as Buffer slices and concatenated into a line exactly once, so a large
+  // line spread over many chunks costs O(L) instead of O(L^2/chunk).
+  const pending: Buffer[] = [];
   stream.on("data", (d: Buffer) => {
-    buf += d.toString("utf8");
-    let idx = buf.indexOf("\n");
+    const chunk = Buffer.isBuffer(d) ? d : Buffer.from(d);
+    let start = 0;
+    let idx = chunk.indexOf("\n", start);
     while (idx >= 0) {
-      const line = buf.slice(0, idx).trim();
-      buf = buf.slice(idx + 1);
+      const piece = chunk.subarray(start, idx);
+      const line = (pending.length === 0 ? piece : Buffer.concat([...pending, piece]))
+        .toString("utf8")
+        .trim();
+      pending.length = 0;
       if (line) {
         try {
           const msg = JSON.parse(line);
           if (msg && typeof msg === "object") onLine(msg as Record<string, unknown>);
         } catch {}
       }
-      idx = buf.indexOf("\n");
+      start = idx + 1;
+      idx = chunk.indexOf("\n", start);
     }
+    if (start < chunk.length) pending.push(chunk.subarray(start));
   });
 }
 
