@@ -1,10 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  boundedAppError,
-  redactTrailingPrefix,
-  redactValues,
-  stderrLineBuffer,
-} from "../src/apps";
+import { boundedAppError, redactTrailingPrefix, redactValues, stderrLineBuffer } from "../src/apps";
 
 describe("app stderr helpers", () => {
   test("joins a secret split across Buffer chunks into one line", () => {

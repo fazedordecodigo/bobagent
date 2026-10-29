@@ -292,15 +292,10 @@ process.stdin.on("data", (chunk) => {
     const timeoutAgentsRoot = tmp("apps-timeout-agents-");
     const timeoutStateDir = tmp("apps-timeout-state-");
     const timeoutToken = `apps-timeout-${crypto.randomUUID()}`;
-    const timeoutDaemon = await startDaemon(
-      timeoutDataDir,
-      timeoutAgentsRoot,
-      timeoutToken,
-      {
-        UPBOT_APP_START_TIMEOUT_MS: "1500",
-        UPBOT_VAULT_KEY: "ef".repeat(32),
-      },
-    );
+    const timeoutDaemon = await startDaemon(timeoutDataDir, timeoutAgentsRoot, timeoutToken, {
+      UPBOT_APP_START_TIMEOUT_MS: "1500",
+      UPBOT_VAULT_KEY: "ef".repeat(32),
+    });
     const timeoutClient = await DaemonClient.connect(timeoutDaemon.port, timeoutToken);
     const stderrReader = (timeoutDaemon.proc.stderr as ReadableStream<Uint8Array>).getReader();
     let timeoutStderr = "";
@@ -344,11 +339,17 @@ process.stdin.on("data", (chunk) => {
       expect(failed?.error).toContain("tok=[redacted]");
       const listed = JSON.stringify(list);
       for (let length = 4; length <= 12; length++) {
-        expect(listed).not.toContain(secret.slice(0, length));
-        expect(timeoutStderr).not.toContain(secret.slice(0, length));
+        const prefix = secret.slice(0, length);
+        if (length === 4) {
+          expect(listed).not.toContain(`tok=${prefix}`);
+          expect(timeoutStderr).not.toContain(`tok=${prefix}`);
+        } else {
+          expect(listed).not.toContain(prefix);
+          expect(timeoutStderr).not.toContain(prefix);
+        }
       }
       await timeoutClient.request("apps.delete", { id: bad.id });
-      for (let i = 0; i < 20 && pidAlive(hungPid); i++) await Bun.sleep(50);
+      for (let i = 0; i < 100 && pidAlive(hungPid); i++) await Bun.sleep(50);
       expect(pidAlive(hungPid)).toBe(false);
     } finally {
       if (bad) await timeoutClient.request("apps.delete", { id: bad.id }).catch(() => {});

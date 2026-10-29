@@ -130,6 +130,7 @@ type Config = {
 
 type Live = {
   client: Client | null;
+  transport: Transport | null;
   starting: Promise<void> | null;
   status: ConnectedApp["status"];
   error: string | null;
@@ -199,14 +200,14 @@ export function redactValues(text: string, values: Iterable<string>): string {
     .reduce((result, value) => result.split(value).join("[redacted]"), text);
 }
 
-export function redactTrailingPrefix(
-  text: string,
-  values: Iterable<string>,
-  min = 4,
-): string {
+export function redactTrailingPrefix(text: string, values: Iterable<string>, min = 4): string {
   let longest = 0;
   for (const needle of secretNeedles(values)) {
-    for (let length = Math.min(text.length, needle.length); length >= min && length > longest; length--) {
+    for (
+      let length = Math.min(text.length, needle.length);
+      length >= min && length > longest;
+      length--
+    ) {
       if (text.endsWith(needle.slice(0, length))) {
         longest = length;
         break;
@@ -462,7 +463,8 @@ export class AppsService {
     const l = this.live.get(id);
     if (!l) return;
     this.live.delete(id);
-    await l.client?.close().catch(() => {});
+    if (l.client) await l.client.close().catch(() => {});
+    else await l.transport?.close().catch(() => {});
   }
 
   async closeAll(): Promise<void> {
@@ -482,6 +484,7 @@ export class AppsService {
     if (existing?.starting) return existing.starting;
     const l: Live = {
       client: null,
+      transport: null,
       starting: null,
       status: "starting",
       error: null,
@@ -532,6 +535,7 @@ export class AppsService {
               },
               stderr: "pipe",
             });
+      l.transport = transport as Transport;
       if (transport instanceof StdioClientTransport) {
         transport.stderr?.on("data", (d: Buffer) => stderr.push(d));
         transport.stderr?.on("end", () => stderr.end());
@@ -552,6 +556,7 @@ export class AppsService {
           l.status = "error";
           l.error = "the app's MCP server exited";
           l.client = null;
+          l.transport = null;
           if (wasReady) {
             const tail = stderrTail();
             console.error("[upbotd] app MCP server exited", {
