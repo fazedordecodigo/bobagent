@@ -23,10 +23,15 @@ export const ProviderId = z.enum([
 ]);
 export type ProviderId = z.infer<typeof ProviderId>;
 
-export const AgentAvatar = z.object({
-  emoji: z.string().min(1).max(16),
-  color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-});
+export const AgentIconId = z.enum(["sym", "mail", "receipt", "plane", "chart", "cal", "sheet"]);
+export type AgentIconId = z.infer<typeof AgentIconId>;
+export const AgentAvatar = z.union([
+  z.object({
+    emoji: z.string().min(1).max(16),
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  }),
+  z.object({ icon: AgentIconId }).strict(),
+]);
 export type AgentAvatar = z.infer<typeof AgentAvatar>;
 
 export const GatewayKind = z.enum(["telegram", "slack", "discord"]);
@@ -85,6 +90,8 @@ export const AgentsUpdateResult = Agent;
 
 export const AgentsDeleteParams = z.object({ id: z.string() }).strict();
 export const AgentsDeleteResult = z.object({ ok: z.literal(true) });
+export const AgentsRestoreParams = z.object({ id: z.string() }).strict();
+export const AgentsRestoreResult = Agent;
 
 // ---- Chat types ----
 
@@ -276,7 +283,7 @@ export const AgentsConfigOptionsResult = z.object({
   configOptions: z.array(ConfigOption),
 });
 export const AgentsSetConfigParams = z
-  .object({ agentId: z.string(), configId: z.string(), value: z.string() })
+  .object({ agentId: z.string(), configId: z.string(), value: z.string().nullable() })
   .strict();
 export const AgentsSetConfigResult = z.object({
   configOptions: z.array(ConfigOption),
@@ -766,6 +773,7 @@ export const methodMap = {
   "agents.create": { params: AgentsCreateParams, result: AgentsCreateResult },
   "agents.update": { params: AgentsUpdateParams, result: AgentsUpdateResult },
   "agents.delete": { params: AgentsDeleteParams, result: AgentsDeleteResult },
+  "agents.restore": { params: AgentsRestoreParams, result: AgentsRestoreResult },
   "chat.history": { params: ChatHistoryParams, result: ChatHistoryResult },
   "chat.send": { params: ChatSendParams, result: ChatSendResult },
   "chat.cancel": { params: ChatCancelParams, result: ChatCancelResult },

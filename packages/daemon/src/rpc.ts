@@ -128,6 +128,12 @@ export class Rpc {
         queueMicrotask(() => this.broadcast("agent.deleted", { id: p.id }));
         return { ok: true };
       }
+      case "agents.restore": {
+        const agent = this.agents.restore((params as { id: string }).id);
+        if (!agent) throw new RpcError("not_found", "deleted agent not found");
+        queueMicrotask(() => this.broadcast("agent.created", agent));
+        return agent;
+      }
       case "chat.history": {
         const p = params as { agentId: string; beforeSeq?: number; limit?: number };
         if (!this.agents.get(p.agentId)) throw new RpcError("not_found", "agent not found");
@@ -174,7 +180,7 @@ export class Rpc {
         return { configOptions: await this.runtimes.configOptions(p.agentId) };
       }
       case "agents.setConfig": {
-        const p = params as { agentId: string; configId: string; value: string };
+        const p = params as { agentId: string; configId: string; value: string | null };
         return { configOptions: await this.runtimes.setConfig(p.agentId, p.configId, p.value) };
       }
       case "chat.cancel": {

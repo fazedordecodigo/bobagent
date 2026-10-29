@@ -295,6 +295,7 @@ async function main() {
           hook[1]!,
           auth.startsWith("Bearer ") ? auth.slice(7) : "",
         );
+        if (id && typeof id === "object") return new Response("not found", { status: 404 });
         if (!id) return new Response("unauthorized", { status: 401 });
         return req.text().then(
           (payload) => {
