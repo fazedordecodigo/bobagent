@@ -1,4 +1,5 @@
-import type { VmCredential, VmCredentialKind, VmCredentialProvider } from "@upbot/protocol";
+import { type VmCredential, VmCredentialKind, type VmCredentialProvider } from "@upbot/protocol";
+import { z } from "zod";
 import { type Vault, VMCRED_PREFIX } from "../vault";
 
 // Provider logins for Firecracker microVM sessions. Stored encrypted in the vault under
@@ -18,8 +19,26 @@ export const VM_CREDENTIAL_ENV: Record<
 
 const isProvider = (p: string): p is VmCredentialProvider => p in VM_CREDENTIAL_ENV;
 
+const STORED_ENTRY = z.object({ kind: VmCredentialKind, value: z.string() });
+
 export class VmCredentials {
   constructor(private vault: Vault) {}
+
+  /** Stored `{kind, value}` for a provider, or null when none is saved. A stored entry
+   * that fails to decrypt or parse is logged and reads as absent. */
+  private readEntry(provider: VmCredentialProvider): z.infer<typeof STORED_ENTRY> | null {
+    const name = `${VMCRED_PREFIX}${provider}`;
+    if (!this.vault.internalEntries(name).some((e) => e.name === name)) return null;
+    try {
+      return STORED_ENTRY.parse(JSON.parse(this.vault.revealInternal(name)));
+    } catch {
+      console.error("UpBot could not read a stored microVM credential", {
+        provider,
+        reason: "invalid_entry",
+      });
+      return null;
+    }
+  }
 
   list(): VmCredential[] {
     return this.vault
@@ -27,10 +46,8 @@ export class VmCredentials {
       .map((e) => {
         const provider = e.name.slice(VMCRED_PREFIX.length);
         if (!isProvider(provider)) return null;
-        const { kind } = JSON.parse(this.vault.revealInternal(e.name)) as {
-          kind: VmCredentialKind;
-        };
-        return { provider, kind, updatedAt: e.updatedAt };
+        const entry = this.readEntry(provider);
+        return entry ? { provider, kind: entry.kind, updatedAt: e.updatedAt } : null;
       })
       .filter((c): c is VmCredential => c !== null);
   }
@@ -48,13 +65,10 @@ export class VmCredentials {
   /** Environment variables for a provider session inside a microVM ({} when none is set). */
   env(provider: string): Record<string, string> {
     if (!isProvider(provider)) return {};
-    let raw: string;
-    try {
-      raw = this.vault.revealInternal(`${VMCRED_PREFIX}${provider}`);
-    } catch {
-      return {};
-    }
-    const { kind, value } = JSON.parse(raw) as { kind: VmCredentialKind; value: string };
-    return Object.fromEntries((VM_CREDENTIAL_ENV[provider][kind] ?? []).map((k) => [k, value]));
+    const entry = this.readEntry(provider);
+    if (!entry) return {};
+    return Object.fromEntries(
+      (VM_CREDENTIAL_ENV[provider][entry.kind] ?? []).map((k) => [k, entry.value]),
+    );
   }
 }

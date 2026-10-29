@@ -10,15 +10,16 @@ import type {
   QueueState,
 } from "@upbot/protocol";
 import type { AgentStore } from "../agents";
-import type { ChatStore, QueueSource, QueueStore } from "../chat-store";
-import { envPositiveNumber } from "../env/vars";
+import { type ChatStore, type QueueSource, type QueueStore, readQueueMeta } from "../chat-store";
+import { envNumber, envPositiveNumber } from "../env/vars";
 import { checkProviderAvailable, DEFAULT_MODE, getDriver } from "../providers";
 import { withTimeout } from "../providers/process";
-import type {
-  McpServerSpec,
-  ProviderHooks,
-  ProviderSession,
-  RemoteLaunch,
+import {
+  type McpServerSpec,
+  ProviderError,
+  type ProviderHooks,
+  type ProviderSession,
+  type RemoteLaunch,
 } from "../providers/types";
 import { buildHandoff } from "./handoff";
 
@@ -32,8 +33,7 @@ do not use any tools.
 function compactThreshold(): number | null {
   const raw = process.env.UPBOT_COMPACT_THRESHOLD;
   if (raw === "off" || raw === "0") return null;
-  const n = raw ? Number(raw) : 0.85;
-  return Number.isFinite(n) && n > 0 && n <= 1 ? n : 0.85;
+  return envNumber("UPBOT_COMPACT_THRESHOLD", 0.85, { max: 1 });
 }
 
 function compactTimeoutMs(): number {
@@ -104,8 +104,9 @@ type PendingEntry = {
   resolve: (r: { optionId: string | null }) => void;
 };
 
-const cancelGraceMs = () =>
-  Math.max(0, Number.parseInt(process.env.UPBOT_CANCEL_GRACE_MS ?? "", 10) || 10_000);
+// min: 0 honors UPBOT_CANCEL_GRACE_MS=0 as an immediate kill, which the old
+// Math.max(0, …) clamp suggested but the `|| 10_000` fallback silently ignored.
+const cancelGraceMs = () => envNumber("UPBOT_CANCEL_GRACE_MS", 10_000, { min: 0 });
 
 /** How often the in-memory streamed text is flushed to SQLite mid-stream. */
 const TEXT_FLUSH_MS = 150;
@@ -247,6 +248,9 @@ export class AgentRuntime {
     if (this.agents.queuePaused(this.agent.id)) return;
     const next = this.queue.peek(this.agent.id);
     if (!next) return;
+    const { meta, rejected } = readQueueMeta(next);
+    if (rejected.length)
+      console.error(`[upbotd] queue item ${next.id}: ignored invalid meta ${rejected.join(", ")}`);
     this.draining = true;
     try {
       const turnRow = this.store.createTurn(this.agent.id, next.id);
@@ -256,9 +260,13 @@ export class AgentRuntime {
       this.toolCallItems.clear();
       this.turnHops = next.hops ?? 0;
       this.turnChannelId = next.channel_id ?? null;
-      const meta = next.meta_json ? (JSON.parse(next.meta_json) as Record<string, unknown>) : {};
       this.turnBackground = Boolean(
-        next.from_agent_id || next.channel_id || meta.routine || meta.gateway || meta.team,
+        next.from_agent_id ||
+          next.channel_id ||
+          meta.routine ||
+          meta.gateway ||
+          meta.team ||
+          rejected.some((key) => ["meta_json", "routine", "gateway", "team"].includes(key)),
       );
       const sender = next.from_agent_id
         ? {

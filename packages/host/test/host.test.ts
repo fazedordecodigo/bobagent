@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -15,6 +15,7 @@ import {
   proxyTarget,
   type RunSpec,
   readFirstLine,
+  relayErrorReporter,
   vmConfig,
 } from "../src/main";
 
@@ -133,6 +134,186 @@ describe("upbot-host", () => {
     }
   });
 
+  test("proxy logs upstream connection failures and successes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "proxy-test-"));
+    const socketPath = join(dir, "proxy.sock");
+    const logPath = join(dir, "proxy.log");
+    const dead = createServer();
+    await new Promise<void>((resolve) => dead.listen(0, "127.0.0.1", resolve));
+    const deadPort = (dead.address() as { port: number }).port;
+    await new Promise<void>((resolve) => dead.close(() => resolve()));
+    const alive = createServer((conn) => conn.resume());
+    await new Promise<void>((resolve) => alive.listen(0, "127.0.0.1", resolve));
+    const alivePort = (alive.address() as { port: number }).port;
+    const proxy = proxyServer(logPath, async () => "127.0.0.1");
+    await new Promise<void>((resolve) => proxy.listen(socketPath, resolve));
+    const connect = (port: number) =>
+      new Promise<string>((resolve, reject) => {
+        const client = createConnection({ path: socketPath });
+        let text = "";
+        client.setTimeout(3000, () => client.destroy(new Error("proxy response timeout")));
+        client.on("data", (data) => {
+          text += data.toString();
+          if (text.includes("\r\n\r\n")) {
+            client.destroy();
+            resolve(text);
+          }
+        });
+        client.on("end", () => resolve(text));
+        client.on("error", reject);
+        client.on("connect", () =>
+          client.write(`CONNECT example.com:${port} HTTP/1.1\r\nHost: proxy\r\n\r\n`),
+        );
+      });
+    try {
+      const failed = await connect(deadPort);
+      expect(failed).toStartWith("HTTP/1.1 502 Bad Gateway");
+      const ok = await connect(alivePort);
+      expect(ok).toStartWith("HTTP/1.1 200 Connection Established");
+      const text = readFileSync(logPath, "utf8");
+      expect(text).toContain(`example.com:${deadPort} upstream error ECONNREFUSED`);
+      expect(text).toContain(`example.com:${alivePort} connected 127.0.0.1`);
+    } finally {
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+      await new Promise<void>((resolve) => alive.close(() => resolve()));
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+
+  test("relay error reporter flushes suppressed failures", async () => {
+    const lines: string[] = [];
+    const report = relayErrorReporter("/bridge.sock", (line) => lines.push(line), 100);
+    const error = Object.assign(new Error("connection refused"), { code: "ECONNREFUSED" });
+    report(error);
+    report(error);
+    report(error);
+    await Bun.sleep(250);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("/bridge.sock: ECONNREFUSED");
+    expect(lines[1]).toContain("2");
+  });
+
+  test("bridge reports daemon failures on stderr without the token", () => {
+    const dir = mkdtempSync(join(tmpdir(), "bridge-test-"));
+    const secretName = "sk-live-SENTINEL";
+    try {
+      const r = spawnSync("bun", [MAIN, "bridge"], {
+        input: `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: secretName, arguments: {} },
+        })}\n`,
+        env: {
+          ...process.env,
+          UPBOT_BRIDGE_SOCKET: join(dir, "missing.sock"),
+          UPBOT_BRIDGE_TOKEN: "sentinel-token",
+        },
+        encoding: "utf8",
+        timeout: 15000,
+      });
+      expect(r.stdout).toContain('"isError":true');
+      expect(r.stderr).toContain("upbot-host bridge: method=tools/call tool=unlisted");
+      expect(r.stderr).not.toContain("sentinel-token");
+      expect(r.stderr).not.toContain(secretName);
+    } finally {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+
+  test("bridge diagnostics omit untrusted daemon response and tool values", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bridge-test-"));
+    const socket = join(dir, "bridge.sock");
+    const token = "bridge-token-SENTINEL";
+    const server = Bun.serve({
+      unix: socket,
+      async fetch(req) {
+        const body = (await req.json()) as { method: string };
+        if (body.method === "tools/list")
+          return Response.json({ tools: [{ name: "list_agents" }] });
+        return new Response('no agent named "SECRET-VALUE-123"', { status: 400 });
+      },
+    });
+    const child = spawn("bun", [MAIN, "bridge"], {
+      env: {
+        ...process.env,
+        UPBOT_BRIDGE_SOCKET: socket,
+        UPBOT_BRIDGE_TOKEN: token,
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    const pendingLines: ((line: string) => void)[] = [];
+    const lines: string[] = [];
+    let buffered = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+      buffered += chunk;
+      for (;;) {
+        const newline = buffered.indexOf("\n");
+        if (newline < 0) break;
+        const line = buffered.slice(0, newline);
+        buffered = buffered.slice(newline + 1);
+        const resolve = pendingLines.shift();
+        if (resolve) resolve(line);
+        else lines.push(line);
+      }
+    });
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    const nextLine = () => {
+      const line = lines.shift();
+      return line === undefined
+        ? new Promise<string>((resolve) => pendingLines.push(resolve))
+        : Promise.resolve(line);
+    };
+    const request = async (message: unknown) => {
+      const response = nextLine();
+      child.stdin.write(`${JSON.stringify(message)}\n`);
+      const line = await response;
+      return JSON.parse(line) as {
+        result?: { content?: { text?: string }[]; isError?: boolean; tools?: unknown[] };
+      };
+    };
+    const exited = new Promise<void>((resolve, reject) => {
+      child.once("close", (code) => (code === 0 ? resolve() : reject(new Error(`exit ${code}`))));
+    });
+    try {
+      const listed = await request({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+      expect(listed.result?.tools).toEqual([{ name: "list_agents" }]);
+      const listedCall = await request({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "list_agents", arguments: {} },
+      });
+      const secretCall = await request({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "sk-live-SENTINEL", arguments: {} },
+      });
+      expect(listedCall.result?.content?.[0]?.text).toContain('no agent named "SECRET-VALUE-123"');
+      expect(secretCall.result?.content?.[0]?.text).toContain('no agent named "SECRET-VALUE-123"');
+      child.stdin.end();
+      await exited;
+      expect(stdout).toContain("SECRET-VALUE-123");
+      expect(stderr).toContain("method=tools/call tool=list_agents status=400");
+      expect(stderr).toContain("method=tools/call tool=unlisted status=400");
+      expect(stderr).not.toContain("SECRET-VALUE-123");
+      expect(stderr).not.toContain("sk-live-SENTINEL");
+      expect(stderr).not.toContain(token);
+    } finally {
+      if (child.exitCode === null) child.kill("SIGKILL");
+      await server.stop(true);
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+
   test("vm config clamps resources and wires vsock", () => {
     const spec: RunSpec = {
       agentId: "a",
@@ -211,6 +392,28 @@ describe("upbot-host", () => {
     });
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(/firecracker|missing/);
+  });
+
+  test("firecracker run rejects a non-positive or malformed boot timeout", () => {
+    const root = mkdtempSync(join(tmpdir(), "host-root-"));
+    try {
+      for (const value of ["0", "-1", "abc", "Infinity"]) {
+        const r = spawnSync("bun", [MAIN, "run"], {
+          input: `${JSON.stringify({ agentId: "a", isolation: "firecracker", cmd: ["true"] })}\n`,
+          env: {
+            ...process.env,
+            UPBOT_HOST_ROOT: root,
+            UPBOT_FIRECRACKER_BIN: "",
+            UPBOT_VM_BOOT_TIMEOUT_MS: value,
+          },
+          encoding: "utf8",
+        });
+        expect(r.status).not.toBe(0);
+        expect(r.stderr).toContain("UPBOT_VM_BOOT_TIMEOUT_MS must be a positive number");
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test("local run executes the command in the agent workspace", () => {

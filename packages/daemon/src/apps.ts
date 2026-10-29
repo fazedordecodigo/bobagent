@@ -14,8 +14,10 @@ import type {
   ConnectedApp,
 } from "@upbot/protocol";
 import { AppPermissions, defaultAppPermissions } from "@upbot/protocol";
+import { envPositiveNumber } from "./env/vars";
 import { RpcError } from "./runtime/agent-runtime";
 import { APP_PREFIX, type Vault } from "./vault";
+import { VERSION } from "./version";
 
 // Connected apps: MCP servers the daemon runs (stdio) or talks to (streamable HTTP) on behalf
 // of the bots. Secrets live in the vault as app.<id>.<KEY> and only reach the server process
@@ -215,8 +217,22 @@ export function appStderrDiagnostics(): {
   };
 }
 
+/**
+ * A failed app MCP call; the message is a fixed string because upstream errors may echo
+ * credentials. `cause` is the raw SDK error: never show or log its message, only
+ * `errorDiagnostics(cause)`.
+ */
+export class AppToolError extends Error {
+  override name = "AppToolError";
+}
+
 export class AppsService {
   private live = new Map<string, Live>();
+  onPermissionsChanged?: (e: {
+    appId: string;
+    source: "connect" | "update" | "restore";
+    changes: { permission: AppPermissionKind; from: AppPermissionLevel; to: AppPermissionLevel }[];
+  }) => void;
 
   constructor(
     private db: Database,
@@ -274,6 +290,25 @@ export class AppsService {
 
   private changed() {
     this.broadcast("apps.changed", {});
+  }
+
+  private reportPermissionChanges(
+    appId: string,
+    source: "connect" | "update" | "restore",
+    from: ConnectedApp["permissions"],
+    to: ConnectedApp["permissions"],
+  ): void {
+    const changes = (Object.keys(defaultAppPermissions) as AppPermissionKind[])
+      .filter((permission) => from[permission] !== to[permission])
+      .map((permission) => ({
+        permission,
+        from: from[permission],
+        to: to[permission],
+      }));
+    if (!changes.length) return;
+    try {
+      this.onPermissionsChanged?.({ appId, source, changes });
+    } catch {}
   }
 
   connect(p: {
@@ -341,6 +376,7 @@ export class AppsService {
         "INSERT INTO connected_apps (id, catalog_id, config_json, permissions_json, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)",
       )
       .run(id, p.catalogId, JSON.stringify(config), JSON.stringify(permissions), Date.now());
+    this.reportPermissionChanges(id, "connect", defaultAppPermissions, permissions);
     this.changed();
     void this.ensure(id).catch(() => {});
     return this.get(id);
@@ -354,7 +390,8 @@ export class AppsService {
     secrets?: Record<string, string> | undefined;
   }): Promise<ConnectedApp> {
     const r = this.row(p.id);
-    const permissions = AppPermissions.parse({ ...this.toApp(r).permissions, ...p.permissions });
+    const previousPermissions = this.toApp(r).permissions;
+    const permissions = AppPermissions.parse({ ...previousPermissions, ...p.permissions });
     const c = this.config(r);
     if (p.agentIds) c.agentIds = p.agentIds;
     if (p.secrets) {
@@ -369,6 +406,7 @@ export class AppsService {
         "UPDATE connected_apps SET config_json = ?, permissions_json = ?, enabled = ? WHERE id = ?",
       )
       .run(JSON.stringify(c), JSON.stringify(permissions), enabled ? 1 : 0, p.id);
+    this.reportPermissionChanges(p.id, "update", previousPermissions, permissions);
     if (p.secrets || !enabled) await this.stop(p.id);
     this.changed();
     if (enabled) void this.ensure(p.id).catch(() => {});
@@ -382,6 +420,7 @@ export class AppsService {
     this.db
       .query("UPDATE connected_apps SET permissions_json = ? WHERE id = ?")
       .run(JSON.stringify(restored), id);
+    this.reportPermissionChanges(id, "restore", permissions, restored);
     this.changed();
   }
 
@@ -469,8 +508,8 @@ export class AppsService {
       if (transport instanceof StdioClientTransport) {
         transport.stderr?.on("data", (d: Buffer) => stderr.push(d));
       }
-      const client = new Client({ name: "upbot", version: "0.3.0" });
-      timeout = AbortSignal.timeout(Number(process.env.UPBOT_APP_START_TIMEOUT_MS) || 60_000);
+      const client = new Client({ name: "upbot", version: VERSION });
+      timeout = AbortSignal.timeout(envPositiveNumber("UPBOT_APP_START_TIMEOUT_MS", 60_000));
       phase = "transport initialization";
       await client.connect(transport as Transport, { signal: timeout });
       phase = "tools/list";
@@ -577,6 +616,17 @@ export class AppsService {
     return this.rows().some((x) => slugFor(this.config(x).name) === slug);
   }
 
+  /** Exact match against a live app's registered tools — untrusted names stay unverifiable. */
+  hasAppTool(name: string): boolean {
+    const i = name.indexOf("-");
+    if (i <= 0) return false;
+    const slug = name.slice(0, i);
+    const r = this.rows().find((x) => slugFor(this.config(x).name) === slug);
+    const l = r && this.live.get(r.id);
+    if (!r || !l || l.status !== "ready") return false;
+    return appToolNames(slug, l.tools).has(name);
+  }
+
   appForTool(name: string): ConnectedApp | undefined {
     return this.list().find((app) => name.startsWith(`${app.slug}-`));
   }
@@ -608,9 +658,9 @@ export class AppsService {
     let res: Awaited<ReturnType<Client["callTool"]>>;
     try {
       res = await l.client!.callTool({ name: tool.name, arguments: args });
-    } catch {
+    } catch (e) {
       logCallFailure();
-      throw new Error("app MCP tool call failed");
+      throw new AppToolError("app MCP tool call failed", { cause: e });
     }
     if (res.isError === true) logCallFailure();
     const content = (res.content ?? []) as { type: string; text?: string }[];
