@@ -110,6 +110,8 @@ old versions in `.history/v<n>.html`. Served at `GET /pages/<id>?token=<viewToke
 per daemon start, CSP `default-src 'none'`, no network); UI `PagesView` (sidebar "Pages")
 shows them in `<iframe sandbox="allow-scripts">` (Tauri CSP `frame-src http://127.0.0.1:*`).
 RPC `pages.list/delete`, event `pages.changed`. Tests: `test/pages.e2e.test.ts`.
+Titles are capped at 200 and descriptions at 1000 UTF-16 units on create and update
+(including legacy values), without splitting a surrogate pair.
 
 ## Group chat + navigation (UpBot)
 
