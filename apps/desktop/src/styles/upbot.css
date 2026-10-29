@@ -44,6 +44,7 @@
     .app.no-panel .panel { display: none; }
     .app.view-agents .panel, .app.view-tasks .panel, .app.view-settings .panel { display: none; }
     .app.view-agents, .app.view-tasks, .app.view-settings { grid-template-columns: var(--sidebar-width) minmax(0, 1fr) 0; }
+    .app.agent-config-shell { --sidebar-width: 248px; }
 
     .side { display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--side); min-height: 0; }
     .side-brand { display: flex; align-items: center; gap: var(--gap-xs); height: 48px; padding: 0 22px; flex: none; font: 800 var(--fs-sec) var(--font-display); }
