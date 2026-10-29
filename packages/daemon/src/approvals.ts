@@ -1,7 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { Approval, ApprovalDecision, ApprovalRule } from "@upbot/protocol";
-import { isSensitivePermission } from "@upbot/protocol";
-import { classifyAppTool } from "./app-permissions";
+import { classifyAppTool, isSensitivePermission } from "@upbot/protocol";
 import type { AppsService } from "./apps";
 import { RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
