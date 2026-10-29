@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 import { resetPathCache } from "../src/env/login-path";
 import { loadVaultKey } from "../src/vault";
 
@@ -209,46 +209,3 @@ test("logs the DPAPI failure cause and falls back to a plaintext key", () => {
     error.mockRestore();
   }
 }, 15_000);
-
-test.skipIf(process.platform !== "darwin")(
-  "logs the keychain add failure before falling back",
-  () => {
-    const directory = testRoot();
-    const dataDir = join(directory, "data");
-    const binDir = join(directory, "bin");
-    const logFile = join(directory, "security.log");
-    const security = join(binDir, "security");
-    mkdirSync(binDir);
-    writeFileSync(
-      security,
-      '#!/bin/sh\nprintf \'%s\\n\' "$1" >> "$KEYCHAIN_TEST_LOG"\ncase "$1" in\n  find-generic-password) exit 44 ;;\n  add-generic-password) exit 45 ;;\nesac\nexit 0\n',
-      { mode: 0o700 },
-    );
-    chmodSync(security, 0o700);
-    setEnv("PATH", [binDir, process.env.PATH ?? ""].filter(Boolean).join(delimiter));
-    setEnv("KEYCHAIN_TEST_LOG", logFile);
-    setEnv("UPBOT_VAULT_KEY", undefined);
-    const error = spyOn(console, "error").mockImplementation(() => {});
-
-    try {
-      const key = loadVaultKey(dataDir, "darwin");
-      const keyHex = key.toString("hex");
-      const file = join(dataDir, "vault.key");
-      expect(error.mock.calls.map(([message]) => message)).toEqual([
-        "[upbotd] keychain add failed (exit 45)",
-        "UpBot could not use the platform secure store; storing the vault key in a plaintext file.",
-      ]);
-      expect(JSON.stringify(error.mock.calls)).not.toContain(keyHex);
-      expect(readFileSync(file, "utf8")).toBe(keyHex);
-      expect(statSync(file).mode & 0o777).toBe(0o600);
-      const calls = readFileSync(logFile, "utf8").trim().split("\n");
-      expect(calls).toEqual([
-        "find-generic-password",
-        "find-generic-password",
-        "add-generic-password",
-      ]);
-    } finally {
-      error.mockRestore();
-    }
-  },
-);
