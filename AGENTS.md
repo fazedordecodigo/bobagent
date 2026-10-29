@@ -394,6 +394,7 @@ RPC `mobile.status/enable/pair/revoke`; UI `MobileView`. Tests: `test/mobile.e2e
 self-hostable Bun relay: admin token (`RELAY_ADMIN_TOKEN` or `<data>/admin-token`) manages
 members (`POST/GET /members`, `DELETE /members/:id`, tokens stored hashed in `team.json`);
 members connect to `/ws?token=` and exchange `share` / `send` / `incoming` / `reply` frames.
+Share entries are validated (string id/name/provider; avatar via protocol `AgentAvatar`, otherwise null).
 No chat content is stored on the relay. Daemon side `src/team.ts` (`settings.team`, token in
 the vault as `team.token`, hidden from `vault.list`, migration 13 `team_messages`): shares
 selected agents, runs incoming messages as `<team_message>` turns and replies on `turn.ended`.

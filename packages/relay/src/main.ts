@@ -9,6 +9,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { AgentAvatar } from "@upbot/protocol";
 
 type Member = {
   id: string;
@@ -17,7 +18,7 @@ type Member = {
   createdAt: number;
   removedAt?: number;
 };
-type SharedAgent = { id: string; name: string; provider: string; avatar: unknown };
+type SharedAgent = { id: string; name: string; provider: string; avatar: AgentAvatar | null };
 type Conn = { memberId: string };
 type Socket = import("bun").ServerWebSocket<Conn>;
 
@@ -276,15 +277,28 @@ export function startRelay(opts: {
         const me = active().find((m) => m.id === ws.data.memberId);
         if (!me) return;
         if (msg.type === "share" && Array.isArray(msg.agents)) {
-          shared.set(
-            me.id,
-            (msg.agents as SharedAgent[]).slice(0, 100).map((a) => ({
-              id: String(a.id),
-              name: String(a.name).slice(0, 80),
-              provider: String(a.provider),
-              avatar: a.avatar ?? null,
-            })),
-          );
+          const agents = msg.agents.slice(0, 100).flatMap((entry): SharedAgent[] => {
+            if (typeof entry !== "object" || entry === null) return [];
+            const a = entry as Record<string, unknown>;
+            if (
+              typeof a.id !== "string" ||
+              a.id.length > 128 ||
+              typeof a.name !== "string" ||
+              typeof a.provider !== "string"
+            ) {
+              return [];
+            }
+            const parsed = AgentAvatar.safeParse(a.avatar);
+            return [
+              {
+                id: a.id,
+                name: a.name.slice(0, 80),
+                provider: a.provider.slice(0, 40),
+                avatar: parsed.success ? parsed.data : null,
+              },
+            ];
+          });
+          shared.set(me.id, agents);
           broadcastRoster();
           return;
         }
