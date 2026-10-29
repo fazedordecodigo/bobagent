@@ -8,6 +8,7 @@ import type { Database } from "bun:sqlite";
 import type { Agent, Subagent, Turn } from "@upbot/protocol";
 import type { AgentStore } from "./agents";
 import type { ChatStore, QueueRow, QueueStore } from "./chat-store";
+import { envNumber } from "./env/vars";
 import type { HostStore } from "./remote/hosts";
 import type { RuntimeManager } from "./runtime/runtime-manager";
 
@@ -25,7 +26,7 @@ type Row = {
 
 export const MAX_SUBAGENTS_PER_CALL = 8;
 export const MAX_SUBAGENT_DEPTH = 2;
-const maxActive = () => Number(process.env.UPBOT_MAX_SUBAGENTS || 8);
+const maxActive = () => envNumber("UPBOT_MAX_SUBAGENTS", 8, { integer: true });
 
 export class SubagentService {
   constructor(

@@ -23,6 +23,7 @@ import { MemoryStore } from "./memories";
 import { MobileServer } from "./mobile";
 import { PageLibrary } from "./pages";
 import { seedDefaultBot, upbotContext } from "./persona";
+import { readyLine } from "./ready";
 import { VmCredentials } from "./remote/credentials";
 import { HostStore } from "./remote/hosts";
 import { RoutineService } from "./routines";
@@ -412,7 +413,7 @@ async function main() {
   mobile.rpc = (raw) => rpc.handle(raw);
   mobile.start();
   team.start();
-  console.log(`UPBOT_READY {"port":${server.port}}`);
+  console.log(readyLine(server.port ?? 0));
   log(`listening on 127.0.0.1:${server.port}, data dir ${dataDir}`);
 
   process.on("SIGTERM", () => shutdown(0, "SIGTERM"));

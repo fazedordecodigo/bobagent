@@ -79,7 +79,17 @@ vault allowlisted to the bot) and `request_takeover` (user uses the bot browser,
 RPC `approvals.list/respond/rules/setRules` (also allowed for mobile), events
 `approval.updated`, `approvals.rulesChanged`. Codex gets `tool_timeout_sec = 3600` for MCP
 servers so waits do not time out. UI: `ApprovalCards` above the composer, Settings →
-Approvals. Tests: `test/approvals.e2e.test.ts`.
+Approvals. Tests: `test/approvals.e2e.test.ts`, `test/approval-audit.test.ts`.
+Every terminal decision persists to `approval_audit` (migration 21): `approval.decided`
+(status, decision, kind, tool, app/permission, ageMs — never args or secret values),
+`approval.auto_denied` for off permissions, `approval.permission_escalated` for
+`always` escalations (app previousLevel or created ruleId), `approval.rules_changed`
+(added/removed/changed rule ids) and `approval.app_permissions_changed` (source connect/update/
+restore, per-kind from/to). Failed or overridden decisions include requestedDecision, reason
+and failure. `approval.secret_allowlist_read_failed` records vault allowlist failures; error
+details in the audit and stderr are limited to code/name, never message or stack. Tests:
+`test/approval-audit.test.ts` and
+`test/approvals.e2e.test.ts` cover the audit trail.
 
 Desktop notifications: `apps/desktop/src/lib/notifications.ts` owns approval eligibility,
 bounded summaries, actions, persisted one-hour mute and daemon decisions. Only pending
@@ -182,7 +192,8 @@ stdin EOF afterwards = shutdown. `spawnEnv` strips all `UPBOT_*` vars.
 Env vars (daemon):
 - `UPBOT_ACP_COMMAND_<PROVIDER>` — JSON array overriding the spawn command per
   provider (e.g. `UPBOT_ACP_COMMAND_DEVIN='["bun","path/to/agent.ts"]'`).
-- `UPBOT_CANCEL_GRACE_MS` — ms after `chat.cancel` before the process is killed.
+- `UPBOT_CANCEL_GRACE_MS` — ms after `chat.cancel` before the process is killed
+  (`0` kills immediately).
 
 Sign-in commands surfaced on auth errors: `devin auth login`, `agent login`,
 `grok login`, `opencode auth login`, `claude auth login`, `codex login` (all verified via --help). Gemini: `gemini`
@@ -371,7 +382,11 @@ mentions count, DMs always. Prompt is wrapped in `<external_message>`; the queue
 events `gateway.updated/deleted`; UI `GatewaysView`. Daemon shutdown (SIGTERM/SIGINT/stdin EOF)
 calls `GatewayService.stopAll()` before closing runtimes. Test base URLs:
 `UPBOT_TELEGRAM_API`, `UPBOT_SLACK_API`, `UPBOT_DISCORD_API`.
-Tests: `test/gateways.e2e.test.ts`, `test/gateways-shutdown.e2e.test.ts`.
+Stderr logs use `[upbotd] gateway.<event> <json>` for error/disconnected/connected (recovery
+includes `downtimeMs` and `errorAttempts`), send_failed/send_recovered, deliver_failed and unauthorized_user.
+Error strings (including `status.error`) redact token values/shapes and URL paths, strip controls and cap at
+300 characters; later successful sends clear send-caused errors. Tests: `test/gateways.e2e.test.ts`,
+`test/gateways-shutdown.e2e.test.ts`, `test/gateways-telemetry.e2e.test.ts`.
 
 ## Marketplace (Phase 12b)
 

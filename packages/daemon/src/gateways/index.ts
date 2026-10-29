@@ -26,6 +26,28 @@ const errorName = (e: unknown) =>
 
 const tokenName = (id: string, field: string) => `${GATEWAY_PREFIX}${id}.${field}`;
 
+export function safeGatewayError(message: string, secrets: readonly string[]): string {
+  let safe = message;
+  for (const secret of secrets) if (secret) safe = safe.replaceAll(secret, "[redacted]");
+  safe = safe
+    .replace(/\b\d{5,}:[A-Za-z0-9_-]{20,}\b/g, "[redacted]")
+    .replace(/\bx(?:ox[a-z]|app)-[A-Za-z0-9-]+/g, "[redacted]")
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>]+/g, (url) => {
+      try {
+        return `${new URL(url).origin}/[redacted]`;
+      } catch {
+        return "<url>";
+      }
+    })
+    .replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ");
+  return safe.length > 300 ? `${safe.slice(0, 300)}…` : safe;
+}
+
+// Emit bounded, redacted operational telemetry as one JSON line on stderr.
+function logGateway(event: string, ctx: Record<string, unknown>) {
+  console.error("[upbotd]", event, JSON.stringify(ctx));
+}
+
 type Row = {
   id: string;
   kind: GatewayKind;
@@ -56,6 +78,8 @@ export class GatewayService {
     string,
     { status: GatewayStatus; error: string | null; sendError: string | null }
   >();
+  private downSince = new Map<string, number>();
+  private errorAttempts = new Map<string, number>();
 
   constructor(
     private db: Database,
@@ -203,16 +227,53 @@ export class GatewayService {
   }
 
   private stopTransport(id: string) {
-    this.transports.get(id)?.stop();
+    const t = this.transports.get(id);
+    t?.stop();
     this.transports.delete(id);
     this.status.delete(id);
+    this.downSince.delete(id);
+    this.errorAttempts.delete(id);
+  }
+
+  // Status transitions go through here so flapping transports don't spam stderr:
+  // an error is logged once per distinct message, every retry is still counted
+  // and the reconnect log carries downtime and attempt count.
+  private logStatus(
+    id: string,
+    kind: GatewayKind,
+    prev: { status: GatewayStatus; error: string | null } | undefined,
+    status: GatewayStatus,
+    error: string | null,
+  ) {
+    if (prev?.status === "connected" && (status === "error" || status === "connecting")) {
+      if (!this.downSince.has(id)) this.downSince.set(id, Date.now());
+      logGateway("gateway.disconnected", { gatewayId: id, kind });
+    }
+    if (status === "error") {
+      if (!this.downSince.has(id)) this.downSince.set(id, Date.now());
+      this.errorAttempts.set(id, (this.errorAttempts.get(id) ?? 0) + 1);
+      if (prev?.status === "error" && prev.error === error) return;
+      logGateway("gateway.error", { gatewayId: id, kind, error });
+    } else if (status === "connected") {
+      const since = this.downSince.get(id);
+      const attempts = this.errorAttempts.get(id) ?? 0;
+      this.downSince.delete(id);
+      this.errorAttempts.delete(id);
+      if (since === undefined) {
+        logGateway("gateway.connected", { gatewayId: id, kind });
+      } else {
+        logGateway("gateway.connected", {
+          gatewayId: id,
+          kind,
+          downtimeMs: Date.now() - since,
+          errorAttempts: attempts,
+        });
+      }
+    }
   }
 
   private sanitizeError(t: Transport, message: string, fallbackSecrets: string[] = []) {
-    for (const secret of this.transportInfo.get(t)?.secrets ?? fallbackSecrets) {
-      message = message.split(secret).join("[redacted]");
-    }
-    return message.slice(0, 500);
+    return safeGatewayError(message, this.transportInfo.get(t)?.secrets ?? fallbackSecrets);
   }
 
   private restart(id: string) {
@@ -225,12 +286,15 @@ export class GatewayService {
       onMessage: (m) => this.onInbound(id, t, m),
       onStatus: (status, error = null) => {
         if (this.transports.get(id) !== t) return;
+        const safeError = error === null ? null : this.sanitizeError(t, error, secrets);
+        const prev = this.status.get(id);
         this.status.set(id, {
           status,
-          error: error === null ? null : this.sanitizeError(t, error, secrets),
-          sendError: this.status.get(id)?.sendError ?? null,
+          error: safeError,
+          sendError: prev?.sendError ?? null,
         });
         this.emit(id);
+        this.logStatus(id, r.kind, prev, status, safeError);
       },
     };
     const t = this.createTransport(r.kind, tokens, hooks);
@@ -252,16 +316,21 @@ export class GatewayService {
     chatId: string,
     text: string,
     replyTo?: string,
+    ctx: Record<string, unknown> = {},
   ) {
     if (!t) return;
+    const kind = this.transportInfo.get(t)?.kind ?? this.row(id)?.kind ?? null;
     try {
       await t.send(chatId, text, replyTo);
     } catch (e) {
-      const info = this.transportInfo.get(t);
       const message = this.sanitizeError(t, e instanceof Error ? e.message : "send failed");
-      console.error(
-        `[upbotd] gateway ${id} (${info?.kind ?? "unknown"}) send failed (${errorName(e)})`,
-      );
+      logGateway("gateway.send_failed", {
+        gatewayId: id,
+        kind,
+        ...ctx,
+        error: message,
+        name: errorName(e),
+      });
       if (this.transports.get(id) !== t) return;
       const status = this.status.get(id) ?? {
         status: "error" as GatewayStatus,
@@ -277,6 +346,7 @@ export class GatewayService {
     if (s?.sendError) {
       this.status.set(id, { ...s, sendError: null });
       this.emit(id);
+      logGateway("gateway.send_recovered", { gatewayId: id, kind });
     }
   }
 
@@ -285,6 +355,13 @@ export class GatewayService {
     if (!r || !this.transports.has(id) || r.enabled !== 1) return;
     const allowed = JSON.parse(r.allowed_users) as string[];
     if (!allowed.includes(m.userId)) {
+      const validUserId = /^[A-Za-z0-9_.:@-]{1,128}$/.test(m.userId);
+      logGateway("gateway.unauthorized_user", {
+        gatewayId: id,
+        kind: r.kind,
+        userId: validUserId ? m.userId : null,
+        ...(!validUserId ? { userIdInvalid: true } : {}),
+      });
       void this.deliver(
         id,
         sourceTransport,
@@ -325,12 +402,20 @@ export class GatewayService {
         meta: { gateway: { ...source, ...(m.replyTo ? { replyTo: m.replyTo } : {}) } },
       });
     } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      logGateway("gateway.deliver_failed", {
+        gatewayId: id,
+        kind: r.kind,
+        agentId,
+        error: this.sanitizeError(sourceTransport, message),
+      });
       void this.deliver(
         id,
         sourceTransport,
         m.chatId,
-        `UpBot could not deliver this: ${(e as Error).message}`,
+        `UpBot could not deliver this: ${message}`,
         m.replyTo,
+        { agentId },
       );
     }
   }
@@ -339,13 +424,15 @@ export class GatewayService {
   onTurnEnded(turn: Turn, queueRow: { meta_json: string | null } | null) {
     const meta = parseQueueMeta(queueRow);
     if (!meta.gateway) return;
+    const gw = meta.gateway;
     const reply = this.chat.turnReplyText(turn);
     void this.deliver(
-      meta.gateway.id,
-      this.transports.get(meta.gateway.id),
-      meta.gateway.chatId,
+      gw.id,
+      this.transports.get(gw.id),
+      gw.chatId,
       reply.slice(0, MAX_REPLY),
-      meta.gateway.replyTo,
+      gw.replyTo,
+      { agentId: turn.agentId, turnId: turn.id },
     );
   }
 

@@ -148,8 +148,8 @@ test("gateway notices stay bound to their source transport and send errors stay 
       meta_json: JSON.stringify({
         gateway: {
           id: gateway.id,
-          kind: "telegram",
-          name: "Relay",
+          kind: gateway.kind,
+          name: gateway.name,
           chatId: "chat",
           userId: "1",
           userName: "allowed",
@@ -166,7 +166,7 @@ test("gateway notices stay bound to their source transport and send errors stay 
         .every((event) => !JSON.stringify(event.data).includes("bot-secret-2")),
     ).toBe(true);
     second.hooks.onStatus("error", "x".repeat(600));
-    expect(service.get(gateway.id).error).toHaveLength(500);
+    expect(service.get(gateway.id).error).toHaveLength(301);
     second.hooks.onStatus("error", "poll broken");
     service.onTurnEnded(turn, queueRow);
     await Bun.sleep(0);
@@ -186,10 +186,16 @@ test("gateway notices stay bound to their source transport and send errors stay 
     second.hooks.onStatus("connected");
     expect(service.get(gateway.id).error).toBe("boom [redacted]");
 
-    const logged = String(errorSpy.mock.calls.at(-1)?.[0]);
-    expect(logged).toContain(`gateway ${gateway.id} (telegram) send failed (Error)`);
+    const logged = String(
+      errorSpy.mock.calls
+        .filter((call) => call[1] === "gateway.send_failed")
+        .at(-1)
+        ?.join(" "),
+    );
+    expect(logged).toContain(`"gatewayId":"${gateway.id}"`);
+    expect(logged).toContain('"name":"Error"');
+    expect(logged).toContain("boom [redacted]");
     expect(logged).not.toContain("bot-secret");
-    expect(logged).not.toContain("boom");
 
     second.failWith = undefined;
     service.onTurnEnded(turn, queueRow);
