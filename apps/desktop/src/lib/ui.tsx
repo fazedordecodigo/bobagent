@@ -1,5 +1,14 @@
 import type { Agent, AgentStatusInfo, Turn } from "@upbot/protocol";
 import { StatusPill } from "../components/ds/controls";
+import {
+  CalIcon,
+  ChartIcon,
+  MailIcon,
+  PlaneIcon,
+  ReceiptIcon,
+  SheetIcon,
+  UpbotSimboloCurrentcolorIcon,
+} from "../components/ds/icons";
 
 export const ST = {
   run: "Em execução",
@@ -67,16 +76,39 @@ export function MonoAv({
   lg?: boolean;
   dot?: boolean;
 }) {
+  const avatar = agent.avatar;
+  const mark =
+    avatar && "icon" in avatar ? (
+      avatar.icon === "sym" ? (
+        <UpbotSimboloCurrentcolorIcon />
+      ) : avatar.icon === "mail" ? (
+        <MailIcon />
+      ) : avatar.icon === "receipt" ? (
+        <ReceiptIcon />
+      ) : avatar.icon === "plane" ? (
+        <PlaneIcon />
+      ) : avatar.icon === "chart" ? (
+        <ChartIcon />
+      ) : avatar.icon === "cal" ? (
+        <CalIcon />
+      ) : (
+        <SheetIcon />
+      )
+    ) : avatar && "emoji" in avatar ? (
+      avatar.emoji
+    ) : (
+      mono(agent.name)
+    );
   return (
     <span
       className={`mono-av${lg ? " lg" : ""}`}
       style={
-        agent.avatar
-          ? { background: `color-mix(in oklab, ${agent.avatar.color} 15%, var(--surface))` }
+        avatar && "color" in avatar
+          ? { background: `color-mix(in oklch, ${avatar.color} 15%, var(--surface))` }
           : undefined
       }
     >
-      {agent.avatar?.emoji ?? mono(agent.name)}
+      {mark}
       {dot && st && <i className={`dot s-${st}`} />}
     </span>
   );

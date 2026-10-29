@@ -1,4 +1,5 @@
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { errorMessage } from "../lib/errors";
 import { Icon } from "./icons";
 
 export type OutgoingAttachment = { name: string; mime: string; dataBase64: string };
@@ -98,14 +99,14 @@ export function Composer({
           if (transcript) onTextChange(text ? `${text} ${transcript}` : transcript);
           textRef.current?.focus();
         } catch (e) {
-          setError(e instanceof Error ? e.message : String(e));
+          setError(errorMessage(e));
         }
       };
       recorder.current = mediaRecorder;
       mediaRecorder.start();
       setRecording(true);
     } catch (e) {
-      if (!unmounted.current) setError(e instanceof Error ? e.message : String(e));
+      if (!unmounted.current) setError(errorMessage(e));
     } finally {
       micPendingRef.current = false;
       if (!unmounted.current) setMicPending(false);
@@ -131,7 +132,7 @@ export function Composer({
       onTextChange("");
       setFiles([]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   };
 
