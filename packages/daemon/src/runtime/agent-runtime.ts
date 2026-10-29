@@ -527,6 +527,7 @@ export class AgentRuntime {
       delete config[configId];
       this.agents.setConfig(this.agent.id, config);
       this.agent = { ...this.agent, config };
+      this.store.clearAgentSession(this.agent.id);
       this.dropSession();
       this.broadcast("agent.updated", this.agent);
       return this.configOptionsList();

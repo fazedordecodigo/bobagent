@@ -361,6 +361,9 @@ describe("chat e2e (fake acp agent)", () => {
     expect(r.configOptions.find((o) => o.id === "model")?.currentValue).toBe("m2");
     const list = (await c.request("agents.list", {})) as Agent[];
     expect(list.find((a) => a.id === agent.id)?.config.model).toBe("m2");
+    const beforeClear = readLog(stateDir);
+    const newSessionsBeforeClear = beforeClear.filter((l) => l.method === "session/new").length;
+    const sessionLoadsBeforeClear = beforeClear.filter((l) => l.method === "session/load").length;
     await c.request("agents.setConfig", {
       agentId: agent.id,
       configId: "model",
@@ -370,6 +373,15 @@ describe("chat e2e (fake acp agent)", () => {
       ((await c.request("agents.list", {})) as Agent[]).find((a) => a.id === agent.id)?.config
         .model,
     ).toBeUndefined();
+    await send(agent.id, "echo:after model reset");
+    await waitTurnEnd(agent.id);
+    const afterClear = readLog(stateDir);
+    expect(afterClear.filter((l) => l.method === "session/new").length).toBeGreaterThan(
+      newSessionsBeforeClear,
+    );
+    expect(afterClear.filter((l) => l.method === "session/load").length).toBe(
+      sessionLoadsBeforeClear,
+    );
     await expect(
       c.request("agents.setConfig", { agentId: agent.id, configId: "model", value: "zzz" }),
     ).rejects.toMatchObject({ code: "bad_request" });

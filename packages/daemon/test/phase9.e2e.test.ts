@@ -189,11 +189,22 @@ describe("routines + attachments e2e", () => {
       headers: { authorization: `Bearer ${r.webhookToken}` },
     });
     expect(response.status).toBe(404);
+    const wrongTokenResponse = await fetch(r.webhookUrl, {
+      method: "POST",
+      headers: { authorization: "Bearer wrong" },
+    });
+    expect(wrongTokenResponse.status).toBe(401);
+    db.query("UPDATE routines SET next_run_at = NULL WHERE id = ?").run(r.id);
     await c.request("agents.restore", { id: agent.id });
-    await c.waitForEventWhere(
-      "routine.updated",
-      (item) => (item as Routine).id === r.id && !!(item as Routine).lastRunAt,
-    );
+    const restoredResponse = await fetch(r.webhookUrl, {
+      method: "POST",
+      headers: { authorization: `Bearer ${r.webhookToken}` },
+    });
+    expect(restoredResponse.status).toBe(202);
+    const webhookRun = (await restoredResponse.json()) as RoutineRun;
+    expect(webhookRun.trigger).toBe("webhook");
+    if (!webhookRun.queueId) throw new Error("Expected a webhook queue ID");
+    await userItem(webhookRun.queueId);
     expect(((await c.request("routines.runs", { id: r.id })) as RoutineRun[]).length).toBe(1);
     db.close();
   });

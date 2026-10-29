@@ -259,10 +259,10 @@ export class RoutineService {
   webhookRoutine(id: string, token: string): string | { notFound: true } | null {
     const r = this.row(id);
     if (!r?.webhook_token || !r.enabled) return null;
-    if (!this.agents.get(r.agent_id)) return { notFound: true };
     const a = Buffer.from(r.webhook_token);
     const b = Buffer.from(token);
-    return a.length === b.length && timingSafeEqual(a, b) ? r.id : null;
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+    return this.agents.get(r.agent_id) ? r.id : { notFound: true };
   }
 
   tick(now = Date.now()): void {

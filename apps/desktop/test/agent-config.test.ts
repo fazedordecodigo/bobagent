@@ -496,7 +496,11 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
     await page.getByRole("button", { name: "Excluir agente" }).click();
     await page.getByText("UpBot foi excluído.").waitFor();
     await capture(`08-agente-excluido-${theme}.png`);
-    await page.getByRole("button", { name: "Desfazer", exact: true }).click();
+    await page.getByRole("button", { name: "Voltar ao início" }).click();
+    const deletedToast = page.getByRole("status").filter({ hasText: "Agente excluído." });
+    await deletedToast.getByRole("button", { name: "Desfazer", exact: true }).waitFor();
+    await deletedToast.getByRole("button", { name: "Desfazer", exact: true }).click();
+    await page.getByLabel("Instruções").waitFor();
     expect(
       ((await rpc.request("agents.list", {})) as Agent[]).some(
         (item) => item.id === currentAgent.id,

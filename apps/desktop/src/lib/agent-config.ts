@@ -161,6 +161,18 @@ export function toRoutineSchedule(
   return routine.schedule;
 }
 
+export function isValidTime(value: string, when: "daily" | "weekly"): boolean {
+  const pattern =
+    when === "weekly"
+      ? /^(dom|seg|ter|qua|qui|sex|sáb)\s+(\d{1,2}):(\d{2})$/
+      : /^(\d{1,2}):(\d{2})$/;
+  const match = pattern.exec(value.trim());
+  if (!match) return false;
+  const hour = Number(match[match.length - 2]);
+  const minute = Number(match[match.length - 1]);
+  return hour <= 23 && minute <= 59;
+}
+
 export function routineWhenText(
   routine: Pick<DraftRoutine, "when" | "time" | "schedule" | "hook" | "enabled">,
 ): string {

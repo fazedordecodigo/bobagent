@@ -9,6 +9,7 @@ import type {
   Routine,
 } from "@upbot/protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useLayerFocus } from "../hooks/useLayerFocus";
 import {
   type AgentConfig,
@@ -17,6 +18,7 @@ import {
   type DraftRoutine,
   deepEqual,
   formatCustomSchedule,
+  isValidTime,
   planMutations,
   rebase,
   routineWhenText,
@@ -160,7 +162,6 @@ export function AgentConfigScreen({
   onDeleted,
   onOpenApps,
   deleted = false,
-  onRestored,
 }: {
   agent: Agent;
   client: DaemonClient;
@@ -170,7 +171,6 @@ export function AgentConfigScreen({
   onDeleted: (agent: Agent, committed?: boolean) => void;
   onOpenApps: () => void;
   deleted?: boolean;
-  onRestored: (agent: Agent) => void;
 }) {
   const [saved, setSaved] = useState<AgentConfig>(EMPTY);
   const [draft, setDraft] = useState<AgentConfig>(EMPTY);
@@ -188,6 +188,8 @@ export function AgentConfigScreen({
   const [toast, setToast] = useState<{ text: string; undo?: () => void } | null>(null);
   const savedRef = useRef(saved);
   const draftRef = useRef(draft);
+  const reloadSequence = useRef(0);
+  const appliedReload = useRef(0);
   const [error, setError] = useState("");
   const currentIcon = asIcon(draft.icon);
   const agentId = agent.id;
@@ -209,6 +211,7 @@ export function AgentConfigScreen({
 
   const reload = useCallback(
     async (external = false) => {
+      const sequence = ++reloadSequence.current;
       const [memories, nextRoutines, access, nextAgent] = await Promise.all([
         client.request("memories.list", { agentId }),
         client.request("routines.list", { agentId }),
@@ -236,25 +239,27 @@ export function AgentConfigScreen({
       );
       incoming.model ??= modelOption?.currentValue || null;
       incoming.effort ??= effortOption?.currentValue || null;
-      setRoutines(nextRoutines);
-      setComputer(access);
-      setOptions(nextOptions);
-      setOptionsError(nextOptionsError);
-      setOptionsLoading(false);
-      if (external) {
-        setSaved((old) => {
-          const nextDraft = rebase(old, incoming, draftRef.current);
-          draftRef.current = nextDraft;
+      if (sequence < appliedReload.current) return;
+      appliedReload.current = sequence;
+      flushSync(() => {
+        setRoutines(nextRoutines);
+        setComputer(access);
+        setOptions(nextOptions);
+        setOptionsError(nextOptionsError);
+        setOptionsLoading(false);
+        if (external) {
+          const nextDraft = rebase(savedRef.current, incoming, draftRef.current);
+          setSaved(incoming);
           setDraft(nextDraft);
           savedRef.current = incoming;
-          return incoming;
-        });
-      } else {
-        setSaved(incoming);
-        setDraft(incoming);
-        savedRef.current = incoming;
-        draftRef.current = incoming;
-      }
+          draftRef.current = nextDraft;
+        } else {
+          setSaved(incoming);
+          setDraft(incoming);
+          savedRef.current = incoming;
+          draftRef.current = incoming;
+        }
+      });
     },
     [agentId, client],
   );
@@ -487,16 +492,6 @@ export function AgentConfigScreen({
           <h1>{agentName} foi excluído.</h1>
           <p>As conversas continuam no histórico.</p>
           <Button onClick={onHome}>Voltar ao início</Button>
-          {toast && (
-            <div role="status" className={s.toast}>
-              {toast.text}
-              {toast.undo && (
-                <button type="button" onClick={toast.undo}>
-                  Desfazer
-                </button>
-              )}
-            </div>
-          )}
         </section>
       </div>
     );
@@ -702,7 +697,7 @@ export function AgentConfigScreen({
               <div className={s.add}>
                 <input
                   aria-label="Nova memória"
-                  maxLength={160}
+                  maxLength={2_000}
                   value={memoryText}
                   placeholder={`Algo que o ${draft.name || "agente"} deve lembrar`}
                   onChange={(event) => setMemoryText(event.target.value)}
@@ -1003,13 +998,8 @@ export function AgentConfigScreen({
                   onDeleted(snapshot);
                   await client.request("agents.delete", { id: agent.id });
                   onDeleted(snapshot, true);
-                  showToast("Agente excluído.", async () => {
-                    try {
-                      onRestored(await client.request("agents.restore", { id: agent.id }));
-                    } catch (e) {
-                      setError(e instanceof Error ? e.message : String(e));
-                    }
-                  });
+                  if (abort.current) clearTimeout(abort.current);
+                  setToast(null);
                 } catch (e) {
                   setError(e instanceof Error ? e.message : String(e));
                 }
@@ -1103,8 +1093,7 @@ function RoutineEditor({
   const update = (patch: Partial<DraftRoutine>) => onChange({ ...value, ...patch });
   const [attempted, setAttempted] = useState(false);
   const timeInvalid =
-    (value.when === "daily" && !/^\d{2}:\d{2}$/.test(value.time)) ||
-    (value.when === "weekly" && !/^(dom|seg|ter|qua|qui|sex|sáb) \d{2}:\d{2}$/.test(value.time));
+    (value.when === "daily" || value.when === "weekly") && !isValidTime(value.time, value.when);
   const webhookUrl = serverRoutine?.webhookUrl;
   const webhookCommand =
     serverRoutine?.webhookToken && webhookUrl

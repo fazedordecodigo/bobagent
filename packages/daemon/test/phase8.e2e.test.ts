@@ -122,8 +122,14 @@ describe("avatars, memories, skills, agent creation e2e", () => {
   });
 
   test("memories enforce the configuration screen character limit", async () => {
+    const accepted = (await c.request("memories.add", {
+      agentId: a.id,
+      text: "x".repeat(2_000),
+    })) as Memory;
+    expect(accepted.text).toHaveLength(2_000);
+    await c.request("memories.delete", { id: accepted.id });
     await expect(
-      c.request("memories.add", { agentId: a.id, text: "x".repeat(161) }),
+      c.request("memories.add", { agentId: a.id, text: "x".repeat(2_001) }),
     ).rejects.toMatchObject({ code: "bad_request" });
   });
 

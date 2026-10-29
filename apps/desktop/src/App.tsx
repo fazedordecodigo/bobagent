@@ -9,6 +9,7 @@ import type {
 } from "@upbot/protocol";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentConfigScreen } from "./components/AgentConfigScreen";
+import agentConfigStyles from "./components/AgentConfigScreen.module.css";
 import { PROVIDERS } from "./components/AgentSettings";
 import { ChannelCreateForm, ChannelView } from "./components/ChannelView";
 import { ChatView } from "./components/ChatView";
@@ -117,6 +118,11 @@ export default function App() {
     [],
   );
   const [deletedAgentSnapshot, setDeletedAgentSnapshot] = useState<Agent | null>(null);
+  const [agentUndoToast, setAgentUndoToast] = useState<{
+    text: string;
+    undo?: () => void;
+  } | null>(null);
+  const agentUndoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [channelId, setChannelId] = useState<string | null>(null);
   const [view, setView] = useState<View>(readView);
@@ -208,6 +214,41 @@ export default function App() {
     if (RAIL_VIEWS.includes(next as RailView)) writeStorage("upbot.view", next);
     setCreating(false);
   }, []);
+
+  const showAgentUndoToast = useCallback((text: string, undo?: () => void) => {
+    if (agentUndoTimer.current) clearTimeout(agentUndoTimer.current);
+    setAgentUndoToast({ text, ...(undo ? { undo } : {}) });
+    agentUndoTimer.current = setTimeout(() => setAgentUndoToast(null), 5000);
+  }, []);
+
+  const restoreDeletedAgent = useCallback(
+    async (agentId: string) => {
+      if (agentUndoTimer.current) clearTimeout(agentUndoTimer.current);
+      setAgentUndoToast(null);
+      try {
+        const restored = await client.request("agents.restore", { id: agentId });
+        setDeletedAgentSnapshot(null);
+        setAgents((current) =>
+          current.some((item) => item.id === restored.id)
+            ? current.map((item) => (item.id === restored.id ? restored : item))
+            : [...current, restored],
+        );
+        setSelectedId(restored.id);
+        writeStorage("upbot.agent", restored.id);
+        navigate("agent-settings");
+      } catch (e) {
+        showAgentUndoToast(`Não deu para desfazer: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+    [client, navigate, showAgentUndoToast],
+  );
+
+  useEffect(
+    () => () => {
+      if (agentUndoTimer.current) clearTimeout(agentUndoTimer.current);
+    },
+    [],
+  );
 
   const openAgent = useCallback(
     (id: string) => {
@@ -649,21 +690,15 @@ export default function App() {
                 if (committed) {
                   setSelectedId(null);
                   setAgents((current) => current.filter((item) => item.id !== deletedAgent.id));
+                  showAgentUndoToast(
+                    "Agente excluído.",
+                    () => void restoreDeletedAgent(deletedAgent.id),
+                  );
                 }
               }}
               onOpenApps={() => {
                 setSettingsTab("apps");
                 navigate("settings");
-              }}
-              onRestored={(restored) => {
-                setDeletedAgentSnapshot(null);
-                setAgents((current) =>
-                  current.some((item) => item.id === restored.id)
-                    ? current.map((item) => (item.id === restored.id ? restored : item))
-                    : [...current, restored],
-                );
-                setSelectedId(restored.id);
-                navigate("agent-settings");
               }}
             />
           </section>
@@ -703,6 +738,16 @@ export default function App() {
           {...(palette.group ? { initialGroup: palette.group } : {})}
           onClose={() => setPalette(null)}
         />
+      )}
+      {agentUndoToast && (
+        <div role="status" className={agentConfigStyles.toast}>
+          {agentUndoToast.text}
+          {agentUndoToast.undo && (
+            <button type="button" onClick={agentUndoToast.undo}>
+              Desfazer
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

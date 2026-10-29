@@ -7,6 +7,7 @@ import {
   formatCustomSchedule,
   fromRoutine,
   isDirty,
+  isValidTime,
   planMutations,
   rebase,
   routineWhenText,
@@ -91,6 +92,17 @@ test("routine tags include custom labels, webhook, and paused state", () => {
     enabled: false,
   };
   expect(routineWhenText(paused)).toBe("Pausada · A cada 45 min · webhook");
+});
+
+test("routine time validation accepts single-digit hours and rejects out-of-range values", () => {
+  for (const value of ["9:00", "09:00", "23:59"]) {
+    expect(isValidTime(value, "daily")).toBe(true);
+  }
+  for (const value of ["24:00", "9:60", "900", "inválido"]) {
+    expect(isValidTime(value, "daily")).toBe(false);
+  }
+  expect(isValidTime("sex 9:00", "weekly")).toBe(true);
+  expect(isValidTime("foo 9:00", "weekly")).toBe(false);
 });
 
 test("workspace paths abbreviate Unix and Windows user homes", () => {

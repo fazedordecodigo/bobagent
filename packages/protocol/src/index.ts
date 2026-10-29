@@ -363,7 +363,7 @@ export const Skill = z.object({
   updatedAt: z.number(),
 });
 export type Skill = z.infer<typeof Skill>;
-const MemoryText = z.string().trim().min(1).max(160);
+const MemoryText = z.string().trim().min(1).max(2_000);
 export const SkillSaveParams = z
   .object({
     name: z.string().trim().min(1).max(64),
