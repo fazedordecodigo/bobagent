@@ -394,11 +394,15 @@ RPC `mobile.status/enable/pair/revoke`; UI `MobileView`. Tests: `test/mobile.e2e
 self-hostable Bun relay: admin token (`RELAY_ADMIN_TOKEN` or `<data>/admin-token`) manages
 members (`POST/GET /members`, `DELETE /members/:id`, tokens stored hashed in `team.json`);
 members connect to `/ws?token=` and exchange `share` / `send` / `incoming` / `reply` frames.
+Share entries are validated (string id/name/provider; avatar via protocol `AgentAvatar`, otherwise null).
 No chat content is stored on the relay. Daemon side `src/team.ts` (`settings.team`, token in
 the vault as `team.token`, hidden from `vault.list`, migration 13 `team_messages`): shares
 selected agents, runs incoming messages as `<team_message>` turns and replies on `turn.ended`.
 RPC `team.status/connect/disconnect/share/send/messages`, events `team.updated/message`;
-UI `TeamView`. Tests: `test/team.e2e.test.ts` (spawns the relay).
+UI `TeamView`. Tests: `test/team.e2e.test.ts` (spawns the relay). Relay audit logs are JSON
+lines on stderr and never include member-supplied identifiers (only relay-known member IDs,
+fixed route labels, and socket IP); limits are 20 lines per actor per window across event types,
+with periodic `relay.audit_suppressed` summaries (`RELAY_AUDIT_WINDOW_MS`).
 
 ## CI, releases, updates, branding
 
