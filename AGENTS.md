@@ -382,7 +382,11 @@ mentions count, DMs always. Prompt is wrapped in `<external_message>`; the queue
 events `gateway.updated/deleted`; UI `GatewaysView`. Daemon shutdown (SIGTERM/SIGINT/stdin EOF)
 calls `GatewayService.stopAll()` before closing runtimes. Test base URLs:
 `UPBOT_TELEGRAM_API`, `UPBOT_SLACK_API`, `UPBOT_DISCORD_API`.
-Tests: `test/gateways.e2e.test.ts`, `test/gateways-shutdown.e2e.test.ts`.
+Stderr logs use `[upbotd] gateway.<event> <json>` for error/disconnected/connected (recovery
+includes `downtimeMs` and `errorAttempts`), send_failed/send_recovered, deliver_failed and unauthorized_user.
+Error strings (including `status.error`) redact token values/shapes and URL paths, strip controls and cap at
+300 characters; later successful sends clear send-caused errors. Tests: `test/gateways.e2e.test.ts`,
+`test/gateways-shutdown.e2e.test.ts`, `test/gateways-telemetry.e2e.test.ts`.
 
 ## Marketplace (Phase 12b)
 
