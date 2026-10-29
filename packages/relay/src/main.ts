@@ -1,7 +1,7 @@
 // UpBot team relay: a small self-hostable Bun server that lets the daemons of a team share
 // agents. Members connect outbound over WebSocket with their member token; the relay keeps
 // the roster (who is online, which agents they share) and forwards messages and replies.
-// It stores no chat content.
+// It stores no chat content and never logs member-supplied identifiers.
 //
 //   bun packages/relay/src/main.ts --data ./relay-data [--port 8787] [--host 0.0.0.0]
 // The admin token is read from RELAY_ADMIN_TOKEN or generated into <data>/admin-token.
@@ -22,17 +22,9 @@ type Conn = { memberId: string };
 type Socket = import("bun").ServerWebSocket<Conn>;
 
 const MAX_TEXT = 100_000;
-export const AUDIT_FIELD_MAX = 64;
 export const AUDIT_WINDOW_MS = 60_000;
 export const AUDIT_LIMIT = 20;
 export const AUDIT_MAX_KEYS = 1000;
-
-export function auditField(v: unknown): string {
-  const s = String(v ?? "");
-  return s.length > AUDIT_FIELD_MAX
-    ? `${s.slice(0, AUDIT_FIELD_MAX)}…(+${s.length - AUDIT_FIELD_MAX})`
-    : s;
-}
 
 const hash = (t: string) => createHash("sha256").update(t).digest("hex");
 const eq = (a: string, b: string) => {
@@ -51,6 +43,7 @@ export function startRelay(opts: {
   port?: number;
   host?: string;
   adminToken?: string;
+  auditWindowMs?: number;
   log?: (line: string) => void;
   now?: () => number;
 }) {
@@ -72,24 +65,37 @@ export function startRelay(opts: {
   const save = () => writeFileSync(teamFile, JSON.stringify(members, null, 2), { mode: 0o600 });
   const sockets = new Map<string, Socket>();
   const shared = new Map<string, SharedAgent[]>();
-  // Audit logs are JSON lines; untrusted fields are bounded and rate-limited per actor.
+  // Audit logs use known member IDs, fixed route labels, and socket IPs only.
   const writeLog = opts.log ?? ((line: string) => console.error(line));
   const now = opts.now ?? Date.now;
-  const auditLimits = new Map<
-    string,
-    { windowStart: number; count: number; suppressed: number; event: string; actor: string }
-  >();
+  const auditWindowMs = opts.auditWindowMs ?? AUDIT_WINDOW_MS;
+  type AuditState = {
+    windowStart: number;
+    count: number;
+    suppressed: number;
+    events: Record<string, number>;
+  };
+  const auditLimits = new Map<string, AuditState>();
   const emit = (event: string, fields: Record<string, unknown> = {}) =>
     writeLog(JSON.stringify({ event, ts: now(), ...fields }));
-  const summarizeSuppressed = (state: { suppressed: number; event: string; actor: string }) => {
+  const summarizeSuppressed = (actor: string, state: AuditState) => {
     if (state.suppressed > 0) {
       emit("relay.audit_suppressed", {
-        suppressedEvent: state.event,
-        actor: auditField(state.actor),
+        actor,
         suppressed: state.suppressed,
+        events: state.events,
       });
     }
   };
+  const sweepAuditState = (flushAll: boolean, timestamp = now()) => {
+    for (const [actor, state] of auditLimits) {
+      if (flushAll || timestamp - state.windowStart >= auditWindowMs) {
+        summarizeSuppressed(actor, state);
+        auditLimits.delete(actor);
+      }
+    }
+  };
+  const sweepAudit = () => sweepAuditState(false);
   const log = (event: string, fields: Record<string, unknown> = {}, actor?: string) => {
     if (actor === undefined) {
       emit(event, fields);
@@ -97,49 +103,37 @@ export function startRelay(opts: {
     }
 
     const timestamp = now();
-    let limitedActor = actor;
-    let key = `${event}:${limitedActor}`;
+    let key = actor;
     let state = auditLimits.get(key);
     if (!state && auditLimits.size >= AUDIT_MAX_KEYS) {
-      for (const [expiredKey, expired] of auditLimits) {
-        if (timestamp - expired.windowStart >= AUDIT_WINDOW_MS) {
-          summarizeSuppressed(expired);
-          auditLimits.delete(expiredKey);
-        }
-      }
+      sweepAuditState(false, timestamp);
       state = auditLimits.get(key);
       if (!state && auditLimits.size >= AUDIT_MAX_KEYS) {
-        limitedActor = "*";
-        key = `${event}:*`;
+        key = "*";
         state = auditLimits.get(key);
         if (!state && auditLimits.size >= AUDIT_MAX_KEYS) {
           const oldestKey = auditLimits.keys().next().value as string | undefined;
           if (oldestKey !== undefined) {
-            const oldest = auditLimits.get(oldestKey)!;
-            summarizeSuppressed(oldest);
+            const oldest = auditLimits.get(oldestKey);
+            if (oldest) summarizeSuppressed(oldestKey, oldest);
             auditLimits.delete(oldestKey);
           }
         }
       }
     }
-    if (state && timestamp - state.windowStart >= AUDIT_WINDOW_MS) {
-      summarizeSuppressed(state);
+    if (!state) {
+      state = { windowStart: timestamp, count: 0, suppressed: 0, events: {} };
+      auditLimits.set(key, state);
+    } else if (timestamp - state.windowStart >= auditWindowMs) {
+      summarizeSuppressed(key, state);
       state.windowStart = timestamp;
       state.count = 0;
       state.suppressed = 0;
-    }
-    if (!state) {
-      state = {
-        windowStart: timestamp,
-        count: 0,
-        suppressed: 0,
-        event,
-        actor: limitedActor,
-      };
-      auditLimits.set(key, state);
+      state.events = {};
     }
     if (state.count >= AUDIT_LIMIT) {
       state.suppressed++;
+      state.events[event] = (state.events[event] ?? 0) + 1;
       return;
     }
     state.count++;
@@ -147,6 +141,7 @@ export function startRelay(opts: {
   };
 
   const active = () => members.filter((m) => !m.removedAt);
+  const activeMemberId = (id: string) => (active().some((m) => m.id === id) ? id : null);
   const roster = () => ({
     type: "roster",
     members: active().map((m) => ({
@@ -162,7 +157,7 @@ export function startRelay(opts: {
     } catch (e) {
       log(
         "relay.send_error",
-        { memberId: ws?.data?.memberId, error: auditField(e) },
+        { memberId: ws?.data?.memberId, error: e instanceof Error ? e.name : "unknown" },
         ws?.data?.memberId,
       );
     }
@@ -189,11 +184,7 @@ export function startRelay(opts: {
           const ip = srv.requestIP(req)?.address;
           log(
             "relay.auth_rejected",
-            {
-              path: auditField(url.pathname),
-              reason: "member_token",
-              ip: auditField(ip),
-            },
+            { route: "/ws", reason: "member_token", ip },
             `ip:${ip ?? "unknown"}`,
           );
           return new Response("unauthorized", { status: 401 });
@@ -208,11 +199,7 @@ export function startRelay(opts: {
           const ip = srv.requestIP(req)?.address;
           log(
             "relay.auth_rejected",
-            {
-              path: auditField(url.pathname),
-              reason: "admin_token",
-              ip: auditField(ip),
-            },
+            { route: "/members", reason: "admin_token", ip },
             `ip:${ip ?? "unknown"}`,
           );
           return new Response("unauthorized", { status: 401 });
@@ -243,11 +230,7 @@ export function startRelay(opts: {
           const ip = srv.requestIP(req)?.address;
           log(
             "relay.auth_rejected",
-            {
-              path: auditField(url.pathname),
-              reason: "admin_token",
-              ip: auditField(ip),
-            },
+            { route: "/members/:id", reason: "admin_token", ip },
             `ip:${ip ?? "unknown"}`,
           );
           return new Response("unauthorized", { status: 401 });
@@ -309,16 +292,15 @@ export function startRelay(opts: {
         const text = typeof msg.text === "string" ? msg.text.slice(0, MAX_TEXT) : "";
         if (msg.type === "send") {
           const to = (msg.to ?? {}) as { memberId?: string; agentId?: string };
-          const target = sockets.get(String(to.memberId));
-          const agent = (shared.get(String(to.memberId)) ?? []).find((a) => a.id === to.agentId);
+          const toMemberId = String(to.memberId);
+          const target = sockets.get(toMemberId);
+          const agent = (shared.get(toMemberId) ?? []).find((a) => a.id === to.agentId);
           if (!target || !agent) {
             log(
               "relay.route_failed",
               {
-                requestId: auditField(requestId),
                 fromMemberId: me.id,
-                toMemberId: auditField(to.memberId),
-                agentId: auditField(to.agentId),
+                toMemberId: activeMemberId(toMemberId),
                 reason: target ? "not_shared" : "offline",
               },
               me.id,
@@ -341,14 +323,14 @@ export function startRelay(opts: {
           return;
         }
         if (msg.type === "reply") {
-          const dst = sockets.get(String(msg.toMemberId));
+          const toMemberId = String(msg.toMemberId);
+          const dst = sockets.get(toMemberId);
           if (!dst) {
             log(
               "relay.reply_dropped",
               {
-                requestId: auditField(requestId),
                 fromMemberId: me.id,
-                toMemberId: auditField(msg.toMemberId),
+                toMemberId: activeMemberId(toMemberId),
               },
               me.id,
             );
@@ -364,18 +346,37 @@ export function startRelay(opts: {
       },
     },
   });
-  return { server, adminToken: admin };
+  const auditInterval = setInterval(sweepAudit, auditWindowMs);
+  auditInterval.unref();
+  const close = async () => {
+    clearInterval(auditInterval);
+    await server.stop(true);
+    sweepAuditState(true);
+  };
+  return { server, adminToken: admin, close, sweepAudit };
 }
 
 if (import.meta.main) {
   const dataDir = arg("data", "./relay-data")!;
-  const { server } = startRelay({
+  const configuredWindow = Number(process.env.RELAY_AUDIT_WINDOW_MS);
+  const { server, close } = startRelay({
     dataDir,
     port: Number(arg("port", "8787")),
     host: arg("host", "0.0.0.0")!,
+    ...(Number.isInteger(configuredWindow) && configuredWindow > 0
+      ? { auditWindowMs: configuredWindow }
+      : {}),
     ...(process.env.RELAY_ADMIN_TOKEN ? { adminToken: process.env.RELAY_ADMIN_TOKEN } : {}),
   });
   console.log(
     `UpBot relay listening on ${server.hostname}:${server.port} (admin token in ${join(dataDir, "admin-token")} or RELAY_ADMIN_TOKEN)`,
   );
+  let shuttingDown = false;
+  const shutdown = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    void close().then(() => process.exit(0));
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
 }

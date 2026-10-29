@@ -392,8 +392,9 @@ the vault as `team.token`, hidden from `vault.list`, migration 13 `team_messages
 selected agents, runs incoming messages as `<team_message>` turns and replies on `turn.ended`.
 RPC `team.status/connect/disconnect/share/send/messages`, events `team.updated/message`;
 UI `TeamView`. Tests: `test/team.e2e.test.ts` (spawns the relay). Relay audit logs are JSON
-lines on stderr; untrusted fields are capped at 64 chars, per-actor 20/min, with
-`relay.audit_suppressed` summaries.
+lines on stderr and never include member-supplied identifiers (only relay-known member IDs,
+fixed route labels, and socket IP); limits are 20 lines per actor per window across event types,
+with periodic `relay.audit_suppressed` summaries (`RELAY_AUDIT_WINDOW_MS`).
 
 ## CI, releases, updates, branding
 
