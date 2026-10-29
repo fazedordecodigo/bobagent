@@ -288,7 +288,7 @@ null; `agents.avatar_json`, migration 8). `agents.restore {id}` restores a soft-
 and emits `agent.created` so clients add it back to their lists. `agents.draft
 {prompt}` (`src/draft.ts`, deterministic) proposes name/instructions/avatar for the create
 form. Memories: `memories` table, `MemoryStore` (`src/memories.ts`), RPC
-`memories.list/add/delete`, event `memories.changed`. Skills library:
+`memories.list/add/update/delete`, event `memories.changed`. Skills library:
 `<shared>/Skills/<name>/SKILL.md` with name/description/author frontmatter, previous versions
 in `.history/` (`src/skills.ts`), RPC `skills.list/get/save/delete`, event `skills.changed`.
 Bridge tools: `remember`, `forget`, `list_memories`, `list_skills`, `read_skill`,
