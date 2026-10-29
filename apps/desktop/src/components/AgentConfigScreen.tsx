@@ -679,7 +679,19 @@ export function AgentConfigScreen({
             <div className={s.box}>
               {draft.memories.map((memory, index) => (
                 <div className={s.memory} key={memory.id ?? index}>
-                  <span>{memory.text}</span>
+                  <input
+                    className={s.memoryText}
+                    aria-label={`Memória ${index + 1}`}
+                    maxLength={2_000}
+                    value={memory.text}
+                    onChange={(event) =>
+                      change({
+                        memories: draft.memories.map((item, i) =>
+                          i === index ? { ...item, text: event.target.value } : item,
+                        ),
+                      })
+                    }
+                  />
                   <button
                     type="button"
                     aria-label={`Remover memória: ${memory.text}`}
