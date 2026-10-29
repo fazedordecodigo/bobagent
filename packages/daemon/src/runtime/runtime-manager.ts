@@ -115,7 +115,11 @@ export class RuntimeManager {
     return this.runtimeFor(agentId).configOptionsList();
   }
 
-  async setConfig(agentId: string, configId: string, value: string): Promise<ConfigOption[]> {
+  async setConfig(
+    agentId: string,
+    configId: string,
+    value: string | null,
+  ): Promise<ConfigOption[]> {
     return this.runtimeFor(agentId).setConfig(configId, value);
   }
 

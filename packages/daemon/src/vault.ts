@@ -40,7 +40,11 @@ function keychainKey(): Buffer | null {
     ["security", "add-generic-password", "-s", "UpBot", "-a", "vault-key", "-U", "-w", hex],
     { stdout: "ignore", stderr: "ignore" },
   );
-  return add.exitCode === 0 ? Buffer.from(hex, "hex") : null;
+  if (add.exitCode !== 0) {
+    console.error(`[upbotd] keychain add failed (exit ${add.exitCode})`);
+    return null;
+  }
+  return Buffer.from(hex, "hex");
 }
 
 function keyFromHex(value: string): Buffer | null {
@@ -187,12 +191,12 @@ export function loadVaultKey(
       writeFileSync(tempFile, protectWithDpapi(key.toString("hex")), { mode: 0o600 });
       renameSync(tempFile, protectedFile);
       return key;
-    } catch {
+    } catch (error) {
       try {
         unlinkSync(tempFile);
       } catch {}
       console.error(
-        "UpBot could not use Windows DPAPI; storing the vault key in a plaintext file.",
+        `UpBot could not use Windows DPAPI (${(error as Error).message}); storing the vault key in a plaintext file.`,
       );
       writeFileSync(file, key.toString("hex"), { mode: 0o600 });
       return key;

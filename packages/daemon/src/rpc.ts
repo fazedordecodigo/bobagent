@@ -128,6 +128,12 @@ export class Rpc {
         queueMicrotask(() => this.broadcast("agent.deleted", { id: p.id }));
         return { ok: true };
       }
+      case "agents.restore": {
+        const agent = this.agents.restore((params as { id: string }).id);
+        if (!agent) throw new RpcError("not_found", "deleted agent not found");
+        queueMicrotask(() => this.broadcast("agent.created", agent));
+        return agent;
+      }
       case "chat.history": {
         const p = params as { agentId: string; beforeSeq?: number; limit?: number };
         if (!this.agents.get(p.agentId)) throw new RpcError("not_found", "agent not found");
@@ -175,7 +181,7 @@ export class Rpc {
         return { configOptions: await this.runtimes.configOptions(p.agentId) };
       }
       case "agents.setConfig": {
-        const p = params as { agentId: string; configId: string; value: string };
+        const p = params as { agentId: string; configId: string; value: string | null };
         return { configOptions: await this.runtimes.setConfig(p.agentId, p.configId, p.value) };
       }
       case "chat.cancel": {
@@ -218,20 +224,6 @@ export class Rpc {
         const h = this.extras.hosts.create(
           params as { name: string; target: string; port?: number; identityFile?: string | null },
         );
-        queueMicrotask(() => this.broadcast("hosts.changed", {}));
-        return h;
-      }
-      case "hosts.update": {
-        const h = this.extras.hosts.update(
-          params as {
-            id: string;
-            name?: string;
-            target?: string;
-            port?: number;
-            identityFile?: string | null;
-          },
-        );
-        if (!h) throw new RpcError("not_found", "host not found");
         queueMicrotask(() => this.broadcast("hosts.changed", {}));
         return h;
       }
@@ -425,9 +417,6 @@ export class Rpc {
           throw new RpcError("bad_request", (e as Error).message);
         }
         return { ok: true };
-      case "voice.stop":
-        this.extras.voice.stop();
-        return { ok: true };
       case "voice.transcribe": {
         const p = params as { audioBase64: string; mime: string };
         try {
@@ -538,10 +527,6 @@ export class Rpc {
       case "channels.reassign": {
         const p = params as { channelId: string; ownerId: string };
         return this.channels.reassign(p.channelId, p.ownerId);
-      }
-      case "channels.setMembers": {
-        const p = params as { channelId: string; memberIds: string[] };
-        return this.channels.setMembers(p.channelId, p.memberIds);
       }
     }
   }

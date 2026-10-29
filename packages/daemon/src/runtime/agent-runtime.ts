@@ -13,12 +13,11 @@ import type { AgentStore } from "../agents";
 import type { ChatStore, QueueSource, QueueStore } from "../chat-store";
 import { checkProviderAvailable, DEFAULT_MODE, getDriver } from "../providers";
 import { withTimeout } from "../providers/process";
-import {
-  type McpServerSpec,
-  ProviderError,
-  type ProviderHooks,
-  type ProviderSession,
-  type RemoteLaunch,
+import type {
+  McpServerSpec,
+  ProviderHooks,
+  ProviderSession,
+  RemoteLaunch,
 } from "../providers/types";
 import { buildHandoff } from "./handoff";
 
@@ -104,6 +103,8 @@ export class AgentRuntime {
     pendingBytes: number;
   } | null = null;
   private textFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  // toolCallId -> cached item for the running turn; skips the items lookup entirely
+  private toolCallItems = new Map<string, ChatItem>();
   private pending = new Map<string, PendingEntry>();
   private cancelTimer: ReturnType<typeof setTimeout> | null = null;
   private draining = false;
@@ -222,6 +223,7 @@ export class AgentRuntime {
       this.queue.markStarted(next.id, turnRow.id);
       this.turn = { id: turnRow.id, cancelled: false, byUser: false };
       this.closeTextItem();
+      this.toolCallItems.clear();
       this.turnHops = next.hops ?? 0;
       this.turnChannelId = next.channel_id ?? null;
       const meta = next.meta_json ? (JSON.parse(next.meta_json) as Record<string, unknown>) : {};
@@ -531,11 +533,22 @@ export class AgentRuntime {
     }
   }
 
-  async setConfig(configId: string, value: string): Promise<ConfigOption[]> {
+  async setConfig(configId: string, value: string | null): Promise<ConfigOption[]> {
     if (this.turn) throw new RpcError("busy", "a turn is running for this agent");
     const session = await this.ensureSession();
     const opt = session.configOptions.find((o) => o.id === configId);
     if (!opt) throw new RpcError("bad_request", `unknown configId ${configId}`);
+    if (value === null) {
+      if (!Object.hasOwn(this.agent.config, configId)) return session.configOptions;
+      const config = { ...this.agent.config };
+      delete config[configId];
+      this.agents.setConfig(this.agent.id, config);
+      this.agent = { ...this.agent, config };
+      this.store.clearAgentSession(this.agent.id);
+      this.dropSession();
+      this.broadcast("agent.updated", this.agent);
+      return this.configOptionsList();
+    }
     if (!opt.options.some((v) => v.value === value)) {
       throw new RpcError("bad_request", `invalid value ${value} for ${configId}`);
     }
@@ -693,19 +706,25 @@ export class AgentRuntime {
           status: u.status,
           detail: u.detail,
         });
+        this.toolCallItems.set(u.toolCallId, item);
         this.broadcast("item.created", item);
         break;
       }
       case "tool_call_update": {
-        const item = this.store.findToolCallItem(turn.id, u.toolCallId);
+        const item =
+          this.toolCallItems.get(u.toolCallId) ??
+          this.store.findToolCallItem(turn.id, u.toolCallId);
         if (item?.kind !== "tool_call") return;
-        const updated = this.store.updateItemData(item.id, {
+        const data = {
           toolCallId: item.toolCallId,
           title: u.title ?? item.title,
           toolKind: item.toolKind,
           status: u.status ?? item.status,
           detail: u.detail === undefined ? item.detail : u.detail,
-        });
+        };
+        const updatedAt = this.store.writeItemData(item.id, data);
+        const updated = { ...item, ...data, updatedAt } as ChatItem;
+        this.toolCallItems.set(u.toolCallId, updated);
         this.broadcast("item.updated", updated);
         break;
       }
@@ -856,8 +875,4 @@ export class AgentRuntime {
   async kill(): Promise<void> {
     await this.dispose();
   }
-}
-
-export function isProviderError(e: unknown): e is ProviderError {
-  return e instanceof ProviderError;
 }
