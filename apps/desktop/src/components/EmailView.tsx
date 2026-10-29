@@ -176,11 +176,12 @@ function useAccounts(client: DaemonClient) {
 export function DraftCards({ client, agentId }: { client: DaemonClient; agentId: string }) {
   const { drafts, error } = useDrafts(client, agentId);
   const { accounts } = useAccounts(client);
-  if (error)
+  if (error && !drafts.length)
     return <div className="border-t border-zinc-800 px-4 py-2 text-xs text-red-400">{error}</div>;
   if (!drafts.length) return null;
   return (
     <div className="max-h-[50vh] space-y-2 overflow-y-auto border-t border-zinc-800 px-4 py-2">
+      {error && <p className="px-4 py-1 text-xs text-red-400">{error}</p>}
       {drafts.map((d) => (
         <DraftCard key={`${d.id}:${d.updatedAt}`} client={client} draft={d} accounts={accounts} />
       ))}

@@ -241,7 +241,7 @@ export function ApprovalCards({
 }) {
   const { items, error } = useApprovals(client, agentId);
   const pending = items.filter((a) => a.status === "pending");
-  if (error)
+  if (error && !pending.length)
     return (
       <div className={s.cards}>
         <p className="px-4 py-1 text-xs text-red-400">{error}</p>
@@ -250,6 +250,7 @@ export function ApprovalCards({
   if (!pending.length) return null;
   return (
     <div className={s.cards}>
+      {error && <p className="px-4 py-1 text-xs text-red-400">{error}</p>}
       {pending.map((a, index) => (
         <ApprovalCard
           key={a.id}
@@ -276,7 +277,7 @@ export function AppApprovalCards({
   const pending = items.filter(
     (a) => a.status === "pending" && a.kind === "tool" && Boolean(a.appId),
   );
-  if (error)
+  if (error && !pending.length)
     return (
       <section aria-label="Pedidos de apps conectados" className={s.cards}>
         <p className="px-4 py-1 text-xs text-red-400">{error}</p>
@@ -285,6 +286,7 @@ export function AppApprovalCards({
   if (!pending.length) return null;
   return (
     <section aria-label="Pedidos de apps conectados" className={s.cards}>
+      {error && <p className="px-4 py-1 text-xs text-red-400">{error}</p>}
       <h3>Pedidos pendentes</h3>
       {pending.map((a, index) => (
         <ApprovalCard

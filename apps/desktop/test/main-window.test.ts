@@ -8,9 +8,10 @@ import type {
   ApprovalRule,
   ChannelMessage,
   ConnectedApp,
+  EmailDraft,
   Routine,
 } from "@upbot/protocol";
-import { type Browser, chromium, type Page } from "playwright-core";
+import { type Browser, chromium, type Page, type WebSocketRoute } from "playwright-core";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -953,6 +954,132 @@ test("scheduled routines show recoverable RPC errors", async () => {
     await target.close();
   }
 }, 15000);
+
+test("cached approval and draft cards remain visible when refreshes fail", async () => {
+  const target = await browser.newPage();
+  target.setDefaultTimeout(5000);
+  const consoleText: string[] = [];
+  target.on("console", (message) => consoleText.push(message.text()));
+  let fail = false;
+  let routedSocket: WebSocketRoute | undefined;
+  const approval: Approval = {
+    id: "refresh-error-approval",
+    agentId: bot.id,
+    turnId: "refresh-error-turn",
+    kind: "tool",
+    title: "Read a project file",
+    detail: "{}",
+    tool: "read_file",
+    secretName: null,
+    background: false,
+    status: "pending",
+    createdAt: Date.now(),
+    expiresAt: Date.now() + 60_000,
+  };
+  const draft: EmailDraft = {
+    id: "refresh-error-draft",
+    agentId: bot.id,
+    accountId: "test-account",
+    to: ["review@example.com"],
+    cc: [],
+    subject: "Draft remains visible",
+    body: "Draft body",
+    inReplyTo: null,
+    status: "pending",
+    error: null,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  const failMethods = new Set([
+    "chat.history",
+    "queue.get",
+    "approvals.list",
+    "apps.list",
+    "email.accounts.list",
+    "email.drafts.list",
+  ]);
+  await target.addInitScript(
+    ({ id }) => {
+      localStorage.setItem("upbot.agent", id);
+      localStorage.setItem("upbot.view", "chat");
+    },
+    { id: bot.id },
+  );
+  await target.routeWebSocket(/\/ws\?/, (socket) => {
+    routedSocket = socket;
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      const request = JSON.parse(String(message));
+      if (request.method === "approvals.list") {
+        socket.send(
+          JSON.stringify(
+            fail
+              ? {
+                  id: request.id,
+                  error: { code: "internal", message: "Falha token=sk-secret-xyz" },
+                }
+              : { id: request.id, result: [approval] },
+          ),
+        );
+      } else if (request.method === "email.drafts.list") {
+        socket.send(
+          JSON.stringify(
+            fail
+              ? {
+                  id: request.id,
+                  error: { code: "internal", message: "Falha token=sk-secret-xyz" },
+                }
+              : { id: request.id, result: [draft] },
+          ),
+        );
+      } else if (fail && failMethods.has(request.method)) {
+        socket.send(
+          JSON.stringify({
+            id: request.id,
+            error: { code: "internal", message: "Falha token=sk-secret-xyz" },
+          }),
+        );
+      } else {
+        server.send(message);
+      }
+    });
+    server.onMessage((message) => socket.send(message));
+    socket.onClose(() => server.close());
+  });
+  try {
+    await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+    await target
+      .locator(".main-head")
+      .getByRole("heading", { name: bot.name, exact: true })
+      .waitFor();
+    await target.getByTestId("approval").waitFor();
+    await target.getByTestId("email-draft").waitFor();
+
+    fail = true;
+    if (!routedSocket) throw new Error("Routed websocket was not created");
+    const approvalLog = target.waitForEvent("console", {
+      predicate: (message) => message.text().includes("[desktop] approvals.list_failed"),
+    });
+    routedSocket.send(JSON.stringify({ event: "approval.updated", data: approval }));
+    routedSocket.send(JSON.stringify({ event: "email.draft.updated", data: draft }));
+    await target.getByText("Não foi possível carregar aprovações", { exact: true }).waitFor();
+    await target.getByText("Falha token=sk-secret-xyz", { exact: true }).waitFor();
+    await target.getByTestId("approval").waitFor();
+    await target.getByTestId("email-draft").waitFor();
+    const approvalMessage = await approvalLog;
+    expect(approvalMessage.text()).toContain('"code":"internal"');
+
+    const closedMessage = target.waitForEvent("console", {
+      predicate: (message) => message.text().includes("[desktop] daemon.socket_closed"),
+    });
+    routedSocket.close({ code: 4001, reason: "reason-secret-abc" });
+    expect((await closedMessage).text()).toContain('"code":4001');
+    expect(consoleText.join("\n")).not.toContain("sk-secret-xyz");
+    expect(consoleText.join("\n")).not.toContain("reason-secret-abc");
+  } finally {
+    await target.close();
+  }
+}, 20000);
 
 test("capture matching prototype states when visual verification is requested", async () => {
   if (!out || !process.env.PHASE2_PROTOTYPE) return;
