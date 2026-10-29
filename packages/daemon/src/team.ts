@@ -247,7 +247,11 @@ export class TeamClient {
       this.roster = [];
       if (ev.code === 4001) this.error = "you were removed from the team";
       this.emit();
-      if (ev.code === 4001) return;
+      if (ev.code === 4001) {
+        console.error(`[upbotd] team relay closed code=${ev.code}`);
+        return;
+      }
+      console.error(`[upbotd] team relay closed code=${ev.code} retryInMs=${backoff}`);
       this.retry = setTimeout(() => this.open(Math.min(backoff * 2, 30_000)), backoff);
     };
   }
@@ -293,7 +297,10 @@ export class TeamClient {
   }) {
     const shared = this.config()?.sharedAgentIds ?? [];
     const agent = this.agents.get(m.agentId);
-    const fail = (text: string) =>
+    const fail = (text: string) => {
+      console.error(
+        `[upbotd] team request rejected requestId=${m.requestId} agentId=${m.agentId} reason=${text}`,
+      );
       this.ws?.send(
         JSON.stringify({
           type: "reply",
@@ -303,6 +310,7 @@ export class TeamClient {
           text,
         }),
       );
+    };
     if (!agent || !shared.includes(agent.id)) {
       fail("that agent is not shared");
       return;
@@ -323,7 +331,12 @@ export class TeamClient {
         hops: 0,
         prompt,
         meta: {
-          team: { requestId: m.requestId, memberId: m.from.memberId, memberName: m.from.name },
+          team: {
+            requestId: m.requestId,
+            memberId: m.from.memberId,
+            memberName: m.from.name,
+            agentId: agent.id,
+          },
         },
       });
     } catch (e) {
@@ -334,7 +347,7 @@ export class TeamClient {
   onTurnEnded(turn: Turn, queueRow: { meta_json: string | null } | null) {
     if (!queueRow?.meta_json) return;
     const meta = JSON.parse(queueRow.meta_json) as {
-      team?: { requestId: string; memberId: string };
+      team?: { requestId: string; memberId: string; agentId?: string };
     };
     if (!meta.team) return;
     const text =
@@ -349,20 +362,27 @@ export class TeamClient {
           ? `The agent failed: ${turn.error ?? "unknown error"}`
           : "The agent stopped before replying.";
     const status = turn.status === "completed" ? "completed" : "failed";
-    this.ws?.send(
-      JSON.stringify({
-        type: "reply",
-        requestId: meta.team.requestId,
-        toMemberId: meta.team.memberId,
-        status,
-        text,
-      }),
-    );
+    const delivered = this.connected && this.ws?.readyState === WebSocket.OPEN;
+    if (delivered) {
+      this.ws?.send(
+        JSON.stringify({
+          type: "reply",
+          requestId: meta.team.requestId,
+          toMemberId: meta.team.memberId,
+          status,
+          text,
+        }),
+      );
+    } else {
+      console.error(
+        `[upbotd] team reply not delivered requestId=${meta.team.requestId} agentId=${meta.team.agentId ?? "unknown"} memberId=${meta.team.memberId} status=${status}`,
+      );
+    }
     this.db
       .query(
         "UPDATE team_messages SET reply = ?, status = ? WHERE request_id = ? AND direction = 'in'",
       )
-      .run(text, status, meta.team.requestId);
+      .run(text, delivered ? status : "failed", meta.team.requestId);
     this.emitMessage(meta.team.requestId, "in");
   }
 }
