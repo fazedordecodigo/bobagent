@@ -3,7 +3,7 @@ import type { TeamMember, TeamMessage, TeamStatus, Turn } from "@upbot/protocol"
 import { z } from "zod";
 import type { AgentStore } from "./agents";
 import type { ChatStore } from "./chat-store";
-import { deleteSetting, getSetting, setSetting } from "./db/settings";
+import { deleteSetting, getSetting, InvalidSettingError, setSetting } from "./db/settings";
 import type { Broadcast } from "./rpc";
 import { RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
@@ -90,7 +90,12 @@ export class TeamClient {
   }
 
   start() {
-    if (this.config()) this.open(1000);
+    try {
+      if (this.config()) this.open(1000);
+    } catch (e) {
+      if (!(e instanceof InvalidSettingError)) throw e;
+      console.error("[upbotd] team relay not started:", e.message);
+    }
   }
 
   connect(url: string, token: string): TeamStatus {
@@ -103,9 +108,16 @@ export class TeamClient {
     if (!["http:", "https:", "ws:", "wss:"].includes(u.protocol))
       throw new RpcError("bad_request", "invalid relay URL");
     this.vault.set("team.token", token.trim(), []);
+    let sharedAgentIds: string[];
+    try {
+      sharedAgentIds = this.config()?.sharedAgentIds ?? [];
+    } catch (e) {
+      if (!(e instanceof InvalidSettingError)) throw e;
+      sharedAgentIds = [];
+    }
     this.setConfig({
       url: u.href.replace(/\/$/, ""),
-      sharedAgentIds: this.config()?.sharedAgentIds ?? [],
+      sharedAgentIds,
     });
     this.close();
     this.open(1000);

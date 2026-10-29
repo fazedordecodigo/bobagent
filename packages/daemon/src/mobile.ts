@@ -3,7 +3,7 @@ import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto
 import { networkInterfaces } from "node:os";
 import type { MobileDevice, MobileStatus } from "@upbot/protocol";
 import { z } from "zod";
-import { getSetting, setSetting } from "./db/settings";
+import { getSetting, InvalidSettingError, setSetting } from "./db/settings";
 import { MOBILE_HTML } from "./mobile-app";
 import { RpcError } from "./runtime/agent-runtime";
 
@@ -100,11 +100,23 @@ export class MobileServer {
   }
 
   start(): void {
-    if (this.setting().enabled) this.listen();
+    try {
+      if (this.setting().enabled) this.listen();
+    } catch (e) {
+      if (!(e instanceof InvalidSettingError)) throw e;
+      console.error("[upbotd] mobile access stays off:", e.message);
+    }
   }
 
   setEnabled(enabled: boolean): MobileStatus {
-    const s = this.setting();
+    let s: { enabled: boolean; port: number };
+    try {
+      s = this.setting();
+    } catch (e) {
+      if (!(e instanceof InvalidSettingError)) throw e;
+      s = { enabled: false, port: 0 };
+      setSetting(this.db, "mobile", s);
+    }
     if (enabled) this.listen();
     else this.close();
     setSetting(this.db, "mobile", { enabled, port: this.server?.port ?? s.port });
