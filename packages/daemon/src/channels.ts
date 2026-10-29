@@ -112,7 +112,7 @@ export class ChannelService {
     }
   }
 
-  create(p: { name: string; memberIds: string[]; ownerId?: string | null }): Channel {
+  create(p: { name: string; memberIds: string[]; ownerId?: string | null | undefined }): Channel {
     const memberIds = [...new Set(p.memberIds)];
     const ownerId = p.ownerId ?? memberIds[0] ?? null;
     this.checkMembers(memberIds, ownerId);

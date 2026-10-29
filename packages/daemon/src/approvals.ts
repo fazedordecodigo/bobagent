@@ -138,7 +138,11 @@ export class ApprovalService {
     return done;
   }
 
-  async respond(p: { id: string; decision: ApprovalDecision; value?: string }): Promise<Approval> {
+  async respond(p: {
+    id: string;
+    decision: ApprovalDecision;
+    value?: string | undefined;
+  }): Promise<Approval> {
     const a = this.pending.get(p.id);
     if (!a) throw new RpcError("not_found", "approval not found or no longer pending");
     if (this.responding.has(p.id))
