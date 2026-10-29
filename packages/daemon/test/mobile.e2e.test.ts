@@ -22,6 +22,16 @@ describe("mobile companion e2e", () => {
   let a: Agent;
   let base: string;
   let device = "";
+  let stderrBuf = "";
+
+  const waitForLog = async (needle: string) => {
+    const deadline = Date.now() + 5000;
+    while (!stderrBuf.includes(needle)) {
+      if (Date.now() > deadline)
+        throw new Error(`log line not found: ${needle}\n--- stderr ---\n${stderrBuf}`);
+      await Bun.sleep(50);
+    }
+  };
 
   const api = (
     path: string,
@@ -49,6 +59,15 @@ describe("mobile companion e2e", () => {
       FAKE_ACP_STATE_DIR: stateDir,
       UPBOT_MOBILE_HOST: "127.0.0.1",
     });
+    const stderrReader = (daemon.proc.stderr as ReadableStream<Uint8Array>).getReader();
+    const dec = new TextDecoder();
+    void (async () => {
+      for (;;) {
+        const { done, value } = await stderrReader.read();
+        if (done) return;
+        stderrBuf += dec.decode(value);
+      }
+    })();
     c = await DaemonClient.connect(daemon.port, TOKEN);
     a = (await c.request("agents.create", {
       name: "Pocket",
@@ -86,8 +105,10 @@ describe("mobile companion e2e", () => {
     expect(code).toMatch(/^\d{6}$/);
     const wrong = code === "123456" ? "654321" : "123456";
     expect((await api("/api/pair", { code: wrong }, "")).status).toBe(401);
+    await waitForLog('mobile.pair_failed {"reason":"wrong_code"');
     const ok = await api("/api/pair", { code, name: "iPhone" }, "");
     expect(ok.status).toBe(200);
+    await waitForLog('mobile.paired {"deviceId"');
     device = ((await ok.json()) as { token: string }).token;
     expect(device).toMatch(/^[0-9a-f]{64}$/);
     expect((await api("/api/pair", { code, name: "again" }, "")).status).toBe(401);
@@ -95,14 +116,20 @@ describe("mobile companion e2e", () => {
     for (let i = 0; i < 5; i++)
       await api("/api/pair", { code: c2 === "111111" ? "222222" : "111111" }, "");
     expect((await api("/api/pair", { code: c2 }, "")).status).toBe(401);
+    await waitForLog('mobile.pair_failed {"reason":"exhausted"');
     const st = (await c.request("mobile.status", {})) as MobileStatus;
     expect(st.devices.map((d) => d.name)).toEqual(["iPhone"]);
   });
 
   test("devices chat through an allowlist of methods and get live events", async () => {
     expect((await api("/api/rpc", { method: "agents.list", params: {} }, "nope")).status).toBe(401);
+    await waitForLog('mobile.unauthorized {"path":"/api/rpc"');
+    expect(stderrBuf).toContain('"reason":"bad_token"');
+    expect(stderrBuf).not.toContain("nope");
     expect((await rpc("vault.list", {})).status).toBe(403);
     expect((await rpc("agents.create", { name: "x", provider: "devin" })).status).toBe(403);
+    await waitForLog('mobile.method_denied {"deviceId"');
+    expect(stderrBuf).toContain('"method":"agents.create"');
     expect(
       (
         await api("/api/rpc", { method: "agents.list", params: {} }, device, {
