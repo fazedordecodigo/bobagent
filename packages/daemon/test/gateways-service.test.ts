@@ -45,6 +45,7 @@ test("gateway notices stay bound to their source transport and send errors stay 
     } as unknown as AgentStore;
     const chat = {
       itemsForTurn: () => [{ kind: "agent_message", text: "reply" }],
+      turnReplyText: () => "reply",
     } as unknown as ChatStore;
     let runtimeFails = false;
     const runtimes = {
