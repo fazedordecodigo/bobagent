@@ -9,6 +9,7 @@ import type {
 import { useEffect, useState } from "react";
 import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 import { btnCls, inputCls, PROVIDERS } from "./AgentSettings";
 import { Markdown } from "./Markdown";
 
@@ -19,7 +20,10 @@ export function AvatarBadge({
   agent: Pick<Agent, "name" | "avatar">;
   size?: number;
 }) {
-  const emoji = agent.avatar?.emoji ?? agent.name.slice(0, 1).toUpperCase();
+  const emoji =
+    agent.avatar && "emoji" in agent.avatar
+      ? agent.avatar.emoji
+      : agent.name.slice(0, 1).toUpperCase();
   return (
     <span
       className="inline-flex shrink-0 items-center justify-center rounded-full"
@@ -27,7 +31,7 @@ export function AvatarBadge({
         width: size,
         height: size,
         fontSize: size * 0.6,
-        background: agent.avatar?.color ?? "var(--fg-soft)",
+        background: agent.avatar && "color" in agent.avatar ? agent.avatar.color : "var(--fg-soft)",
       }}
     >
       {emoji}
@@ -42,9 +46,11 @@ export function AvatarEditor({
   agent: Agent;
   onSave: (avatar: AgentAvatar | null) => Promise<void>;
 }) {
-  const [emoji, setEmoji] = useState(agent.avatar?.emoji ?? agent.name.slice(0, 1));
+  const [emoji, setEmoji] = useState(
+    agent.avatar && "emoji" in agent.avatar ? agent.avatar.emoji : agent.name.slice(0, 1),
+  );
   const [color, setColor] = useState(() => {
-    if (agent.avatar?.color) return agent.avatar.color;
+    if (agent.avatar && "color" in agent.avatar) return agent.avatar.color;
     const probe = document.createElement("span");
     probe.style.color = "var(--fg)";
     document.body.append(probe);
@@ -163,7 +169,7 @@ export function SkillsView({ client }: { client: DaemonClient }) {
           client
             .request("skills.save", edit)
             .then(() => setEdit(null))
-            .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+            .catch((err) => setError(errorMessage(err)));
         }}
       >
         <h2 className="text-lg font-semibold">Skill</h2>
@@ -262,7 +268,7 @@ export function RoutinesPanel({ client, agentId }: { client: DaemonClient; agent
   );
   const [form, setForm] = useState({ name: "", prompt: "", schedule: "", webhook: false });
   const [error, setError] = useState<string | null>(null);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   return (
     <section className="mx-auto max-w-lg space-y-2 px-6 pb-6">
       <h3 className="text-sm font-semibold text-zinc-300">Routines</h3>
@@ -463,7 +469,7 @@ export function VaultView({ client, agents }: { client: DaemonClient; agents: Ag
   const [error, setError] = useState<string | null>(null);
   const toggle = (ids: string[], id: string) =>
     ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id];
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   return (
     <div className="mx-auto max-w-2xl space-y-4 p-6">
       <h2 className="text-lg font-semibold">Vault</h2>
@@ -650,7 +656,7 @@ export function GatewaysView({ client, agents }: { client: DaemonClient; agents:
     },
   );
   const [error, setError] = useState<string | null>(null);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   const users = (s: string) =>
     s
       .split(/[\s,]+/)
@@ -830,7 +836,7 @@ export function MarketplaceView({ client }: { client: DaemonClient }) {
         ...(i.kind === "agent" ? { provider } : {}),
       })
       .then(reload)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setError(errorMessage(e)))
       .finally(() => setBusy(null));
   };
   return (
@@ -902,7 +908,7 @@ export function MarketplaceView({ client }: { client: DaemonClient }) {
                 .filter(Boolean),
             })
             .then(reload)
-            .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+            .catch((err) => setError(errorMessage(err)));
         }}
       >
         <h3 className="text-sm font-semibold text-zinc-300">Registries</h3>
@@ -930,7 +936,7 @@ export function MobileView({ client }: { client: DaemonClient }) {
     const t = setInterval(reload, 5000);
     return () => clearInterval(t);
   }, [reload]);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   if (!st) {
     return loadError ? (
       <div className="mx-auto max-w-lg p-6">
@@ -1030,7 +1036,7 @@ export function TeamView({ client, agents }: { client: DaemonClient; agents: Age
   const [target, setTarget] = useState("");
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   const shownError = error ?? statusError ?? msgsError;
   if (!st) {
     return shownError ? (

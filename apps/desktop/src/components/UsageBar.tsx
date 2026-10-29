@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 
 const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 
@@ -28,9 +29,7 @@ export function UsageBar({
       : null;
   const compact = () => {
     setError(null);
-    client
-      .request("agents.compact", { agentId })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    client.request("agents.compact", { agentId }).catch((e) => setError(errorMessage(e)));
   };
   return (
     <div

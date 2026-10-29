@@ -27,6 +27,7 @@ export function Sidebar({
   overview,
   statuses,
   selectedId,
+  agentNameOverride,
   channelId,
   current,
   profileName,
@@ -49,6 +50,7 @@ export function Sidebar({
   overview: Record<string, AgentOverview>;
   statuses: Record<string, AgentStatusInfo>;
   selectedId: string | null;
+  agentNameOverride?: { agentId: string; name: string } | null;
   channelId: string | null;
   current: string;
   profileName: string;
@@ -174,10 +176,18 @@ export function Sidebar({
                 <button
                   type="button"
                   className="side-bot"
-                  aria-current={current === "chat" && selectedId === agent.id ? "true" : undefined}
+                  aria-current={
+                    (current === "chat" || current === "agent-settings") && selectedId === agent.id
+                      ? "true"
+                      : undefined
+                  }
                   onClick={() => onAgent(agent.id)}
                 >
-                  <b>{agent.name}</b>
+                  <b>
+                    {agentNameOverride?.agentId === agent.id
+                      ? agentNameOverride.name.trim() || "Sem nome"
+                      : agent.name}
+                  </b>
                   <small title={state === "err" ? (statuses[agent.id]?.error ?? summary) : summary}>
                     {summary}
                   </small>
