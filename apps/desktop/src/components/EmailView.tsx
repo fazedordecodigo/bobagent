@@ -1,6 +1,7 @@
 import type { Agent, EmailAccount, EmailDraft, EmailProvider } from "@upbot/protocol";
 import { useCallback, useEffect, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 import { btnCls, inputCls } from "./AgentSettings";
 
 const PROVIDER_HINTS: Record<EmailProvider, string> = {
@@ -61,7 +62,7 @@ export function DraftCard({
       subject,
       body,
     });
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   return (
     <div
       className="space-y-2 rounded-lg border border-sky-800/60 bg-sky-950/20 p-3 text-sm"
@@ -186,7 +187,7 @@ export function EmailView({ client, agents }: { client: DaemonClient; agents: Ag
   });
   const [error, setError] = useState<string | null>(null);
   const [tests, setTests] = useState<Record<string, string>>({});
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? "deleted bot";
   return (
     <div className="mx-auto max-w-2xl space-y-4 p-6">

@@ -153,32 +153,6 @@ export class HostStore {
     return this.get(id)!;
   }
 
-  update(p: {
-    id: string;
-    name?: string | undefined;
-    target?: string | undefined;
-    port?: number | undefined;
-    identityFile?: string | null | undefined;
-  }): RemoteHost | null {
-    const h = this.get(p.id);
-    if (!h) return null;
-    const changedConn = p.target !== undefined || p.port !== undefined;
-    this.db
-      .query(
-        "UPDATE hosts SET name = ?, target = ?, port = ?, identity_file = ?, root = ?, preflight_json = ? WHERE id = ?",
-      )
-      .run(
-        p.name ?? h.name,
-        p.target ?? h.target,
-        p.port ?? h.port,
-        p.identityFile !== undefined ? p.identityFile : h.identityFile,
-        changedConn ? null : h.root,
-        changedConn ? null : h.preflight ? JSON.stringify(h.preflight) : null,
-        p.id,
-      );
-    return this.get(p.id);
-  }
-
   delete(id: string): boolean {
     const n = this.db.query("DELETE FROM hosts WHERE id = ?").run(id).changes;
     this.db

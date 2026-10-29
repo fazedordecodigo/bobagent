@@ -127,6 +127,12 @@ export class Rpc {
         queueMicrotask(() => this.broadcast("agent.deleted", { id: p.id }));
         return { ok: true };
       }
+      case "agents.restore": {
+        const agent = this.agents.restore((params as { id: string }).id);
+        if (!agent) throw new RpcError("not_found", "deleted agent not found");
+        queueMicrotask(() => this.broadcast("agent.created", agent));
+        return agent;
+      }
       case "chat.history": {
         const p = params as MethodParsedParams<typeof method>;
         if (!this.agents.get(p.agentId)) throw new RpcError("not_found", "agent not found");
@@ -210,12 +216,6 @@ export class Rpc {
         return this.extras.hosts.list();
       case "hosts.create": {
         const h = this.extras.hosts.create(params as MethodParsedParams<typeof method>);
-        queueMicrotask(() => this.broadcast("hosts.changed", {}));
-        return h;
-      }
-      case "hosts.update": {
-        const h = this.extras.hosts.update(params as MethodParsedParams<typeof method>);
-        if (!h) throw new RpcError("not_found", "host not found");
         queueMicrotask(() => this.broadcast("hosts.changed", {}));
         return h;
       }
@@ -399,9 +399,6 @@ export class Rpc {
           throw new RpcError("bad_request", (e as Error).message);
         }
         return { ok: true };
-      case "voice.stop":
-        this.extras.voice.stop();
-        return { ok: true };
       case "voice.transcribe": {
         const p = params as MethodParsedParams<typeof method>;
         try {
@@ -450,13 +447,6 @@ export class Rpc {
         if (!this.agents.get(p.agentId)) throw new RpcError("not_found", "agent not found");
         const m = this.memories.add(p.agentId, p.text);
         this.broadcast("memories.changed", { agentId: p.agentId });
-        return m;
-      }
-      case "memories.update": {
-        const p = params as MethodParsedParams<typeof method>;
-        const m = this.memories.update(p.id, p.text);
-        if (!m) throw new RpcError("not_found", "memory not found");
-        this.broadcast("memories.changed", { agentId: m.agentId });
         return m;
       }
       case "memories.delete": {
@@ -512,10 +502,6 @@ export class Rpc {
       case "channels.reassign": {
         const p = params as MethodParsedParams<typeof method>;
         return this.channels.reassign(p.channelId, p.ownerId);
-      }
-      case "channels.setMembers": {
-        const p = params as MethodParsedParams<typeof method>;
-        return this.channels.setMembers(p.channelId, p.memberIds);
       }
       default: {
         const _method: never = method;
