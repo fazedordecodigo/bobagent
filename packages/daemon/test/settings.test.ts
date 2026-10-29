@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { openDatabase } from "../src/db";
-import { deleteSetting, getSetting, setSetting } from "../src/db/settings";
+import {
+  deleteSetting,
+  getSetting,
+  hasSetting,
+  InvalidSettingError,
+  setSetting,
+} from "../src/db/settings";
 
 const db = () => openDatabase(mkdtempSync(join(tmpdir(), "upbot-data-")));
 
@@ -26,13 +32,37 @@ describe("settings store", () => {
       extra: 1,
     });
     setSetting(d, "k", { enabled: "yes" });
-    expect(() => getSetting(d, "k", schema, { enabled: false })).toThrow(/settings\.k/);
+    try {
+      getSetting(d, "k", schema, { enabled: false });
+      throw new Error("expected invalid setting");
+    } catch (e) {
+      expect(e).toBeInstanceOf(InvalidSettingError);
+      expect((e as InvalidSettingError).key).toBe("k");
+      expect((e as Error).message).toMatch(/settings\.k/);
+    }
   });
 
   test("errors name the key on malformed JSON", () => {
     const d = db();
+    const stored = "not-json-secret";
+    d.query("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run("k", stored);
+    try {
+      getSetting(d, "k", z.unknown(), null);
+      throw new Error("expected invalid setting");
+    } catch (e) {
+      expect(e).toBeInstanceOf(InvalidSettingError);
+      expect((e as InvalidSettingError).key).toBe("k");
+      expect((e as Error).message).toMatch(/settings\.k/);
+      expect((e as Error).message).not.toContain(stored);
+      expect((e as Error).message).toContain("malformed JSON");
+    }
+  });
+
+  test("checks whether a setting row is present without parsing it", () => {
+    const d = db();
+    expect(hasSetting(d, "k")).toBe(false);
     d.query("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run("k", "not-json");
-    expect(() => getSetting(d, "k", z.unknown(), null)).toThrow(/settings\.k/);
+    expect(hasSetting(d, "k")).toBe(true);
   });
 
   test("deleteSetting removes the row", () => {
