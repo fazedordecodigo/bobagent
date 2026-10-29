@@ -194,6 +194,42 @@ describe("chat e2e (fake acp agent)", () => {
     ).rejects.toMatchObject({ code: "not_found" });
   });
 
+  test("tools: multiple tool calls in one turn update their own items; orphan update ignored", async () => {
+    const agent = await newAgent("Tools", "devin");
+    const base = c.events.length;
+    await send(agent.id, "tools");
+    const turn = await waitTurnEnd(agent.id);
+    expect(turn.status).toBe("completed");
+
+    const h = await history(agent.id);
+    const calls = h.items.filter(
+      (i): i is Extract<ChatItem, { kind: "tool_call" }> => i.kind === "tool_call",
+    );
+    expect(calls.length).toBe(2);
+    expect(calls.find((i) => i.toolCallId === "tc-a")).toMatchObject({
+      title: "Tool A renamed",
+      status: "completed",
+    });
+    expect(calls.find((i) => i.toolCallId === "tc-b")).toMatchObject({
+      title: "Tool B",
+      status: "completed",
+    });
+    expect(calls.some((i) => i.toolCallId === "tc-orphan")).toBe(false);
+    expect(h.items[h.items.length - 1]).toMatchObject({
+      kind: "agent_message",
+      text: "tools:done",
+    });
+
+    // broadcasts stayed routed per toolCallId and nothing was emitted for the orphan
+    const updates = c.events
+      .slice(base)
+      .filter((e) => e.event === "item.updated")
+      .map((e) => (e.data as { toolCallId?: string }).toolCallId);
+    expect(updates.filter((id) => id === "tc-a").length).toBe(2);
+    expect(updates.filter((id) => id === "tc-b").length).toBe(1);
+    expect(updates).not.toContain("tc-orphan");
+  });
+
   test("cancel: during slow, during permission, ignorecancel kills after grace", async () => {
     // cancel during slow
     const agent = await newAgent("CancelSlow", "devin");
@@ -571,7 +607,7 @@ describe("chat e2e (fake acp agent)", () => {
     const db2 = new Database(join(dir, "upbot.db"), { readonly: true });
     expect(
       (db2.query("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number }).n,
-    ).toBe(19);
+    ).toBe(20);
     db2.close();
     rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
@@ -749,7 +785,7 @@ describe("chat e2e (fake acp agent)", () => {
 
     const db2 = new Database(join(dir, "upbot.db"), { readonly: true });
     const n = (db2.query("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number }).n;
-    expect(n).toBe(19);
+    expect(n).toBe(20);
     db2.close();
     rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });

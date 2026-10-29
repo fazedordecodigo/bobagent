@@ -1,6 +1,6 @@
 import type { Agent, ApprovalRule } from "@upbot/protocol";
 import { useMemo, useRef, useState } from "react";
-import { useChat } from "../hooks/useChat";
+import { useChatApi } from "../hooks/useChat";
 import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import { useLayerFocus, useMediaQuery } from "../hooks/useLayerFocus";
 import type { AgentOverview } from "../hooks/useOverview";
@@ -46,7 +46,7 @@ export function RunPanel({
   const panelRef = useRef<HTMLElement>(null);
   const overlay = useMediaQuery("(max-width: 1180px)");
   useLayerFocus(panelRef, overlay && overlayOpen);
-  const chat = useChat(client, agent.id);
+  const chat = useChatApi();
   const {
     data: rules = [],
     error: rulesLoadError,
