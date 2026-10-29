@@ -169,6 +169,11 @@ export function appToolNames(slug: string, tools: Tool[]): Map<string, Tool> {
   return new Map(named);
 }
 
+/** A failed app MCP call; the message has the app's secrets redacted. */
+export class AppToolError extends Error {
+  override name = "AppToolError";
+}
+
 export class AppsService {
   private live = new Map<string, Live>();
 
@@ -505,7 +510,12 @@ export class AppsService {
     const l = this.live.get(r.id)!;
     const tool = appToolNames(slug, l.tools).get(name);
     if (!tool) throw new Error(`unknown tool ${name}`);
-    const res = await l.client!.callTool({ name: tool.name, arguments: args });
+    let res: Awaited<ReturnType<Client["callTool"]>>;
+    try {
+      res = await l.client!.callTool({ name: tool.name, arguments: args });
+    } catch (e) {
+      throw new AppToolError(this.redact(r.id, (e as Error)?.message ?? String(e)).slice(0, 500));
+    }
     const content = (res.content ?? []) as { type: string; text?: string }[];
     const text = content
       .map((c) => (c.type === "text" ? (c.text ?? "") : `[${c.type} content]`))
