@@ -147,10 +147,12 @@ export function useChat(client: DaemonClient, agentId: string | null) {
 
   const loadEarlier = useCallback(async () => {
     if (!agentId || seqCursor.current === null) return;
+    const forAgent = agentId;
     const res = await client.request("chat.history", {
-      agentId,
+      agentId: forAgent,
       beforeSeq: seqCursor.current,
     });
+    if (activeAgent.current !== forAgent) return; // stale load after switching agents
     if (res.items.length > 0) seqCursor.current = res.items[0]?.seq ?? null;
     setState((s) => ({
       ...s,
