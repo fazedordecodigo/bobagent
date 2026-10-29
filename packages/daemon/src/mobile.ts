@@ -207,7 +207,11 @@ export class MobileServer {
     try {
       this.server = Bun.serve({ ...opts, port });
     } catch (e) {
-      emit("mobile.port_fallback", { port, error: (e as Error).message });
+      const code = (e as { code?: unknown } | null)?.code;
+      emit("mobile.port_fallback", {
+        port,
+        error: code === "EADDRINUSE" ? "EADDRINUSE" : "listen_failed",
+      });
       this.server = Bun.serve({ ...opts, port: 0 });
     }
   }

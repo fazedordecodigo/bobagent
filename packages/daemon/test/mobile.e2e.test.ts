@@ -24,6 +24,7 @@ describe("mobile companion e2e", () => {
   let base: string;
   let device = "";
   let stderrBuf = "";
+  let occupied: ReturnType<typeof Bun.serve>;
 
   const waitForLog = async (needle: string, after = 0) => {
     const deadline = Date.now() + 5000;
@@ -54,10 +55,16 @@ describe("mobile companion e2e", () => {
     dataDir = tmp("mob-data-");
     agentsRoot = tmp("mob-agents-");
     stateDir = tmp("mob-fake-");
+    occupied = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () => new Response("occupied"),
+    });
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
       UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
       UPBOT_MOBILE_HOST: "127.0.0.1",
+      UPBOT_MOBILE_PORT: String(occupied.port),
     });
     const stderrReader = (daemon.proc.stderr as ReadableStream<Uint8Array>).getReader();
     const dec = new TextDecoder();
@@ -82,18 +89,25 @@ describe("mobile companion e2e", () => {
       daemon.proc.kill("SIGKILL");
     } catch {}
     await daemon.proc.exited;
+    occupied?.stop(true);
     await stopTestChildren(stateDir);
     for (const d of [dataDir, agentsRoot, stateDir])
       rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
-  test("disabled by default; pairing needs it enabled", async () => {
+  test("disabled by default; enabling audits and serves after a real port collision", async () => {
     expect(await c.request("mobile.status", {})).toEqual({ enabled: false, urls: [], devices: [] });
     await expect(c.request("mobile.pair", {})).rejects.toMatchObject({ code: "bad_request" });
     const s = (await c.request("mobile.enable", { enabled: true })) as MobileStatus;
     expect(s.enabled).toBe(true);
     expect(s.urls).toHaveLength(1);
     base = s.urls[0]!.replace(/\/$/, "");
+    expect(Number(new URL(base).port)).not.toBe(occupied.port);
+    await waitForLog(
+      `mobile.port_fallback ${JSON.stringify({ port: occupied.port, error: "EADDRINUSE" })}`,
+    );
+    const blocker = await fetch(`http://127.0.0.1:${occupied.port}/`);
+    expect(await blocker.text()).toBe("occupied");
     const page = await fetch(`${base}/`);
     expect(page.headers.get("content-security-policy")).toContain("connect-src 'self'");
     expect(await page.text()).toContain("Pair with UpBot");
