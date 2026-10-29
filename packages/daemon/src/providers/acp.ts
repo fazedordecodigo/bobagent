@@ -1,17 +1,15 @@
-import type { ChildProcess } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import type { ConfigOption, ProviderId } from "@upbot/protocol";
-import { resolveCommand, spawnEnv } from "../env/login-path";
-import { spawnChild, waitForChildSpawn } from "../env/spawn";
 import { envPositiveNumber } from "../env/vars";
 import {
-  AUTH_RE,
   authMessage,
-  commandFor,
-  isVmCredentialRejection,
+  classifyStartupError,
+  type ProviderProcess,
+  providerCommand,
   redactCredential,
-  STDERR_TAIL_LINES,
+  spawnProvider,
+  startupAuthError,
   vmCredentialRejectedMessage,
 } from "./process";
 import {
@@ -25,12 +23,6 @@ import {
 } from "./types";
 
 const DEFAULT_OPENCODE_FIRST_ACTIVITY_MS = 30000;
-
-function isAuthError(e: unknown): boolean {
-  const err = e as { code?: number; message?: string };
-  if (err?.code === -32000) return true;
-  return AUTH_RE.test(err?.message ?? "");
-}
 
 async function boundedRequest<T>(
   provider: ProviderId,
@@ -168,12 +160,8 @@ export function mapAcpAuthError(
   opencodeNoProgressPrompt = false,
 ): ProviderError | null {
   const detail = errorDetail(error);
-  if (credential && isVmCredentialRejection(detail)) {
-    return new ProviderError(
-      "auth_required",
-      vmCredentialRejectedMessage(provider, detail, credential),
-    );
-  }
+  const auth = startupAuthError(provider, detail, credential);
+  if (auth) return auth;
   if (
     credential &&
     provider === "cursor" &&
@@ -192,7 +180,7 @@ export function mapAcpAuthError(
   ) {
     return new ProviderError("auth_required", authMessage("opencode", ""));
   }
-  if (isAuthError(error)) {
+  if ((error as { code?: number })?.code === -32000) {
     return new ProviderError(
       "auth_required",
       authMessage(provider, redactCredential(detail, credential)),
@@ -342,7 +330,7 @@ class AcpSession implements ProviderSession {
     readonly sessionId: string,
     readonly resumed: boolean,
     private conn: acp.ClientConnection,
-    private child: ChildProcess,
+    private proc: ProviderProcess,
     private hooks: ProviderHooks,
     private provider: ProviderId,
     private credential: string | null,
@@ -453,11 +441,10 @@ class AcpSession implements ProviderSession {
     try {
       this.conn.close();
     } catch {}
-    try {
-      this.child.kill("SIGKILL");
-    } catch {}
-    if (this.child.exitCode === null && this.child.signalCode === null) {
-      await new Promise<void>((resolve) => this.child.once("close", () => resolve()));
+    this.proc.kill();
+    const child = this.proc.child;
+    if (child.exitCode === null && child.signalCode === null) {
+      await new Promise<void>((resolve) => child.once("close", () => resolve()));
     }
   }
 }
@@ -485,49 +472,23 @@ export class AcpDriver implements ProviderDriver {
       args: m.args,
       env: Object.entries(m.env).map(([name, value]) => ({ name, value })),
     }));
-    const cmd = commandFor(this.provider);
-    if (!cmd) {
-      throw new ProviderError("provider_unavailable", `${this.provider} is not supported yet`);
-    }
-    const bin = opts.remote ? cmd[0]! : resolveCommand(cmd[0]!);
-    if (!bin) {
-      throw new ProviderError(
-        "provider_unavailable",
-        `\`${cmd[0]}\` not found in PATH (provider: ${this.provider})`,
-      );
-    }
-
-    const stderrLines: string[] = [];
+    const { bin, args } = providerCommand(this.provider, opts.remote);
     const credential = Object.values(opts.remote?.credentials ?? {})[0] ?? null;
-    let child: ChildProcess;
+    let proc: ProviderProcess;
     try {
-      child = opts.remote
-        ? opts.remote.spawn([bin, ...cmd.slice(1)], { NO_COLOR: "1", ...opts.remote.credentials })
-        : spawnChild(bin, cmd.slice(1), {
-            cwd,
-            stdio: ["pipe", "pipe", "pipe"],
-            env: spawnEnv({ NO_COLOR: "1" }),
-          });
+      proc = spawnProvider(bin, args, cwd, opts.remote?.credentials, opts.remote);
     } catch (error) {
-      throw new ProviderError(
-        "provider_unavailable",
-        `${this.provider} failed to start: ${redactCredential(errorDetail(error), credential)}`,
-      );
+      if (error instanceof ProviderError) throw error;
+      throw classifyStartupError(this.provider, errorDetail(error), "", credential);
     }
-    child.stdin?.on("error", () => {});
+    const child = proc.child;
+    const tail = () => redactCredential(proc.stderrTail(), credential);
     let rejectChildError!: (error: Error) => void;
     const childError = new Promise<never>((_, reject) => {
       rejectChildError = reject;
     });
     void childError.catch(() => {});
-    child.stderr?.on("data", (d: Buffer) => {
-      for (const line of d.toString("utf8").split("\n")) stderrLines.push(line);
-      if (stderrLines.length > STDERR_TAIL_LINES * 2) {
-        stderrLines.splice(0, stderrLines.length - STDERR_TAIL_LINES);
-      }
-    });
 
-    let exited = false;
     let closedByUs = false;
     let startupComplete = false;
     const activity: AcpActivityMonitor = {
@@ -537,25 +498,21 @@ export class AcpDriver implements ProviderDriver {
       promptHadProgress: false,
     };
     child.on("error", (error) => {
-      exited = true;
       rejectChildError(error);
       if (startupComplete && !closedByUs) {
-        const message = `process error: ${error.message}`;
+        const t = tail();
+        const message = `process error: ${error.message}${t ? `: ${t}` : ""}`;
         const authError = mapAcpAuthError(this.provider, new Error(message), credential);
         hooks.onExit(authError?.message ?? message);
       }
     });
     child.on("exit", (code, signal) => {
-      exited = true;
       if (
         !closedByUs &&
         (!activity.promptHandler || (activity.promptActive && !activity.promptHadProgress))
       ) {
-        const tail = redactCredential(
-          stderrLines.slice(-STDERR_TAIL_LINES).join("\n"),
-          credential,
-        ).trim();
-        const message = `process exited (code ${code ?? "null"}, signal ${signal ?? "null"})${tail ? `: ${tail}` : ""}`;
+        const t = tail();
+        const message = `process exited (code ${code ?? "null"}, signal ${signal ?? "null"})${t ? `: ${t}` : ""}`;
         const authError = mapAcpAuthError(
           this.provider,
           new Error(message),
@@ -567,14 +524,11 @@ export class AcpDriver implements ProviderDriver {
     });
 
     try {
-      await waitForChildSpawn(child);
+      await proc.waitForSpawn();
     } catch (error) {
       closedByUs = true;
-      child.kill("SIGKILL");
-      throw new ProviderError(
-        "provider_unavailable",
-        `${this.provider} failed to start: ${redactCredential(errorDetail(error), credential)}`,
-      );
+      proc.kill();
+      throw classifyStartupError(this.provider, errorDetail(error), tail(), credential);
     }
     const startupRequest = <T>(request: Promise<T>) => Promise.race([request, childError]);
 
@@ -626,15 +580,12 @@ export class AcpDriver implements ProviderDriver {
     conn.closed.catch(() => {});
     conn.closed.then(() => {
       if (
-        !exited &&
+        !proc.exited() &&
         !closedByUs &&
         (!activity.promptHandler || (activity.promptActive && !activity.promptHadProgress))
       ) {
-        const tail = redactCredential(
-          stderrLines.slice(-STDERR_TAIL_LINES).join("\n"),
-          credential,
-        ).trim();
-        const message = `connection closed unexpectedly${tail ? `: ${tail}` : ""}`;
+        const t = tail();
+        const message = `connection closed unexpectedly${t ? `: ${t}` : ""}`;
         const authError = mapAcpAuthError(
           this.provider,
           new Error(message),
@@ -644,6 +595,17 @@ export class AcpDriver implements ProviderDriver {
         hooks.onExit(authError?.message ?? message);
       }
     });
+
+    const abortStartup = async () => {
+      closedByUs = true;
+      try {
+        conn.close();
+      } catch {}
+      proc.kill();
+      if (child.exitCode === null && child.signalCode === null) {
+        await new Promise<void>((resolve) => child.once("close", () => resolve()));
+      }
+    };
 
     const init = async () => {
       try {
@@ -675,29 +637,11 @@ export class AcpDriver implements ProviderDriver {
     try {
       initRes = await init();
     } catch (e) {
-      closedByUs = true;
-      try {
-        conn.close();
-      } catch {}
-      child.kill("SIGKILL");
+      await abortStartup();
       if (e instanceof ProviderError) throw e;
       const authError = mapAcpAuthError(this.provider, e, credential);
       if (authError) throw authError;
-      if (exited) {
-        const tail = redactCredential(
-          stderrLines.slice(-STDERR_TAIL_LINES).join("\n"),
-          credential,
-        ).trim();
-        const detail = redactCredential(errorDetail(e), credential);
-        throw new ProviderError(
-          "provider_unavailable",
-          `${this.provider} failed to start${tail ? `: ${tail}` : detail ? `: ${detail}` : ""}`,
-        );
-      }
-      throw new ProviderError(
-        "provider_unavailable",
-        `${this.provider} initialize failed: ${(e as Error).message}`,
-      );
+      throw classifyStartupError(this.provider, errorDetail(e), tail(), credential);
     }
 
     let sessionId: string;
@@ -722,10 +666,9 @@ export class AcpDriver implements ProviderDriver {
           sessionId = resumeSessionId;
           resumed = true;
         } catch (error) {
-          const tail = stderrLines.slice(-STDERR_TAIL_LINES).join("\n");
           const authError =
             mapAcpAuthError(this.provider, error, credential) ??
-            mapAcpAuthError(this.provider, new Error(tail), credential);
+            mapAcpAuthError(this.provider, new Error(tail()), credential);
           if (authError) throw authError;
           throw new AcpResumeError(errorDetail(error));
         } finally {
@@ -746,33 +689,11 @@ export class AcpDriver implements ProviderDriver {
         rawConfig = normalizeConfigOptions(res);
       }
     } catch (e) {
-      closedByUs = true;
-      try {
-        conn.close();
-      } catch {}
-      child.kill("SIGKILL");
-      if (child.exitCode === null && child.signalCode === null) {
-        await new Promise<void>((resolve) => child.once("close", () => resolve()));
-      }
+      await abortStartup();
       if (e instanceof AcpResumeError || e instanceof ProviderError) throw e;
       const authError = mapAcpAuthError(this.provider, e, credential);
       if (authError) throw authError;
-      if (exited) {
-        const tail = redactCredential(
-          stderrLines.slice(-STDERR_TAIL_LINES).join("\n"),
-          credential,
-        ).trim();
-        const detail = redactCredential(errorDetail(e), credential);
-        throw new ProviderError(
-          "provider_unavailable",
-          `${this.provider} failed to start${tail ? `: ${tail}` : detail ? `: ${detail}` : ""}`,
-        );
-      }
-      const detail = errorDetail(e);
-      throw new ProviderError(
-        "provider_unavailable",
-        `${this.provider} session startup failed${detail ? `: ${redactCredential(detail, credential)}` : ""}`,
-      );
+      throw classifyStartupError(this.provider, errorDetail(e), tail(), credential);
     }
 
     activity.sessionId = sessionId;
@@ -780,7 +701,7 @@ export class AcpDriver implements ProviderDriver {
       sessionId,
       resumed,
       conn,
-      child,
+      proc,
       hooks,
       this.provider,
       credential,
