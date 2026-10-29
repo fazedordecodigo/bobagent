@@ -1,6 +1,5 @@
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
-import { StringDecoder } from "node:string_decoder";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   getDefaultEnvironment,
@@ -15,7 +14,6 @@ import type {
   ConnectedApp,
 } from "@upbot/protocol";
 import { AppPermissions, defaultAppPermissions } from "@upbot/protocol";
-import { redactSecrets, STDERR_TAIL_LINES } from "./providers/process";
 import { RpcError } from "./runtime/agent-runtime";
 import type { Vault } from "./vault";
 
@@ -173,12 +171,6 @@ export function appToolNames(slug: string, tools: Tool[]): Map<string, Tool> {
   return new Map(named);
 }
 
-export function boundedAppError(message: string, tail: string, max = 500): string {
-  if (!tail) return message.slice(0, max);
-  const tailPart = tail.slice(-Math.max(max - 1 - message.length, Math.floor(max / 2)));
-  return `${message.slice(0, max - 1 - tailPart.length)}\n${tailPart}`;
-}
-
 function secretNeedles(values: Iterable<string>): Set<string> {
   const needles = new Set<string>();
   for (const value of values) {
@@ -200,76 +192,21 @@ export function redactValues(text: string, values: Iterable<string>): string {
     .reduce((result, value) => result.split(value).join("[redacted]"), text);
 }
 
-export function redactTrailingPrefix(text: string, values: Iterable<string>, min = 4): string {
-  let longest = 0;
-  for (const needle of secretNeedles(values)) {
-    for (
-      let length = Math.min(text.length, needle.length);
-      length >= min && length > longest;
-      length--
-    ) {
-      if (text.endsWith(needle.slice(0, length))) {
-        longest = length;
-        break;
-      }
-    }
-  }
-  return longest ? `${text.slice(0, -longest)}[redacted]` : text;
-}
-
-export function stderrLineBuffer(
-  maxLines = STDERR_TAIL_LINES,
-  maxLineChars = 8192,
-): {
+export function appStderrDiagnostics(): {
   push(chunk: Buffer | string): void;
-  end(): void;
-  lines(): string[];
-  pending(): string;
+  summary(): string;
 } {
-  const decoder = new StringDecoder("utf8");
-  const stored: string[] = [];
-  let pending = "";
-  let dropping = false;
-  let ended = false;
-
-  const store = (line: string) => {
-    stored.push(line.replace(/\r$/, ""));
-    if (stored.length > maxLines * 2) stored.splice(0, stored.length - maxLines);
-  };
-  const consume = (text: string) => {
-    for (const char of text) {
-      if (dropping) {
-        if (char === "\n") dropping = false;
-      } else if (char === "\n") {
-        store(pending);
-        pending = "";
-      } else {
-        pending += char;
-        if (pending.length > maxLineChars) {
-          pending = "";
-          dropping = true;
-          store("[stderr line truncated]");
-        }
-      }
-    }
-  };
-
+  const maxBytes = 1_000_000;
+  let bytes = 0;
+  // stderr may contain arbitrary credential fragments, so never retain its text.
   return {
     push(chunk) {
-      if (!ended) consume(decoder.write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      bytes = Math.min(maxBytes, bytes + Buffer.byteLength(chunk));
     },
-    end() {
-      if (ended) return;
-      ended = true;
-      consume(decoder.end());
-      if (!dropping && pending) store(pending);
-      pending = "";
-    },
-    lines() {
-      return stored.slice(-maxLines);
-    },
-    pending() {
-      return dropping ? "" : pending.replace(/\r$/, "");
+    summary() {
+      return bytes
+        ? `stderr output suppressed (${bytes}${bytes === maxBytes ? "+" : ""} bytes)`
+        : "";
     },
   };
 }
@@ -494,27 +431,16 @@ export class AppsService {
     this.live.set(id, l);
     this.changed();
     const startedAt = Date.now();
-    let secretValues: string[] = [];
-    const stderr = stderrLineBuffer();
-    const stderrTail = () => {
-      const pending = stderr.pending();
-      const raw = [...stderr.lines(), ...(pending ? [pending] : [])].join("\n");
-      let redacted = this.redact(id, redactSecrets(raw), secretValues);
-      if (pending)
-        redacted = redactTrailingPrefix(redacted, [
-          ...secretValues,
-          ...this.currentSecretValues(id),
-        ]);
-      return redacted.trim();
-    };
+    const stderr = appStderrDiagnostics();
+    let phase = "configuration";
+    let timeout: AbortSignal | null = null;
     let ctx: { catalogId: string; transport: Config["transport"] } | null = null;
     l.starting = (async () => {
       const r = this.row(id);
       const c = this.config(r);
       ctx = { catalogId: r.catalog_id, transport: c.transport };
       const secrets = this.secrets(id, c);
-      secretValues = Object.values(secrets);
-      l.secretValues = secretValues;
+      l.secretValues = Object.values(secrets);
       const fill = (s: string) => s.replace(/\{([A-Za-z0-9_]+)\}/g, (_, k) => secrets[k] ?? "");
       const transport =
         c.transport === "http"
@@ -538,11 +464,12 @@ export class AppsService {
       l.transport = transport as Transport;
       if (transport instanceof StdioClientTransport) {
         transport.stderr?.on("data", (d: Buffer) => stderr.push(d));
-        transport.stderr?.on("end", () => stderr.end());
       }
       const client = new Client({ name: "upbot", version: "0.3.0" });
-      const timeout = AbortSignal.timeout(Number(process.env.UPBOT_APP_START_TIMEOUT_MS) || 60_000);
+      timeout = AbortSignal.timeout(Number(process.env.UPBOT_APP_START_TIMEOUT_MS) || 60_000);
+      phase = "transport initialization";
       await client.connect(transport as Transport, { signal: timeout });
+      phase = "tools/list";
       const tools: Tool[] = [];
       let cursor: string | undefined;
       do {
@@ -554,16 +481,16 @@ export class AppsService {
         if (this.live.get(id) === l) {
           const wasReady = l.status === "ready";
           l.status = "error";
-          l.error = "the app's MCP server exited";
+          const diagnostic = stderr.summary();
+          l.error = ["the app's MCP server exited", diagnostic].filter(Boolean).join("\n");
           l.client = null;
           l.transport = null;
           if (wasReady) {
-            const tail = stderrTail();
             console.error("[upbotd] app MCP server exited", {
               appId: id,
               catalogId: r.catalog_id,
               transport: c.transport,
-              ...(tail ? { stderrTail: tail } : {}),
+              ...(diagnostic ? { stderr: diagnostic } : {}),
             });
           }
           this.changed();
@@ -573,10 +500,14 @@ export class AppsService {
       l.tools = tools;
       l.status = "ready";
     })()
-      .catch((e) => {
-        const tail = stderrTail();
+      .catch(() => {
         l.status = "error";
-        l.error = boundedAppError(this.redact(id, (e as Error).message, secretValues), tail);
+        l.error = [
+          `app MCP startup ${timeout?.aborted ? "timed out" : "failed"} (${phase})`,
+          stderr.summary(),
+        ]
+          .filter(Boolean)
+          .join("\n");
         console.error("[upbotd] app start failed", {
           appId: id,
           catalogId: ctx?.catalogId ?? null,
@@ -673,9 +604,9 @@ export class AppsService {
     let res: Awaited<ReturnType<Client["callTool"]>>;
     try {
       res = await l.client!.callTool({ name: tool.name, arguments: args });
-    } catch (e) {
+    } catch {
       logCallFailure();
-      throw e;
+      throw new Error("app MCP tool call failed");
     }
     if (res.isError === true) logCallFailure();
     const content = (res.content ?? []) as { type: string; text?: string }[];

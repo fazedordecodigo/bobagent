@@ -145,7 +145,7 @@ describe("connected apps (MCP) e2e", () => {
     expect(log).not.toContain(APP_SECRET);
   });
 
-  test("a failing stdio app surfaces its stderr tail in the error", async () => {
+  test("a failing stdio app surfaces only trusted stderr diagnostics", async () => {
     const bad = (await c.request("apps.connect", {
       catalogId: "custom-stdio",
       name: "Bad App",
@@ -164,11 +164,13 @@ describe("connected apps (MCP) e2e", () => {
       await Bun.sleep(100);
     }
     expect(failed?.status).toBe("error");
-    expect(failed?.error).toContain("boom-stderr-marker");
+    expect(failed?.error).toContain("stderr output suppressed");
+    expect(failed?.error?.includes("boom-stderr-marker")).toBe(false);
+    expect(daemonStderr.includes("boom-stderr-marker")).toBe(false);
     await c.request("apps.delete", { id: bad.id });
   });
 
-  test("a long startup error retains the stderr tail within the error bound", async () => {
+  test("a long startup error is replaced with bounded trusted diagnostics", async () => {
     const bad = (await c.request("apps.connect", {
       catalogId: "custom-stdio",
       name: "Long Error App",
@@ -208,7 +210,9 @@ process.stdin.on("data", (chunk) => {
         await Bun.sleep(100);
       }
       expect(failed?.status).toBe("error");
-      expect(failed?.error).toContain("long-stderr-marker");
+      expect(failed?.error).toContain("app MCP startup failed (transport initialization)");
+      expect(failed?.error).toContain("stderr output suppressed");
+      expect(failed?.error?.includes("long-stderr-marker")).toBe(false);
       expect(failed!.error!.length).toBeLessThanOrEqual(500);
     } finally {
       await c.request("apps.delete", { id: bad.id });
@@ -239,7 +243,7 @@ process.stdin.on("data", (chunk) => {
       }
       const list = (await c.request("apps.list", {})) as ConnectedApp[];
       expect(failed?.status).toBe("error");
-      expect(failed?.error).toContain("tok=[redacted]");
+      expect(failed?.error).toContain("stderr output suppressed");
       expect(JSON.stringify(list)).not.toContain(firstHalf);
       expect(JSON.stringify(list)).not.toContain(secondHalf);
       expect(daemonStderr).not.toContain(firstHalf);
@@ -287,7 +291,7 @@ process.stdin.on("data", (chunk) => {
     }
   });
 
-  test("includes pending stderr on startup timeout and redacts its credential prefix", async () => {
+  test("reports suppressed pending stderr on startup timeout without credential fragments", async () => {
     const timeoutDataDir = tmp("apps-timeout-data-");
     const timeoutAgentsRoot = tmp("apps-timeout-agents-");
     const timeoutStateDir = tmp("apps-timeout-state-");
@@ -335,8 +339,9 @@ process.stdin.on("data", (chunk) => {
       const list = (await timeoutClient.request("apps.list", {})) as ConnectedApp[];
       expect(failed?.status).toBe("error");
       expect(timeoutStderr).toContain("app start failed");
-      expect(failed?.error).toContain("hang-marker");
-      expect(failed?.error).toContain("tok=[redacted]");
+      expect(failed?.error).toContain("app MCP startup timed out (transport initialization)");
+      expect(failed?.error).toContain("stderr output suppressed");
+      expect(failed?.error?.includes("hang-marker")).toBe(false);
       const listed = JSON.stringify(list);
       for (let length = 4; length <= 12; length++) {
         const prefix = secret.slice(0, length);

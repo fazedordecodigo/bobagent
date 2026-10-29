@@ -1,55 +1,27 @@
 import { describe, expect, test } from "bun:test";
-import { boundedAppError, redactTrailingPrefix, redactValues, stderrLineBuffer } from "../src/apps";
+import { appStderrDiagnostics, redactValues } from "../src/apps";
 
-describe("app stderr helpers", () => {
-  test("joins a secret split across Buffer chunks into one line", () => {
-    const buffer = stderrLineBuffer();
-    buffer.push(Buffer.from("split-cred"));
-    buffer.push(Buffer.from("ential\n"));
-    expect(buffer.lines()).toEqual(["split-credential"]);
+describe("app stderr diagnostics", () => {
+  test("omits the summary when no stderr was received", () => {
+    expect(appStderrDiagnostics().summary()).toBe("");
   });
 
-  test("decodes multibyte characters split across Buffer chunks", () => {
-    const buffer = stderrLineBuffer();
-    buffer.push(Buffer.from([0xc3]));
-    buffer.push(Buffer.from([0xa9, 0x0a]));
-    expect(buffer.lines()).toEqual(["é"]);
+  test("retains only byte counts across chunks, newlines and partial UTF-8", () => {
+    const diagnostic = appStderrDiagnostics();
+    diagnostic.push(Buffer.from([0xc3]));
+    diagnostic.push(Buffer.from([0xa9]));
+    diagnostic.push("fictional\ncredential-fragment");
+    expect(diagnostic.summary()).toBe("stderr output suppressed (31 bytes)");
   });
 
-  test("keeps partial lines pending until newline or end", () => {
-    const buffer = stderrLineBuffer();
-    buffer.push("first");
-    expect(buffer.lines()).toEqual([]);
-    buffer.push("\nsecond");
-    expect(buffer.lines()).toEqual(["first"]);
-    buffer.end();
-    expect(buffer.lines()).toEqual(["first", "second"]);
+  test("bounds the counter without retaining oversized output", () => {
+    const diagnostic = appStderrDiagnostics();
+    diagnostic.push("x".repeat(1_000_001));
+    diagnostic.push("fictional-credential");
+    expect(diagnostic.summary()).toBe("stderr output suppressed (1000000+ bytes)");
   });
 
-  test("returns a safe pending line without a trailing carriage return or dropped fragment", () => {
-    const buffer = stderrLineBuffer(10, 5);
-    buffer.push("a\r");
-    expect(buffer.pending()).toBe("a");
-    buffer.push("\n");
-    expect(buffer.pending()).toBe("");
-    buffer.push("123456");
-    expect(buffer.pending()).toBe("");
-  });
-
-  test("replaces over-long lines with one marker and drops their fragments", () => {
-    const buffer = stderrLineBuffer(10, 5);
-    buffer.push("abcdef");
-    buffer.push("ignored\nkept\n");
-    expect(buffer.lines()).toEqual(["[stderr line truncated]", "kept"]);
-  });
-
-  test("bounds the retained line window", () => {
-    const buffer = stderrLineBuffer(3);
-    buffer.push("one\ntwo\nthree\nfour\n");
-    expect(buffer.lines()).toEqual(["two", "three", "four"]);
-  });
-
-  test("redacts multiline secret parts longest-first", () => {
+  test("redacts complete tool output and multiline credentials longest-first", () => {
     expect(
       redactValues("longer long\nsecret-line\nanother-secret-line", [
         "long",
@@ -59,28 +31,7 @@ describe("app stderr helpers", () => {
     ).toBe("[redacted] [redacted]\n[redacted]\n[redacted]");
   });
 
-  test("redacts a matching trailing secret prefix", () => {
-    expect(redactTrailingPrefix("tok=abcd", ["abcdefgh"])).toBe("tok=[redacted]");
-    expect(redactTrailingPrefix("tok=abc", ["abcdefgh"])).toBe("tok=abc");
-  });
-
-  test("redacts the longest matching secret prefix", () => {
-    expect(redactTrailingPrefix("tok=abcde", ["abcdef", "bcde123"])).toBe("tok=[redacted]");
-  });
-
-  test("redacts trailing prefixes of multiline secret parts", () => {
-    expect(redactTrailingPrefix("tok=longsec", ["prefix\nlongsecret\nsuffix"])).toBe(
-      "tok=[redacted]",
-    );
-  });
-
-  test("redacts short multiline secret parts", () => {
+  test("redacts short multiline secret parts in tool results", () => {
     expect(redactValues("part", ["first\npart\nlast"])).toBe("[redacted]");
-  });
-
-  test("keeps the stderr tail when the startup message exceeds the bound", () => {
-    const result = boundedAppError("x".repeat(600), "stderr-tail-marker");
-    expect(result.length).toBeLessThanOrEqual(500);
-    expect(result).toEndWith("stderr-tail-marker");
   });
 });
