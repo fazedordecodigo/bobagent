@@ -1,5 +1,20 @@
-import type { Agent, AgentStatusInfo, Turn } from "@upbot/protocol";
+import type { Agent, AgentStatusInfo, ProviderId, Turn } from "@upbot/protocol";
 import { StatusPill } from "../components/ds/controls";
+
+export const PROVIDER_NAMES: Record<ProviderId, string> = {
+  devin: "Devin",
+  cursor: "Cursor",
+  grok: "Grok",
+  opencode: "OpenCode",
+  gemini: "Gemini",
+  claude: "Claude",
+  codex: "Codex",
+  "openai-compatible": "Compatível com OpenAI",
+};
+
+export function statusProvider(provider: ProviderId) {
+  return PROVIDER_NAMES[provider];
+}
 
 export const ST = {
   run: "Em execução",

@@ -1,11 +1,6 @@
-import type {
-  Agent,
-  AgentStatusInfo,
-  Approval,
-  ApprovalDecision,
-  EmailDraft,
-} from "@upbot/protocol";
+import type { Approval, ApprovalDecision, EmailDraft } from "@upbot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useDaemonState } from "../hooks/useDaemonState";
 import { permissionActions } from "../lib/app-permissions";
 import { approvalAction, decideApproval } from "../lib/approval-decisions";
 import { describeApproval, requiresFullReview } from "../lib/approval-description";
@@ -59,13 +54,9 @@ function ApprovalIcon({ approval }: { approval: Approval }) {
 
 export default function MenuBar() {
   const [client] = useState(() => new DaemonClient());
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [statuses, setStatuses] = useState<Record<string, AgentStatusInfo>>({});
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [drafts, setDrafts] = useState<EmailDraft[]>([]);
   const [queueAction, setQueueAction] = useState<GlobalPauseAction>("pause");
-  const [ready, setReady] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<MenuResult[]>([]);
   const [busy, setBusy] = useState<string[]>([]);
   const working = useRef(new Set<string>());
@@ -76,32 +67,34 @@ export default function MenuBar() {
   const [quit, setQuit] = useState(false);
   const [, setTheme] = useThemePref();
   const dark = document.documentElement.dataset.theme === "dark";
-  const load = useCallback(async () => {
+  const loadPending = useCallback(async () => {
     const version = ++generation.current;
-    const [list, status, pending, mail] = await Promise.all([
-      client.request("agents.list", {}),
-      client.request("agents.statuses", {}),
+    const [pending, mail] = await Promise.all([
       client.request("approvals.list", {}),
       client.request("email.drafts.list", { pendingOnly: true }),
     ]);
     if (version !== generation.current) return;
-    setAgents(list);
-    setStatuses(status);
     setApprovals(pending.filter((item) => item.status === "pending"));
     setDrafts(mail.filter((item) => item.status === "pending" || item.status === "failed"));
     setQueueAction(globalPauseAction(localStorage));
-    setReady(true);
   }, [client]);
+  const {
+    agents,
+    statuses,
+    ready,
+    error,
+    setError,
+    refresh: load,
+  } = useDaemonState(client, {
+    includeChannels: false,
+    onRefresh: loadPending,
+  });
   useEffect(() => {
     let active = true;
     const refresh = () => {
       if (!active) return;
       void load().catch((e: unknown) => setError(errorMessage(e)));
     };
-    void client
-      .connect()
-      .then(refresh)
-      .catch((e: unknown) => setError(errorMessage(e)));
     const offs = [
       client.onReconnect(refresh),
       client.on("approval.updated", refresh),
@@ -121,9 +114,8 @@ export default function MenuBar() {
       generation.current++;
       for (const off of offs) off();
       clearInterval(timer);
-      client.close();
     };
-  }, [client, load]);
+  }, [client, load, setError]);
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
       if (event.key === GLOBAL_PAUSE_KEY)
@@ -131,21 +123,24 @@ export default function MenuBar() {
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
-  }, [load]);
-  const perform = useCallback(async (id: string, action: () => Promise<unknown>) => {
-    if (working.current.has(id)) return;
-    working.current.add(id);
-    setBusy([...working.current]);
-    setError(null);
-    try {
-      await action();
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      working.current.delete(id);
+  }, [load, setError]);
+  const perform = useCallback(
+    async (id: string, action: () => Promise<unknown>) => {
+      if (working.current.has(id)) return;
+      working.current.add(id);
       setBusy([...working.current]);
-    }
-  }, []);
+      setError(null);
+      try {
+        await action();
+      } catch (e) {
+        setError(errorMessage(e));
+      } finally {
+        working.current.delete(id);
+        setBusy([...working.current]);
+      }
+    },
+    [setError],
+  );
   const count = approvals.length + drafts.length;
   useEffect(() => {
     if (!done.length) return;
@@ -161,7 +156,7 @@ export default function MenuBar() {
       void nativeCommand("set_tray_count", { count }).catch((e: unknown) =>
         setError(errorMessage(e)),
       );
-  }, [count, ready]);
+  }, [count, ready, setError]);
   useEffect(() => {
     const onEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !event.defaultPrevented && !quit) {
@@ -170,7 +165,7 @@ export default function MenuBar() {
     };
     window.addEventListener("keydown", onEscape);
     return () => window.removeEventListener("keydown", onEscape);
-  }, [quit]);
+  }, [quit, setError]);
   const open = (view?: string) =>
     void perform("open", () => nativeCommand("open_main", { view: view ?? null }));
   const nameOf = (id: string) => agents.find((agent) => agent.id === id)?.name ?? "Bot removido";

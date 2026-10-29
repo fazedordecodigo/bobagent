@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-type ThemePreference = "light" | "dark" | "auto";
+export type ThemePreference = "light" | "dark" | "auto";
 const changed = "upbot:theme-changed";
 
 function apply(preference: string | null) {
