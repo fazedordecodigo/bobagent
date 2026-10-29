@@ -5,7 +5,7 @@ import { type MobileDevice, type MobileStatus, methodMap } from "@upbot/protocol
 import { getSetting, setSetting } from "./db";
 import { envNumber } from "./env/vars";
 import { MOBILE_HTML } from "./mobile-app";
-import { RpcError } from "./runtime/agent-runtime";
+import { ERRNO_RE, RpcError } from "./runtime/agent-runtime";
 
 // Mobile companion: an opt-in LAN web app (phone browser / home-screen PWA) that pairs with a
 // one-time 6-digit code shown on the desktop, then gets a device token. Devices may only call
@@ -213,7 +213,7 @@ export class MobileServer {
       const code = (e as { code?: unknown } | null)?.code;
       emit("mobile.port_fallback", {
         port,
-        error: code === "EADDRINUSE" ? "EADDRINUSE" : "listen_failed",
+        error: typeof code === "string" && ERRNO_RE.test(code) ? code : "listen_failed",
       });
       this.usedFallbackPort = true;
       this.server = Bun.serve({ ...opts, port: 0 });
