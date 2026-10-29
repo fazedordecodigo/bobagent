@@ -10,6 +10,7 @@ import type {
 } from "@upbot/protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
+import { errorFields, logWarn } from "../lib/log";
 import { fmtTime, status, type UiStatus } from "../lib/ui";
 
 export type AgentOverview = {
@@ -54,8 +55,14 @@ export function useOverview(
   const loadAgent = useCallback(
     async (agentId: string) => {
       const [history, queue] = await Promise.all([
-        client.request("chat.history", { agentId, limit: 50 }).catch(() => null),
-        client.request("queue.get", { agentId }).catch(() => null),
+        client.request("chat.history", { agentId, limit: 50 }).catch((e: unknown) => {
+          logWarn("overview.history_failed", { agentId, ...errorFields(e) });
+          return null;
+        }),
+        client.request("queue.get", { agentId }).catch((e: unknown) => {
+          logWarn("overview.queue_failed", { agentId, ...errorFields(e) });
+          return null;
+        }),
       ]);
       if (history) {
         const latestTurn = [...history.turns].sort((a, b) => b.startedAt - a.startedAt)[0] ?? null;
@@ -73,19 +80,19 @@ export function useOverview(
     client
       .request("approvals.list", {})
       .then(setApprovals)
-      .catch(() => {});
+      .catch((e: unknown) => logWarn("overview.approvals_failed", errorFields(e)));
   }, [client]);
   const refreshApps = useCallback(() => {
     client
       .request("apps.list", {})
       .then(setApps)
-      .catch(() => {});
+      .catch((e: unknown) => logWarn("overview.apps_failed", errorFields(e)));
   }, [client]);
   const refreshEmail = useCallback(() => {
     client
       .request("email.accounts.list", {})
       .then(setEmailAccounts)
-      .catch(() => {});
+      .catch((e: unknown) => logWarn("overview.email_failed", errorFields(e)));
   }, [client]);
 
   useEffect(() => {
