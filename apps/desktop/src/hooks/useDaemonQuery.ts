@@ -87,5 +87,5 @@ export function useDaemonQuery<M extends MethodName>(
     // live from eventsRef so they can be inline closures.
   }, [enabled, client, reload, eventsKey]);
 
-  return { data, error, loaded, reload };
+  return { data, error, loaded, reload, setData };
 }
