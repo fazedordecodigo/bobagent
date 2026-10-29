@@ -1,6 +1,7 @@
 import type { Agent, Routine } from "@upbot/protocol";
 import { useEffect, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 
 export function ScheduledView({
   client,
@@ -30,7 +31,7 @@ export function ScheduledView({
           }
         })
         .catch((e: unknown) => {
-          if (alive) setError(e instanceof Error ? e.message : String(e));
+          if (alive) setError(errorMessage(e));
         });
     refresh();
     const offs = [

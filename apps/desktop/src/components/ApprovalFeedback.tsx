@@ -1,4 +1,5 @@
 import { createContext, type ReactNode, useContext, useState } from "react";
+import { errorMessage } from "../lib/errors";
 import s from "./Approvals.module.css";
 import { Button, IconButton } from "./ds/controls";
 
@@ -31,7 +32,7 @@ export function ApprovalFeedback({ children }: { children: ReactNode }) {
                 } catch (error) {
                   setFeedback({
                     ...feedback,
-                    message: `Não foi possível remover a permissão: ${error instanceof Error ? error.message : String(error)}`,
+                    message: `Não foi possível remover a permissão: ${errorMessage(error)}`,
                   });
                 } finally {
                   setBusy(false);
