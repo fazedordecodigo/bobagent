@@ -52,10 +52,6 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   );
 }
 
-export function isDirty(draft: AgentConfig, saved: AgentConfig): boolean {
-  return !deepEqual(draft, saved);
-}
-
 export function rebase<T extends object>(oldSaved: T, newSaved: T, draft: T): T {
   const result = { ...draft };
   for (const key of Object.keys(newSaved) as (keyof T)[]) {
