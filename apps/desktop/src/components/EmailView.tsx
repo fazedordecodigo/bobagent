@@ -113,9 +113,13 @@ export function DraftCard({
             className={`${btnCls} bg-sky-600 hover:bg-sky-500`}
             onClick={() => {
               setError(null);
-              save()
-                .then(() => client.request("email.drafts.send", { id: draft.id }))
-                .catch(fail("email.drafts.send_failed"));
+              save().then(
+                () =>
+                  client
+                    .request("email.drafts.send", { id: draft.id })
+                    .catch(fail("email.drafts.send_failed")),
+                fail("email.drafts.update_failed"),
+              );
             }}
           >
             Send

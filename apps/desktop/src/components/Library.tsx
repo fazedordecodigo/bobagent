@@ -186,7 +186,7 @@ export function SkillsView({ client }: { client: DaemonClient }) {
           client
             .request("skills.save", edit)
             .then(() => setEdit(null))
-            .catch(fail("skills.save_failed", { name: edit.name }));
+            .catch(fail("skills.save_failed"));
         }}
       >
         <h2 className="text-lg font-semibold">Skill</h2>
@@ -269,7 +269,7 @@ export function SkillsView({ client }: { client: DaemonClient }) {
                   setError(null);
                   client
                     .request("skills.delete", { name: s.name })
-                    .catch(fail("skills.delete_failed", { name: s.name }));
+                    .catch(fail("skills.delete_failed"));
                 }}
               >
                 Delete
