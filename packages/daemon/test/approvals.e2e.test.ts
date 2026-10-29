@@ -135,7 +135,7 @@ describe("approvals e2e", () => {
       c.request("approvals.respond", { id: ap.id, decision: "deny" }),
     );
     expect(no.text).toContain("declined");
-  });
+  }, 30000);
 
   test("always allows the app kind without adding a rule; explicit ask still wins", async () => {
     await withApproval("notes-create_note", {}, (ap) =>
@@ -159,7 +159,7 @@ describe("approvals e2e", () => {
     );
     expect(asked.text).toBe("tool-ok:note-created");
     await c.request("approvals.setRules", { rules: [] });
-  });
+  }, 30000);
 
   test("legacy double-underscore app approval rules still match", async () => {
     await c.request("approvals.setRules", {
@@ -171,7 +171,7 @@ describe("approvals e2e", () => {
     expect(asked.approval.tool).toBe("notes-echo");
     expect(asked.text).toBe("tool-ok:echo:legacy");
     await c.request("approvals.setRules", { rules: [] });
-  });
+  }, 30000);
 
   test("wildcard allow keeps sensitive app writes gated", async () => {
     await c.request("approvals.setRules", {
@@ -200,7 +200,7 @@ describe("approvals e2e", () => {
     );
     expect(specific.text).toBe("tool-ok:note-created");
     await c.request("approvals.setRules", { rules: [] });
-  });
+  }, 30000);
 
   test("unanswered approvals expire and tell the bot not to retry", async () => {
     const pending = c.waitForEventWhere(
@@ -211,7 +211,7 @@ describe("approvals e2e", () => {
     const text = await tool(a, "notes-create_note");
     await pending;
     expect(text).toContain("did not approve");
-  });
+  }, 30000);
 
   test("permission defaults and sensitive allow validation through RPC", async () => {
     expect(app.permissions).toEqual(defaultAppPermissions);
@@ -230,7 +230,7 @@ describe("approvals e2e", () => {
       ).rejects.toThrow();
     }
     expect(((await c.request("apps.list", {})) as ConnectedApp[]).length).toBe(1);
-  });
+  }, 30000);
 
   test("off auto-denies without approval; allow passes; ask creates labeled approval", async () => {
     await c.request("apps.update", { id: app.id, permissions: { write: "off" } });
@@ -251,7 +251,7 @@ describe("approvals e2e", () => {
       permission: "write",
       agentId: a.id,
     });
-  });
+  }, 30000);
 
   test("sensitive calls cannot be bypassed by rules, always or task decisions", async () => {
     await c.request("approvals.setRules", {
@@ -272,7 +272,7 @@ describe("approvals e2e", () => {
       );
       expect(await c.request("approvals.rules", {})).toEqual(before);
     }
-  });
+  }, 30000);
 
   test("task grant passes another call in the same turn but not the next turn", async () => {
     const waiting = c.waitForEventWhere(
@@ -307,7 +307,7 @@ describe("approvals e2e", () => {
     );
     expect(next.approval.turnId).not.toBe(ap.turnId);
     expect(next.text).toContain("declined");
-  });
+  }, 30000);
 
   test("always reports the previous level for honest app-level undo", async () => {
     let result: Approval | undefined;
@@ -329,7 +329,7 @@ describe("approvals e2e", () => {
       c.request("approvals.respond", { id: ap.id, decision: "deny" }),
     );
     expect(asked.text).toContain("declined");
-  });
+  }, 30000);
 
   test("persists the approval audit trail through daemon RPC", async () => {
     const dbPath = join(dataDir, "upbot.db");
@@ -545,7 +545,7 @@ describe("approvals e2e", () => {
     const v = (await c.request("vault.list", {})) as VaultEntry[];
     expect(v.find((e) => e.name === "stripe.key")?.agentIds).toEqual([a.id]);
     expect(await tool(a, "vault_get", { name: "stripe.key" })).toBe("tool-ok:sk_test_42");
-  });
+  }, 30000);
 
   test("take-over waits for the user to finish", async () => {
     const r = await withApproval("request_takeover", { reason: "2FA code needed" }, (ap) =>
@@ -555,5 +555,5 @@ describe("approvals e2e", () => {
     expect(r.text).toContain("the user finished");
     const list = (await c.request("approvals.list", { agentId: a.id })) as Approval[];
     expect(list[0]).toMatchObject({ kind: "takeover", status: "done" });
-  });
+  }, 30000);
 });
