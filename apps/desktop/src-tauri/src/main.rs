@@ -90,13 +90,24 @@ fn spawn_daemon(app: &tauri::App) -> Result<(), String> {
                         if let Some(json) = line.strip_prefix(READY_PREFIX) {
                             match serde_json::from_str::<serde_json::Value>(json) {
                                 Ok(v) => {
-                                    let port = v["port"].as_u64().unwrap_or(0) as u16;
-                                    {
-                                        let mut inner = state.inner.lock().unwrap();
-                                        inner.conn = Some(DaemonConnection {
-                                            port,
-                                            token: token.clone(),
-                                        });
+                                    let port = v["port"]
+                                        .as_u64()
+                                        .and_then(|p| u16::try_from(p).ok())
+                                        .filter(|p| *p != 0);
+                                    match port {
+                                        Some(port) => {
+                                            let mut inner = state.inner.lock().unwrap();
+                                            inner.conn = Some(DaemonConnection {
+                                                port,
+                                                token: token.clone(),
+                                            });
+                                        }
+                                        None => {
+                                            let msg =
+                                                format!("upbotd READY has no valid port: {json}");
+                                            log::error!("{msg}");
+                                            state.inner.lock().unwrap().error = Some(msg);
+                                        }
                                     }
                                     state.ready.notify_waiters();
                                 }
@@ -115,9 +126,9 @@ fn spawn_daemon(app: &tauri::App) -> Result<(), String> {
                     log::warn!("upbotd terminated: {status:?}");
                     {
                         let mut inner = state.inner.lock().unwrap();
-                        if inner.conn.is_none() && inner.error.is_none() {
-                            inner.error = Some(format!("upbotd exited: {status:?}"));
-                        }
+                        inner.conn = None;
+                        inner.child = None;
+                        inner.error = Some(format!("upbotd exited: {status:?}"));
                     }
                     state.ready.notify_waiters();
                 }
