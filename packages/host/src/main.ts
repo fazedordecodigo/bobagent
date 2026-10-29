@@ -95,13 +95,11 @@ const safeId = (id: string) => {
   return id;
 };
 
-function which(cmd: string): string | null {
-  return Bun.which(cmd) ?? null;
-}
-
 export function firecrackerBin(): string | null {
   const local = join(ROOT, "firecracker", "firecracker");
-  return process.env.UPBOT_FIRECRACKER_BIN || (existsSync(local) ? local : which("firecracker"));
+  return (
+    process.env.UPBOT_FIRECRACKER_BIN || (existsSync(local) ? local : Bun.which("firecracker"))
+  );
 }
 
 export function buildGuestProviderEnv(
@@ -163,7 +161,7 @@ function preflight() {
   const rootfs = join(ROOT, "firecracker", "rootfs.ext4");
   const kernelImage = existsSync(kernel) ? kernel : null;
   const rootfsImage = existsSync(rootfs) ? rootfs : null;
-  const mkfsExt4 = which("mkfs.ext4");
+  const mkfsExt4 = Bun.which("mkfs.ext4");
   let guestHelperCurrent: boolean | null = null;
   const helperStampPath = join(ROOT, "firecracker", "guest-helper.sha256");
   if (existsSync(helperStampPath)) {
@@ -177,7 +175,7 @@ function preflight() {
     }
   }
   const providers: Record<string, string | null> = {};
-  for (const c of PROVIDER_CLIS) providers[c] = which(c);
+  for (const c of PROVIDER_CLIS) providers[c] = Bun.which(c);
   const report = {
     root: ROOT,
     os: platform(),
@@ -550,7 +548,7 @@ function ensureWorkspaceDisk(path: string): void {
   if (existsSync(path)) return;
   const size = Number(process.env.UPBOT_VM_WORKSPACE_MIB ?? 8192);
   if (!Number.isInteger(size) || size < 1) die("UPBOT_VM_WORKSPACE_MIB must be a positive integer");
-  const mkfs = which("mkfs.ext4") ?? die("mkfs.ext4 not found; install e2fsprogs on the host");
+  const mkfs = Bun.which("mkfs.ext4") ?? die("mkfs.ext4 not found; install e2fsprogs on the host");
   const truncate = spawnSync("truncate", ["-s", `${size}M`, path]);
   if (truncate.status !== 0)
     die(`cannot create workspace disk: ${truncate.stderr.toString().trim()}`);
@@ -610,9 +608,9 @@ async function runFirecracker(spec: RunSpec, rest: Buffer) {
   const consoleTail = () => (existsSync(logPath) ? readFileSync(logPath, "utf8").slice(-1500) : "");
   const log = openSync(logPath, "w");
   const vmArgs = ["--no-api", "--config-file", configPath, "--id", id];
-  const setpriv = which("setpriv");
+  const setpriv = Bun.which("setpriv");
   const vm: ChildProcess = spawn(
-    setpriv ?? (fc as string),
+    setpriv ?? fc,
     setpriv ? ["--pdeathsig", "KILL", "--", fc, ...vmArgs] : vmArgs,
     {
       stdio: ["ignore", log, log],

@@ -1,5 +1,6 @@
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useState } from "react";
+import { errorMessage } from "../lib/errors";
 
 export function UpdateButton() {
   const [state, setState] = useState<
@@ -22,18 +23,18 @@ export function UpdateButton() {
       setUpdate(u);
       setState(u ? "available" : "none");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
       setState("error");
     }
   };
   const label = {
-    idle: "Check for updates",
-    checking: "Checking…",
-    none: "Up to date",
-    available: `Install ${update?.version ?? "update"}`,
-    installing: "Installing…",
-    done: "Restart UpBot to finish",
-    error: "Update check failed",
+    idle: "Verificar atualizações",
+    checking: "Verificando…",
+    none: "Tudo atualizado",
+    available: `Instalar ${update?.version ?? "atualização"}`,
+    installing: "Instalando…",
+    done: "Reinicie o UpBot para concluir",
+    error: "Falha ao verificar atualizações",
   }[state];
   return (
     <button

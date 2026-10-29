@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -233,5 +234,60 @@ describe("email connector e2e", () => {
     expect(received).toHaveLength(1);
     const log = readFileSync(join(stateDir, "log.jsonl"), "utf8");
     expect(log).not.toContain(APP_PASSWORD);
+  });
+
+  test("delete is atomic when vault cleanup fails", async () => {
+    const doomed = (await c.request("email.accounts.save", {
+      provider: "custom",
+      label: "Doomed",
+      address: "doomed@example.com",
+      password: "doomed-secret",
+      imapHost: "127.0.0.1",
+      imapPort: 993,
+      smtpHost: "127.0.0.1",
+      smtpPort,
+      smtpSecure: false,
+    })) as EmailAccount;
+    const db = new Database(join(dataDir, "upbot.db"));
+    try {
+      db.exec("PRAGMA busy_timeout=5000");
+      db.exec(
+        `CREATE TRIGGER fail_email_vault_delete BEFORE DELETE ON vault WHEN old.name = 'email.${doomed.id}.password' BEGIN SELECT RAISE(ABORT, 'vault locked'); END;`,
+      );
+
+      const eventIndex = c.events.length;
+      await expect(c.request("email.accounts.delete", { id: doomed.id })).rejects.toMatchObject({
+        code: "internal",
+      });
+      expect((await c.request("email.accounts.list", {})) as EmailAccount[]).toContainEqual(
+        expect.objectContaining({ id: doomed.id, hasPassword: true }),
+      );
+      expect(
+        c.events.slice(eventIndex).some((event) => event.event === "email.accounts.changed"),
+      ).toBe(false);
+
+      db.exec("DROP TRIGGER fail_email_vault_delete");
+      const previousEvents = new Set(
+        c.events
+          .filter((event) => event.event === "email.accounts.changed")
+          .map((event) => event.data),
+      );
+      const changed = c.waitForEventWhere(
+        "email.accounts.changed",
+        (data) => !previousEvents.has(data),
+      );
+      await c.request("email.accounts.delete", { id: doomed.id });
+      await changed;
+
+      expect((await c.request("email.accounts.list", {})) as EmailAccount[]).not.toContainEqual(
+        expect.objectContaining({ id: doomed.id }),
+      );
+      const row = db
+        .query("SELECT count(*) AS n FROM vault WHERE name = ?")
+        .get(`email.${doomed.id}.password`) as { n: number };
+      expect(row.n).toBe(0);
+    } finally {
+      db.close();
+    }
   });
 });

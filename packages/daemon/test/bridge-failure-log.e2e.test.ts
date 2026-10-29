@@ -198,8 +198,8 @@ describe("bridge failure diagnostics", () => {
     expect(rejected.stderr).not.toContain("sk-live-SENTINEL");
 
     const fingerprint = createHash("sha256").update(wrongToken).digest("hex").slice(0, 8);
-    const rejectionLog = `bridge: rejected /bridge request (unauthorized; token fp ${fingerprint})`;
-    await waitFor(() => daemonStderr.includes(rejectionLog));
+    await waitFor(() => daemonStderr.includes(fingerprint));
+    expect(daemonStderr).toContain("auth.rejected");
     expect(daemonStderr).not.toContain(wrongToken);
 
     const realFailure = await runMcpBridge(spec, {}, [

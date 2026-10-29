@@ -43,7 +43,8 @@ The bridge appends app tools to `tools/list` as `<slug>-<tool>` and routes calls
 Migration 19 adds `permissions_json`: `read | write | send | pay | book | del` map to
 `off | ask | allow`. New and migrated apps default to read=allow and all others=ask.
 Sensitive kinds (send/pay/book/del) reject allow in both protocol schemas and AppsService.
-`apps.connect/update` accept partial permissions. `src/app-permissions.ts` classifies the
+`apps.connect/update` accept partial permissions. `classifyAppTool` in `@upbot/protocol`
+(shared with the desktop UI) classifies the
 operation after `<slug>-` on underscores, hyphens and camelCase. The leading verb determines
 the kind; verbs after and/or/then can escalate it (del > pay > book > send > write > read).
 Read-object nouns do not escalate. An unknown leading token falls back to known verbs
@@ -110,6 +111,8 @@ old versions in `.history/v<n>.html`. Served at `GET /pages/<id>?token=<viewToke
 per daemon start, CSP `default-src 'none'`, no network); UI `PagesView` (sidebar "Pages")
 shows them in `<iframe sandbox="allow-scripts">` (Tauri CSP `frame-src http://127.0.0.1:*`).
 RPC `pages.list/delete`, event `pages.changed`. Tests: `test/pages.e2e.test.ts`.
+Titles are capped at 200 and descriptions at 1000 UTF-16 units on create and update
+(including legacy values), without splitting a surrogate pair.
 
 ## Group chat + navigation (UpBot)
 
@@ -256,7 +259,7 @@ spawns the real bridge and calls the tool).
 
 `src/channels.ts` (`ChannelService`, migration 6: `channels`, `channel_members`,
 `channel_messages`, `queue.channel_id` + `queue.prompt`). RPC `channels.list/create/
-history/post/stop/resume/archive/restore/reassign/setMembers`; events `channel.created`,
+history/post/stop/resume/archive/restore/reassign`; events `channel.created`,
 `channel.updated`, `channel.message`. A user post goes to the owner (default: first
 member) as a queue item whose provider prompt (`queue.prompt`) carries a
 `<channel_context>` block with role and recent transcript. When a channel turn ends
@@ -283,7 +286,9 @@ Tests: `test/usage.e2e.test.ts`.
 
 ## Avatars, memories, skills, agent creation (Phase 8)
 
-`Agent.avatar` (`{emoji,color}` or null, `agents.avatar_json`, migration 8). `agents.draft
+`Agent.avatar` (`{emoji,color}`, `{icon}` with `sym|mail|receipt|plane|chart|cal|sheet`, or
+null; `agents.avatar_json`, migration 8). `agents.restore {id}` restores a soft-deleted agent
+and emits `agent.created` so clients add it back to their lists. `agents.draft
 {prompt}` (`src/draft.ts`, deterministic) proposes name/instructions/avatar for the create
 form. Memories: `memories` table, `MemoryStore` (`src/memories.ts`), RPC
 `memories.list/add/update/delete`, event `memories.changed`. Skills library:
@@ -292,14 +297,17 @@ in `.history/` (`src/skills.ts`), RPC `skills.list/get/save/delete`, event `skil
 Bridge tools: `remember`, `forget`, `list_memories`, `list_skills`, `read_skill`,
 `create_skill`, `revise_skill`, `create_agent`. The first prompt of every fresh session is
 prefixed with `<agent_memories>` and `<skills_library>` (index only). UI:
-`components/Library.tsx`. Tests: `test/phase8.e2e.test.ts`.
+`components/Library.tsx`; the saved agent configuration screen is
+`apps/desktop/src/components/AgentConfigScreen.tsx`. Tests: `test/phase8.e2e.test.ts`.
 
 ## Routines + attachments (Phase 9)
 
 Routines (`src/routines.ts`, migration 9: `routines`, `routine_runs`) are saved prompts sent
 to an agent with `trigger` schedule|webhook|manual. Schedules: `every <n>m|h|d`, `daily HH:MM`,
 `weekly <day> HH:MM` (local time); the scheduler ticks every `UPBOT_ROUTINE_TICK_MS`
-(default 30000) and collapses missed runs into one. Webhooks: `POST /hooks/<routineId>` with
+(default 30000), skips soft-deleted agents, and collapses missed runs into one. Manual and
+webhook triggers also reject routines whose agent is soft-deleted; restoring the agent resumes
+scheduled runs. Webhooks: `POST /hooks/<routineId>` with
 `Authorization: Bearer <webhookToken>` (per-routine token; Origin rejected), body passed as
 `<webhook_payload>` (20 KB cap). RPC `routines.list/create/update/delete/run/runs`, events
 `routine.updated`/`routine.deleted`. The prompt is wrapped in `<routine name trigger>`;
@@ -329,8 +337,9 @@ is `UPBOT_VAULT_KEY` (64 hex, tests), macOS Keychain (service `UpBot`, account `
 an existing `<data-dir>/vault.key`, then Windows DPAPI or Linux Secret Service. Linux writes
 `vault.key.location` after a successful Secret Service store so a locked/unavailable keyring
 cannot silently orphan secrets; when secure storage is unavailable, a 0600 plaintext key file
-is used with a warning. Existing plaintext keys are kept without migration. Per-secret agent
-allowlist. RPC
+is used with a warning. Fallback diagnostics are covered by `test/vault-platform.test.ts` and
+`test/vault-fallback.e2e.test.ts`. Existing plaintext keys are kept without migration.
+Per-secret agent allowlist. RPC
 `vault.list/set/setAccess/delete` (values never returned), event `vault.changed`; bridge
 `vault_list`, `vault_get`. Connectors (`src/connectors.ts`) use shared secrets without
 returning them: `connector.github` -> `github_api` (REST proxy, token redacted,
@@ -341,7 +350,7 @@ Computer Use (`src/computer.ts`, macOS): off per agent until `computer.setAccess
 `computer_screenshot` (screencapture), `computer_click` (CoreGraphics via JXA),
 `computer_type`, `computer_key` (System Events, whitelisted keys/modifiers);
 `UPBOT_COMPUTER_DRYRUN=<file>` logs commands instead (tests).
-Voice (`src/voice.ts`): `voice.speak/stop` (`say`, or `UPBOT_TTS_COMMAND` with text on
+Voice (`src/voice.ts`): `voice.speak` (`say`, or `UPBOT_TTS_COMMAND` with text on
 stdin), `voice.transcribe` (`UPBOT_STT_COMMAND` with `{file}`, or `whisper` on PATH),
 `voice.status`. UI: Vault view, Computer Use toggle, composer mic, read-aloud button;
 `src-tauri/Info.plist` has the microphone usage string. Tests: `test/phase11.e2e.test.ts`.
@@ -356,9 +365,10 @@ from `vault.list`, never shared with agents). Only `allowedUsers` reach the agen
 their id back); `@AgentName text` routes to another agent; in Slack/Discord channels only
 mentions count, DMs always. Prompt is wrapped in `<external_message>`; the queue
 `meta_json.gateway` drives the reply on `turn.ended`. RPC `gateways.list/create/update/delete`,
-events `gateway.updated/deleted`; UI `GatewaysView`. Test base URLs:
+events `gateway.updated/deleted`; UI `GatewaysView`. Daemon shutdown (SIGTERM/SIGINT/stdin EOF)
+calls `GatewayService.stopAll()` before closing runtimes. Test base URLs:
 `UPBOT_TELEGRAM_API`, `UPBOT_SLACK_API`, `UPBOT_DISCORD_API`.
-Tests: `test/gateways.e2e.test.ts`.
+Tests: `test/gateways.e2e.test.ts`, `test/gateways-shutdown.e2e.test.ts`.
 
 ## Marketplace (Phase 12b)
 
@@ -387,11 +397,20 @@ RPC `mobile.status/enable/pair/revoke`; UI `MobileView`. Tests: `test/mobile.e2e
 self-hostable Bun relay: admin token (`RELAY_ADMIN_TOKEN` or `<data>/admin-token`) manages
 members (`POST/GET /members`, `DELETE /members/:id`, tokens stored hashed in `team.json`);
 members connect to `/ws?token=` and exchange `share` / `send` / `incoming` / `reply` frames.
+Share entries are validated (string id/name/provider; avatar via protocol `AgentAvatar`, otherwise null).
 No chat content is stored on the relay. Daemon side `src/team.ts` (`settings.team`, token in
 the vault as `team.token`, hidden from `vault.list`, migration 13 `team_messages`): shares
 selected agents, runs incoming messages as `<team_message>` turns and replies on `turn.ended`.
+An incoming row is `completed` once the reply is handed to an open relay socket; if the socket
+is down it is `failed` and logged (`team reply not delivered`). The relay has no delivery ack
+and drops replies to offline members, so a sender's `out` row still `pending` after
+`UPBOT_TEAM_REPLY_TTL_MS` (default 30 min; checked at start and periodically) becomes `failed`;
+a late reply still overwrites it. No relay protocol change, nothing stored on the relay.
 RPC `team.status/connect/disconnect/share/send/messages`, events `team.updated/message`;
-UI `TeamView`. Tests: `test/team.e2e.test.ts` (spawns the relay).
+UI `TeamView`. Tests: `test/team.e2e.test.ts` (spawns the relay). Relay audit logs are JSON
+lines on stderr and never include member-supplied identifiers (only relay-known member IDs,
+fixed route labels, and socket IP); limits are 20 lines per actor per window across event types,
+with periodic `relay.audit_suppressed` summaries (`RELAY_AUDIT_WINDOW_MS`).
 
 ## CI, releases, updates, branding
 
@@ -411,7 +430,7 @@ UI `TeamView`. Tests: `test/team.e2e.test.ts` (spawns the relay).
 ## Remote hosts, Firecracker, subagents
 
 `src/remote/hosts.ts` (`HostStore`, migration 14: `hosts`, `agent_placement`, `subagents`).
-RPC `hosts.list/create/update/delete/install/check`, `placements.list/set`, `subagents.list`;
+RPC `hosts.list/create/delete/install/check`, `placements.list/set`, `subagents.list`;
 events `hosts.changed`, `placement.updated`, `subagent.updated`; UI `components/HostsView.tsx`
 (Settings → Hosts). SSH runs the system `ssh` with `BatchMode=yes`,
 `StrictHostKeyChecking=accept-new`, keepalives, `-p`, optional `-i`, then `--` and the target

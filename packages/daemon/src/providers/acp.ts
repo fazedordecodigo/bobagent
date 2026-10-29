@@ -4,6 +4,7 @@ import * as acp from "@agentclientprotocol/sdk";
 import type { ConfigOption, ProviderId } from "@upbot/protocol";
 import { resolveCommand, spawnEnv } from "../env/login-path";
 import { spawnChild, waitForChildSpawn } from "../env/spawn";
+import { envPositiveNumber } from "../env/vars";
 import {
   AUTH_RE,
   authMessage,
@@ -54,10 +55,7 @@ async function boundedRequest<T>(
 }
 
 function opencodeFirstActivityTimeoutMs(): number {
-  const configured = Number(process.env.UPBOT_ACP_FIRST_ACTIVITY_MS);
-  return Number.isFinite(configured) && configured > 0
-    ? configured
-    : DEFAULT_OPENCODE_FIRST_ACTIVITY_MS;
+  return envPositiveNumber("UPBOT_ACP_FIRST_ACTIVITY_MS", DEFAULT_OPENCODE_FIRST_ACTIVITY_MS);
 }
 
 type AcpActivityMonitor = {
@@ -85,10 +83,11 @@ function isPromptProgressUpdate(params: unknown): boolean {
 
 function observeAgentRequests(
   stream: ReadableStream<Uint8Array>,
-  sessionId: () => string | null,
-  onRequest: () => void,
+  activity: AcpActivityMonitor,
 ): void {
   const observeLine = (line: string) => {
+    const handler = activity.promptHandler;
+    if (!handler) return;
     let message: unknown;
     try {
       message = JSON.parse(line);
@@ -103,7 +102,7 @@ function observeAgentRequests(
     };
     if (typeof frame.method !== "string" || frame.id === undefined) return;
     const requestSessionId = frame.params?.sessionId;
-    if (requestSessionId === undefined || requestSessionId === sessionId()) onRequest();
+    if (requestSessionId === undefined || requestSessionId === activity.sessionId) handler();
   };
 
   void (async () => {
@@ -114,12 +113,14 @@ function observeAgentRequests(
       for (;;) {
         const { done, value } = await reader.read();
         buffer += decoder.decode(value, { stream: !done });
+        let lineStart = 0;
         let newline = buffer.indexOf("\n");
         while (newline >= 0) {
-          observeLine(buffer.slice(0, newline));
-          buffer = buffer.slice(newline + 1);
-          newline = buffer.indexOf("\n");
+          observeLine(buffer.slice(lineStart, newline));
+          lineStart = newline + 1;
+          newline = buffer.indexOf("\n", lineStart);
         }
+        buffer = buffer.slice(lineStart);
         if (done) {
           if (buffer.trim()) observeLine(buffer);
           return;
@@ -579,14 +580,12 @@ export class AcpDriver implements ProviderDriver {
 
     const stdoutNode = child.stdout!;
     const stdoutStream = Readable.toWeb(stdoutNode) as unknown as ReadableStream<Uint8Array>;
-    const [providerStream, activityStream] = stdoutStream.tee();
-    observeAgentRequests(
-      activityStream,
-      () => activity.sessionId,
-      () => {
-        activity.promptHandler?.();
-      },
-    );
+    let providerStream = stdoutStream;
+    if (this.provider === "opencode") {
+      const [main, activityStream] = stdoutStream.tee();
+      providerStream = main;
+      observeAgentRequests(activityStream, activity);
+    }
     const stream = acp.ndJsonStream(
       Writable.toWeb(child.stdin!) as WritableStream<Uint8Array>,
       providerStream,
