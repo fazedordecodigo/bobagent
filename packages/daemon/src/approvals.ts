@@ -158,12 +158,10 @@ export class ApprovalService {
         if (p.decision === "deny") return this.finish(a.id, "denied")!;
         if (!p.value) throw new RpcError("bad_request", "enter the secret value");
         const name = a.secretName!;
-        let agentIds = [a.agentId];
-        try {
-          const existing = this.vault.list().find((v) => v.name === name);
-          if (existing) agentIds = [...new Set([...existing.agentIds, a.agentId])];
-        } catch {}
+        const existing = this.vault.get(name);
+        const agentIds = existing ? [...new Set([...existing.agentIds, a.agentId])] : [a.agentId];
         this.vault.set(name, p.value, agentIds);
+        this.broadcast("vault.changed", {});
         return this.finish(a.id, "approved")!;
       }
       if (a.kind === "takeover")
