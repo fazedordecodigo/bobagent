@@ -2,13 +2,16 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, ChatItem, ConfigOption, PendingPermission, Turn } from "@upbot/protocol";
+import type { Agent } from "@upbot/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
+  lastAgentText,
   readLog,
   readPids,
+  sendAndWait,
   startDaemon,
+  stopDaemon,
   stopTestChildren,
   tmp,
   waitForPidDead,
@@ -68,23 +71,12 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
   });
 
   const newAgent = async (name: string) =>
-    (await c.request("agents.create", { name, provider: cs.provider, instructions: "" })) as Agent;
+    c.request("agents.create", { name, provider: cs.provider, instructions: "" });
 
-  async function turn(agentId: string, text: string, timeout = 15000): Promise<Turn> {
-    const { queueId } = (await c.request("chat.send", { agentId, text })) as { queueId: string };
-    return (await c.waitForEventWhere(
-      "turn.ended",
-      (d) => (d as Turn).queueId === queueId,
-      timeout,
-    )) as Turn;
-  }
+  const turn = (agentId: string, text: string, timeout = 15000) =>
+    sendAndWait(c, agentId, text, timeout);
 
-  async function lastAgentText(agentId: string): Promise<string> {
-    const h = (await c.request("chat.history", { agentId })) as { items: ChatItem[] };
-    const msgs = h.items.filter((i) => i.kind === "agent_message");
-    const last = msgs[msgs.length - 1];
-    return last && "text" in last ? last.text : "";
-  }
+  const agentText = (agentId: string) => lastAgentText(c, agentId);
 
   function persistedSessionId(agentId: string): string | null {
     const db = new Database(join(dataDir, "upbot.db"), { readonly: true });
@@ -140,12 +132,7 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
   });
 
   afterAll(async () => {
-    c?.close();
-    try {
-      daemon.proc.kill("SIGKILL");
-    } catch {}
-    await daemon.proc.exited;
-    await stopTestChildren(stateDir);
+    await stopDaemon(daemon, c, stateDir);
     for (const d of [dataDir, agentsRoot, stateDir])
       rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
@@ -154,17 +141,14 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
     const a = await newAgent("Echo");
     const t = await turn(a.id, "echo:hello native");
     expect(t.status).toBe("completed");
-    expect(await lastAgentText(a.id)).toBe("hello native");
+    expect(await agentText(a.id)).toBe("hello native");
     const t2 = await turn(a.id, "think:deep");
     expect(t2.status).toBe("completed");
-    const h = (await c.request("chat.history", { agentId: a.id })) as { items: ChatItem[] };
+    const h = await c.request("chat.history", { agentId: a.id });
     const thoughts = h.items.filter((i) => i.kind === "agent_thought" && i.turnId === t2.id);
     expect(thoughts.map((i) => ("text" in i ? i.text : ""))).toEqual(["pondering"]);
-    expect(await lastAgentText(a.id)).toBe("deep");
-    const usage = (await c.request("agents.usage", { agentId: a.id })) as {
-      inputTokens: number;
-      contextWindow: number | null;
-    };
+    expect(await agentText(a.id)).toBe("deep");
+    const usage = await c.request("agents.usage", { agentId: a.id });
     expect(usage.inputTokens).toBeGreaterThan(0);
     expect(usage.contextWindow).toBe(cs.provider === "claude" ? 200000 : 258000);
     const log = readLog(stateDir);
@@ -183,7 +167,7 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
   test("multi-byte UTF-8 split across stdout chunks is decoded intact", async () => {
     const a = await newAgent("UTF-8 split");
     const t = await turn(a.id, "split:olá 🎉 ünïcödé");
-    const text = await lastAgentText(a.id);
+    const text = await agentText(a.id);
     expect(t.status).toBe("completed");
     expect(text).toBe("olá 🎉 ünïcödé");
     expect(text).not.toContain("\uFFFD");
@@ -197,10 +181,7 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
     test(`tool permission: ${label}`, async () => {
       const a = await newAgent(`Tool ${label}`);
       const ended = turn(a.id, "tool");
-      const pending = (await c.waitForEventWhere(
-        "permission.requested",
-        (d) => (d as PendingPermission).agentId === a.id,
-      )) as PendingPermission;
+      const pending = await c.waitForEventWhere("permission.requested", (d) => d.agentId === a.id);
       expect(pending.title).toContain("ls -la");
       expect(pending.toolKind).toBe("execute");
       expect(pending.options.map((o) => o.kind)).toEqual([
@@ -211,8 +192,8 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
       await c.request("permissions.respond", { requestId: pending.requestId, optionId: pick(cs) });
       const t = await ended;
       expect(t.status).toBe("completed");
-      expect(await lastAgentText(a.id)).toBe(reply(cs));
-      const h = (await c.request("chat.history", { agentId: a.id })) as { items: ChatItem[] };
+      expect(await agentText(a.id)).toBe(reply(cs));
+      const h = await c.request("chat.history", { agentId: a.id });
       const tool = h.items.find((i) => i.kind === "tool_call");
       expect(tool && "status" in tool ? tool.status : null).toBe(
         label === "deny" ? "failed" : "completed",
@@ -222,25 +203,19 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
 
   test("cancel interrupts a running turn", async () => {
     const a = await newAgent("Slow");
-    const { queueId } = (await c.request("chat.send", { agentId: a.id, text: "slow" })) as {
-      queueId: string;
-    };
-    await c.waitForEventWhere("item.delta", (d) => (d as { agentId: string }).agentId === a.id);
+    const { queueId } = await c.request("chat.send", { agentId: a.id, text: "slow" });
+    await c.waitForEventWhere("item.delta", (d) => d.agentId === a.id);
     await c.request("chat.cancel", { agentId: a.id });
-    const t = (await c.waitForEventWhere(
-      "turn.ended",
-      (d) => (d as Turn).queueId === queueId,
-      2500,
-    )) as Turn;
+    const t = await c.waitForEventWhere("turn.ended", (d) => d.queueId === queueId, 2500);
     expect(t.status).toBe("cancelled");
     expect((await turn(a.id, "echo:after")).status).toBe("completed");
   });
 
   test("config options: mode + model applied to the provider", async () => {
     const a = await newAgent("Config");
-    const { configOptions: opts } = (await c.request("agents.configOptions", {
+    const { configOptions: opts } = await c.request("agents.configOptions", {
       agentId: a.id,
-    })) as { configOptions: ConfigOption[] };
+    });
     const mode = opts.find((o) => o.id === "mode");
     const model = opts.find((o) => o.id === "model");
     expect(mode?.currentValue).toBe(cs.provider === "claude" ? "default" : "auto");
@@ -251,16 +226,16 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
     const altMode = cs.provider === "claude" ? "acceptEdits" : "read-only";
     await c.request("agents.setConfig", { agentId: a.id, configId: "mode", value: altMode });
     await turn(a.id, "whoami");
-    const who = await lastAgentText(a.id);
+    const who = await agentText(a.id);
     expect(who).toContain(`model=${cs.model.to}`);
     expect(who).toContain(cs.provider === "claude" ? "mode=acceptEdits" : "sandbox=readOnly");
   });
 
   test("clearing a model config starts a fresh provider session", async () => {
     const a = await newAgent("Clear model");
-    const { configOptions } = (await c.request("agents.configOptions", {
+    const { configOptions } = await c.request("agents.configOptions", {
       agentId: a.id,
-    })) as { configOptions: ConfigOption[] };
+    });
     const model = configOptions.find((option) => option.id === "model");
     expect(model?.options.some((option) => option.value === cs.model.to)).toBe(true);
     await c.request("agents.setConfig", {
@@ -302,7 +277,7 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
     await turn(a.id, "echo:first");
     await restartDaemon();
     await turn(a.id, "whoami");
-    const who = await lastAgentText(a.id);
+    const who = await agentText(a.id);
     const log = readLog(stateDir);
     if (cs.provider === "claude") {
       const argvs = log.filter((l) => l.method === "argv").map((l) => l.params as string[]);
@@ -334,7 +309,7 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
     const stderrChunks = await restartDaemon();
     const t = await turn(a.id, "whoami");
     expect(t.status).toBe("completed");
-    const who = await lastAgentText(a.id);
+    const who = await agentText(a.id);
     expect(who).not.toContain(`=${oldSessionId}`);
     const log = readLog(stateDir);
     let freshSessionId: string;
@@ -385,18 +360,13 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
     expect(stderr).toContain("provider.resume_failed");
 
     rmSync(join(stateDir, "fail-start"));
-    const { queueId } = (await c.request("chat.send", { agentId: a.id, text: "whoami" })) as {
-      queueId: string;
-    };
-    const retryTurn = c.waitForEventWhere(
-      "turn.ended",
-      (d) => (d as Turn).queueId === queueId,
-    ) as Promise<Turn>;
+    const { queueId } = await c.request("chat.send", { agentId: a.id, text: "whoami" });
+    const retryTurn = c.waitForEventWhere("turn.ended", (d) => d.queueId === queueId);
     const queue = (await c.request("queue.get", { agentId: a.id })) as { paused: boolean };
     if (queue.paused) await c.request("queue.resume", { agentId: a.id });
     const completed = await retryTurn;
     expect(completed.status).toBe("completed");
-    const who = await lastAgentText(a.id);
+    const who = await agentText(a.id);
     expect(who).toContain(
       cs.provider === "claude" ? `session=${oldSessionId}` : `thread=${oldSessionId}`,
     );
@@ -437,18 +407,13 @@ describe("codex signed out", () => {
     });
     const c = await DaemonClient.connect(d.port, TOKEN);
     try {
-      const a = (await c.request("agents.create", {
+      const a = await c.request("agents.create", {
         name: "x",
         provider: "codex",
         instructions: "",
-      })) as Agent;
-      const { queueId } = (await c.request("chat.send", { agentId: a.id, text: "echo:x" })) as {
-        queueId: string;
-      };
-      const t = (await c.waitForEventWhere(
-        "turn.ended",
-        (e) => (e as Turn).queueId === queueId,
-      )) as Turn;
+      });
+      const { queueId } = await c.request("chat.send", { agentId: a.id, text: "echo:x" });
+      const t = await c.waitForEventWhere("turn.ended", (e) => e.queueId === queueId);
       expect(t.status).toBe("failed");
       expect(t.error).toContain("codex login");
     } finally {

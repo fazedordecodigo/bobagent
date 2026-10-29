@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, ChatItem, PendingPermission, Turn } from "@upbot/protocol";
+import type { Agent, ChatItem, ProviderId, Turn } from "@upbot/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -11,7 +11,7 @@ import {
   readLog,
   readPids,
   startDaemon,
-  stopTestChildren,
+  stopDaemon,
   tmp,
   waitForExit,
   waitForPidDead,
@@ -26,12 +26,12 @@ describe("chat e2e (fake acp agent)", () => {
   let daemon: DaemonHandle;
   let c: DaemonClient;
 
-  async function newAgent(name: string, provider: string, instructions = ""): Promise<Agent> {
-    return (await c.request("agents.create", { name, provider, instructions })) as Agent;
+  async function newAgent(name: string, provider: ProviderId, instructions = ""): Promise<Agent> {
+    return c.request("agents.create", { name, provider, instructions });
   }
 
   async function send(agentId: string, text: string): Promise<string> {
-    const res = (await c.request("chat.send", { agentId, text })) as { queueId: string };
+    const res = await c.request("chat.send", { agentId, text });
     (lastQueueId.get(agentId) ?? lastQueueId.set(agentId, []).get(agentId)!).push(res.queueId);
     return res.queueId;
   }
@@ -39,19 +39,15 @@ describe("chat e2e (fake acp agent)", () => {
   const lastQueueId = new Map<string, string[]>();
   async function waitTurnEnd(agentId: string, timeout = 15000, queueId?: string): Promise<Turn> {
     const qid = queueId ?? lastQueueId.get(agentId)?.shift();
-    return (await c.waitForEventWhere(
+    return c.waitForEventWhere(
       "turn.ended",
-      (d) => (d as Turn).agentId === agentId && (qid === undefined || (d as Turn).queueId === qid),
+      (d) => d.agentId === agentId && (qid === undefined || d.queueId === qid),
       timeout,
-    )) as Turn;
+    );
   }
 
-  async function history(agentId: string): Promise<{
-    items: ChatItem[];
-    turns: Turn[];
-    hasMore: boolean;
-  }> {
-    return (await c.request("chat.history", { agentId })) as never;
+  async function history(agentId: string) {
+    return c.request("chat.history", { agentId });
   }
 
   function expectSeqPrefix(text: string): number {
@@ -94,12 +90,7 @@ describe("chat e2e (fake acp agent)", () => {
   });
 
   afterAll(async () => {
-    c?.close();
-    try {
-      daemon.proc.kill("SIGKILL");
-    } catch {}
-    await daemon.proc.exited;
-    await stopTestChildren(stateDir);
+    await stopDaemon(daemon, c, stateDir);
     rmSync(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     rmSync(agentsRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     rmSync(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
@@ -132,7 +123,7 @@ describe("chat e2e (fake acp agent)", () => {
     expect(h.items[1]).toMatchObject({ kind: "agent_message", text: "hello world" });
     expect(h.turns[0]?.status).toBe("completed");
 
-    const statuses = (await c.request("agents.statuses", {})) as Record<string, { status: string }>;
+    const statuses = await c.request("agents.statuses", {});
     expect(statuses[agent.id]?.status).toBe("idle");
 
     // env leak check: the provider child saw no UPBOT_* var and no token
@@ -259,17 +250,17 @@ describe("chat e2e (fake acp agent)", () => {
   test("permission flow: requested, listed, respond, resolved", async () => {
     const agent = await newAgent("Perm", "devin");
     await send(agent.id, "tool");
-    const pending = (await c.waitForEventWhere(
+    const pending = await c.waitForEventWhere(
       "permission.requested",
-      (d) => (d as PendingPermission).agentId === agent.id,
-    )) as PendingPermission;
+      (d) => d.agentId === agent.id,
+    );
     expect(pending.options.length).toBe(4);
 
-    const list = (await c.request("permissions.list", {})) as PendingPermission[];
+    const list = await c.request("permissions.list", {});
     expect(list.some((p) => p.requestId === pending.requestId)).toBe(true);
 
     // status while awaiting
-    const st = (await c.request("agents.statuses", {})) as Record<string, { status: string }>;
+    const st = await c.request("agents.statuses", {});
     expect(st[agent.id]?.status).toBe("awaiting_permission");
 
     // bad optionId -> bad_request, still pending
@@ -281,10 +272,10 @@ describe("chat e2e (fake acp agent)", () => {
       requestId: pending.requestId,
       optionId: "allow_once",
     });
-    const resolved = (await c.waitForEventWhere(
+    const resolved = await c.waitForEventWhere(
       "permission.resolved",
-      (d) => (d as { requestId: string }).requestId === pending.requestId,
-    )) as { optionId: string };
+      (d) => d.requestId === pending.requestId,
+    );
     expect(resolved.optionId).toBe("allow_once");
 
     const turn = await waitTurnEnd(agent.id);
@@ -344,22 +335,22 @@ describe("chat e2e (fake acp agent)", () => {
     // cancel during slow
     const agent = await newAgent("CancelSlow", "devin");
     await send(agent.id, "slow");
-    await c.waitForEventWhere("item.delta", (d) => (d as { agentId: string }).agentId === agent.id);
+    await c.waitForEventWhere("item.delta", (d) => d.agentId === agent.id);
     await c.request("chat.cancel", { agentId: agent.id });
     const t1 = await waitTurnEnd(agent.id);
     expect(t1.status).toBe("cancelled");
 
     // cancel while a permission is pending
     await send(agent.id, "tool");
-    const pending = (await c.waitForEventWhere(
+    const pending = await c.waitForEventWhere(
       "permission.requested",
-      (d) => (d as PendingPermission).agentId === agent.id,
-    )) as PendingPermission;
+      (d) => d.agentId === agent.id,
+    );
     await c.request("chat.cancel", { agentId: agent.id });
-    const resolved = (await c.waitForEventWhere(
+    const resolved = await c.waitForEventWhere(
       "permission.resolved",
-      (d) => (d as { requestId: string }).requestId === pending.requestId,
-    )) as { optionId: string | null };
+      (d) => d.requestId === pending.requestId,
+    );
     expect(resolved.optionId).toBe(null);
     const t2 = await waitTurnEnd(agent.id);
     expect(t2.status).toBe("cancelled");
@@ -368,7 +359,7 @@ describe("chat e2e (fake acp agent)", () => {
     // the tool turn, so no new pid is spawned)
     const pid = readPids(stateDir)[readPids(stateDir).length - 1]!;
     await send(agent.id, "ignorecancel");
-    await c.waitForEventWhere("turn.started", (d) => (d as Turn).agentId === agent.id);
+    await c.waitForEventWhere("turn.started", (d) => d.agentId === agent.id);
     await c.request("chat.cancel", { agentId: agent.id });
     const t3 = await waitTurnEnd(agent.id, 10000);
     expect(t3.status).toBe("cancelled");
@@ -378,18 +369,13 @@ describe("chat e2e (fake acp agent)", () => {
   test("send during a running turn enqueues instead of busy", async () => {
     const agent = await newAgent("Busy", "devin");
     await send(agent.id, "slow");
-    await c.waitForEventWhere("turn.started", (d) => (d as Turn).agentId === agent.id);
-    const res = (await c.request("chat.send", { agentId: agent.id, text: "echo:x" })) as {
-      queueId: string;
-    };
+    await c.waitForEventWhere("turn.started", (d) => d.agentId === agent.id);
+    const res = await c.request("chat.send", { agentId: agent.id, text: "echo:x" });
     expect(res.queueId).toBeTruthy();
     await c.request("chat.cancel", { agentId: agent.id });
     await waitTurnEnd(agent.id);
     // user cancel pauses the queue while items remain
-    const q = (await c.request("queue.get", { agentId: agent.id })) as {
-      paused: boolean;
-      items: { id: string }[];
-    };
+    const q = await c.request("queue.get", { agentId: agent.id });
     expect(q.paused).toBe(true);
     expect(q.items.length).toBe(1);
     // resume drains it
@@ -400,24 +386,19 @@ describe("chat e2e (fake acp agent)", () => {
   test("queue: order, remove, pause-on-stop, resume", async () => {
     const agent = await newAgent("Queue", "devin");
     await send(agent.id, "slow");
-    await c.waitForEventWhere("turn.started", (d) => (d as Turn).agentId === agent.id);
+    await c.waitForEventWhere("turn.started", (d) => d.agentId === agent.id);
     const ids: string[] = [];
     for (const t of ["echo:a", "echo:b", "echo:c"]) {
-      const r = (await c.request("chat.send", { agentId: agent.id, text: t })) as {
-        queueId: string;
-      };
+      const r = await c.request("chat.send", { agentId: agent.id, text: t });
       ids.push(r.queueId);
       (lastQueueId.get(agent.id) ?? lastQueueId.set(agent.id, []).get(agent.id)!).push(r.queueId);
     }
-    let q = (await c.request("queue.get", { agentId: agent.id })) as {
-      paused: boolean;
-      items: { id: string; text: string }[];
-    };
+    let q = await c.request("queue.get", { agentId: agent.id });
     expect(q.items.length).toBe(3);
     await c.request("queue.remove", { queueId: ids[1]! });
     await c.request("chat.cancel", { agentId: agent.id });
     await waitTurnEnd(agent.id);
-    q = (await c.request("queue.get", { agentId: agent.id })) as typeof q;
+    q = await c.request("queue.get", { agentId: agent.id });
     expect(q.paused).toBe(true);
     expect(q.items.map((i) => i.text)).toEqual(["echo:a", "echo:c"]);
     await c.request("queue.resume", { agentId: agent.id });
@@ -436,7 +417,7 @@ describe("chat e2e (fake acp agent)", () => {
     await c.request("queue.pause", { agentId: agent.id });
     await send(agent.id, "echo:p");
     await expect(
-      c.waitForEventWhere("turn.started", (d) => (d as Turn).agentId === agent.id, 500),
+      c.waitForEventWhere("turn.started", (d) => d.agentId === agent.id, 500),
     ).rejects.toThrow();
     await c.request("queue.resume", { agentId: agent.id });
     const t = await waitTurnEnd(agent.id);
@@ -449,10 +430,7 @@ describe("chat e2e (fake acp agent)", () => {
     await send(agent.id, "echo:q");
     const t = await waitTurnEnd(agent.id);
     expect(t.status).toBe("failed");
-    const q = (await c.request("queue.get", { agentId: agent.id })) as {
-      paused: boolean;
-      items: { text: string }[];
-    };
+    const q = await c.request("queue.get", { agentId: agent.id });
     expect(q.paused).toBe(true);
     expect(q.items.map((i) => i.text)).toEqual(["echo:q"]);
   });
@@ -460,7 +438,7 @@ describe("chat e2e (fake acp agent)", () => {
   test("queue: kill -9 leaves started item alone, queued item runs after restart", async () => {
     const agent = await newAgent("K9", "devin");
     await send(agent.id, "slow");
-    await c.waitForEventWhere("turn.started", (d) => (d as Turn).agentId === agent.id);
+    await c.waitForEventWhere("turn.started", (d) => d.agentId === agent.id);
     const qx = await send(agent.id, "echo:x");
     const slowPrompts = () =>
       readLog(stateDir)
@@ -479,10 +457,7 @@ describe("chat e2e (fake acp agent)", () => {
       FAKE_ACP_STATE_DIR: stateDir,
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
-    const h = (await c.request("chat.history", { agentId: agent.id })) as {
-      turns: Turn[];
-      items: ChatItem[];
-    };
+    const h = await c.request("chat.history", { agentId: agent.id });
     expect(h.turns.some((t) => t.status === "interrupted")).toBe(true);
     // queued echo:x drains automatically; slow's started item never re-runs
     const t2 = await waitTurnEnd(agent.id, 15000, qx);
@@ -497,21 +472,19 @@ describe("chat e2e (fake acp agent)", () => {
 
   test("config: configOptions, setConfig persistence, busy, invalid, defaults", async () => {
     const agent = await newAgent("Cfg", "devin");
-    const opts = (await c.request("agents.configOptions", { agentId: agent.id })) as {
-      configOptions: { id: string; category: string | null; options: { value: string }[] }[];
-    };
+    const opts = await c.request("agents.configOptions", { agentId: agent.id });
     const ids = opts.configOptions.map((o) => o.id);
     expect(ids).toEqual(expect.arrayContaining(["mode", "model"]));
 
     const updatedP = c.waitForEventWhere("agent.updated", () => true, 5000);
-    const r = (await c.request("agents.setConfig", {
+    const r = await c.request("agents.setConfig", {
       agentId: agent.id,
       configId: "model",
       value: "m2",
-    })) as { configOptions: { id: string; currentValue: string }[] };
+    });
     await updatedP;
     expect(r.configOptions.find((o) => o.id === "model")?.currentValue).toBe("m2");
-    const list = (await c.request("agents.list", {})) as Agent[];
+    const list = await c.request("agents.list", {});
     expect(list.find((a) => a.id === agent.id)?.config.model).toBe("m2");
     const beforeClear = readLog(stateDir);
     const newSessionsBeforeClear = beforeClear.filter((l) => l.method === "session/new").length;
@@ -522,8 +495,7 @@ describe("chat e2e (fake acp agent)", () => {
       value: null,
     });
     expect(
-      ((await c.request("agents.list", {})) as Agent[]).find((a) => a.id === agent.id)?.config
-        .model,
+      (await c.request("agents.list", {})).find((a) => a.id === agent.id)?.config.model,
     ).toBeUndefined();
     await send(agent.id, "echo:after model reset");
     await waitTurnEnd(agent.id);
@@ -539,7 +511,7 @@ describe("chat e2e (fake acp agent)", () => {
     ).rejects.toMatchObject({ code: "bad_request" });
 
     await send(agent.id, "slow");
-    await c.waitForEventWhere("turn.started", (d) => (d as Turn).agentId === agent.id);
+    await c.waitForEventWhere("turn.started", (d) => d.agentId === agent.id);
     await expect(
       c.request("agents.setConfig", { agentId: agent.id, configId: "model", value: "m1" }),
     ).rejects.toMatchObject({ code: "busy" });
@@ -557,10 +529,8 @@ describe("chat e2e (fake acp agent)", () => {
     const cfgP = c.waitForEventWhere(
       "agent.config",
       (d) =>
-        (d as { agentId: string }).agentId === agent.id &&
-        (d as { configOptions: { id: string; currentValue: string }[] }).configOptions.find(
-          (o) => o.id === "model",
-        )?.currentValue === "m2",
+        d.agentId === agent.id &&
+        d.configOptions.find((o) => o.id === "model")?.currentValue === "m2",
       10000,
     );
     await send(agent.id, "switchmodel");
@@ -594,17 +564,13 @@ describe("chat e2e (fake acp agent)", () => {
     });
     const c2 = await DaemonClient.connect(d.port, TOKEN);
     try {
-      const agent = (await c2.request("agents.create", {
+      const agent = await c2.request("agents.create", {
         name: "Stall",
         provider: "devin",
-      })) as Agent;
+      });
       const cfg = c2.request("agents.configOptions", { agentId: agent.id }); // slow session/new
       await c2.request("chat.send", { agentId: agent.id, text: "echo:x" });
-      const ended = (await c2.waitForEventWhere(
-        "turn.ended",
-        (t) => (t as Turn).agentId === agent.id,
-        15000,
-      )) as Turn;
+      const ended = await c2.waitForEventWhere("turn.ended", (t) => t.agentId === agent.id, 15000);
       expect(ended.status).toBe("completed");
       await cfg;
     } finally {
@@ -622,7 +588,7 @@ describe("chat e2e (fake acp agent)", () => {
     await c.request("agents.update", { id: agent.id, provider: "cursor" });
     await send(agent.id, "history");
     await waitTurnEnd(agent.id);
-    const h = (await c.request("chat.history", { agentId: agent.id })) as { items: ChatItem[] };
+    const h = await c.request("chat.history", { agentId: agent.id });
     const reply = [...h.items].reverse().find((i) => i.kind === "agent_message") as
       | { text: string }
       | undefined;
@@ -632,9 +598,7 @@ describe("chat e2e (fake acp agent)", () => {
     // second prompt in the same session: no block
     await send(agent.id, "history");
     await waitTurnEnd(agent.id);
-    const h2 = (await c.request("chat.history", { agentId: agent.id })) as {
-      items: ChatItem[];
-    };
+    const h2 = await c.request("chat.history", { agentId: agent.id });
     const replies = h2.items.filter((i) => i.kind === "agent_message") as { text: string }[];
     expect(replies[replies.length - 1]?.text).not.toContain("<conversation_history>");
   });
@@ -646,11 +610,11 @@ describe("chat e2e (fake acp agent)", () => {
     const qa1 = await send(agent.id, "echo:after1");
     const qa2 = await send(agent.id, "echo:after2");
     await c.request("agents.update", { id: agent.id, provider: "cursor" });
-    const cancelled = (await c.waitForEventWhere(
+    const cancelled = await c.waitForEventWhere(
       "turn.ended",
-      (d) => (d as Turn).agentId === agent.id && (d as Turn).status === "cancelled",
+      (d) => d.agentId === agent.id && d.status === "cancelled",
       10000,
-    )) as Turn;
+    );
     expect(cancelled.status).toBe("cancelled");
     // queued items are kept and drain on the new provider's session
     const t1 = await waitTurnEnd(agent.id, 15000, qa1);
@@ -712,7 +676,7 @@ describe("chat e2e (fake acp agent)", () => {
     });
     try {
       const c2 = await DaemonClient.connect(d.port, TOKEN);
-      const list = (await c2.request("agents.list", {})) as Agent[];
+      const list = await c2.request("agents.list", {});
       const a = list.find((a) => a.id === "agent-v2");
       expect(a?.config).toEqual({ model: "x" });
       c2.close();
@@ -743,10 +707,7 @@ describe("chat e2e (fake acp agent)", () => {
     const errItem = h.items.find((i) => i.kind === "error");
     expect(errItem).toBeTruthy();
 
-    const st = (await c.request("agents.statuses", {})) as Record<
-      string,
-      { status: string; error: string | null }
-    >;
+    const st = await c.request("agents.statuses", {});
     expect(st[agent.id]?.status).toBe("error");
     expect(st[agent.id]?.error).toBeTruthy();
 
@@ -763,7 +724,7 @@ describe("chat e2e (fake acp agent)", () => {
       ((lastLoad as NonNullable<typeof lastLoad>).params as { sessionId: string }).sessionId,
     ).toBeTruthy();
 
-    const st2 = (await c.request("agents.statuses", {})) as Record<string, { status: string }>;
+    const st2 = await c.request("agents.statuses", {});
     expect(st2[agent.id]?.status).toBe("idle");
   });
 
@@ -803,10 +764,10 @@ describe("chat e2e (fake acp agent)", () => {
   test("kill -9 during a turn: turn becomes interrupted after restart, orphan exits on stdin EOF", async () => {
     const agent = await newAgent("Killed", "devin");
     await send(agent.id, "slowseq");
-    const delta = (await c.waitForEventWhere("item.delta", (d) => {
-      const item = d as { agentId: string; itemId: string; text: string };
-      return item.agentId === agent.id && item.text === "2|";
-    })) as { itemId: string };
+    const delta = await c.waitForEventWhere(
+      "item.delta",
+      (d) => d.agentId === agent.id && d.text === "2|",
+    );
     const emitted = emittedAgentMessage(agent.id, delta.itemId);
     expectSeqPrefix(emitted);
     expect(emitted.startsWith("0|")).toBe(true);
@@ -905,7 +866,7 @@ describe("chat e2e (fake acp agent)", () => {
     });
     try {
       const c2 = await DaemonClient.connect(d.port, TOKEN);
-      const list = (await c2.request("agents.list", {})) as Agent[];
+      const list = await c2.request("agents.list", {});
       expect(list.some((a) => a.id === "agent-v1" && a.name === "Old Agent")).toBe(true);
       c2.close();
     } finally {

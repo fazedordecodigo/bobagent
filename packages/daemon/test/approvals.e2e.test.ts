@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, Approval, ChatItem, ConnectedApp, Turn, VaultEntry } from "@upbot/protocol";
+import type { Agent, Approval, ConnectedApp } from "@upbot/protocol";
 import { defaultAppPermissions } from "@upbot/protocol";
 import {
   DaemonClient,
@@ -10,8 +10,9 @@ import {
   FAKE_AGENT,
   ROOT,
   startDaemon,
-  stopTestChildren,
+  stopDaemon,
   tmp,
+  toolCall,
 } from "./helpers";
 
 const TOKEN = `approvals-test-${crypto.randomUUID()}`;
@@ -28,22 +29,8 @@ describe("approvals e2e", () => {
   let daemonStderr = "";
   let daemonStderrRead: Promise<void> | undefined;
 
-  async function tool(agent: Agent, name: string, args: Record<string, unknown> = {}) {
-    const { queueId } = (await c.request("chat.send", {
-      agentId: agent.id,
-      text: `mcp:${name} ${JSON.stringify(args)}`,
-    })) as { queueId: string };
-    const t = (await c.waitForEventWhere(
-      "turn.ended",
-      (d) => (d as Turn).queueId === queueId,
-      30000,
-    )) as Turn;
-    const { items } = (await c.request("chat.history", { agentId: agent.id })) as {
-      items: ChatItem[];
-    };
-    const msg = items.filter((i) => i.turnId === t.id && i.kind === "agent_message").pop();
-    return msg && "text" in msg ? msg.text : "";
-  }
+  const tool = (agent: Agent, name: string, args: Record<string, unknown> = {}) =>
+    toolCall(c, agent, name, args);
 
   /** Runs a tool call that should raise an approval; answers it with `decide`. */
   async function withApproval(
@@ -51,11 +38,7 @@ describe("approvals e2e", () => {
     args: Record<string, unknown>,
     decide: (ap: Approval) => Promise<unknown>,
   ): Promise<{ text: string; approval: Approval }> {
-    const pending = c.waitForEventWhere(
-      "approval.updated",
-      (d) => (d as Approval).status === "pending",
-      20000,
-    ) as Promise<Approval>;
+    const pending = c.waitForEventWhere("approval.updated", (d) => d.status === "pending", 20000);
     const result = tool(a, name, args);
     const approval = await pending;
     await decide(approval);
@@ -84,17 +67,17 @@ describe("approvals e2e", () => {
       stderrReader.releaseLock();
     })();
     c = await DaemonClient.connect(daemon.port, TOKEN);
-    a = (await c.request("agents.create", {
+    a = await c.request("agents.create", {
       name: "A",
       provider: "devin",
       instructions: "",
-    })) as Agent;
-    app = (await c.request("apps.connect", {
+    });
+    app = await c.request("apps.connect", {
       catalogId: "custom-stdio",
       name: "Notes",
       command: ["bun", FAKE_MCP],
       secrets: { FAKE_APP_PERMISSIONS: "1" },
-    })) as ConnectedApp;
+    });
   });
 
   beforeEach(async () => {
@@ -103,13 +86,8 @@ describe("approvals e2e", () => {
   });
 
   afterAll(async () => {
-    c?.close();
-    try {
-      daemon.proc.kill("SIGKILL");
-    } catch {}
-    await daemon.proc.exited;
+    await stopDaemon(daemon, c, stateDir);
     if (daemonStderrRead) await daemonStderrRead;
-    await stopTestChildren(stateDir);
     for (const d of [dataDir, agentsRoot, stateDir])
       rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
@@ -142,11 +120,9 @@ describe("approvals e2e", () => {
       c.request("approvals.respond", { id: ap.id, decision: "always" }),
     );
     expect(await tool(a, "notes-create_note")).toBe("tool-ok:note-created");
-    const rules = (await c.request("approvals.rules", {})) as { pattern: string }[];
+    const rules = await c.request("approvals.rules", {});
     expect(rules).toEqual([]);
-    expect(((await c.request("apps.list", {})) as ConnectedApp[])[0]?.permissions.write).toBe(
-      "allow",
-    );
+    expect((await c.request("apps.list", {}))[0]?.permissions.write).toBe("allow");
     await c.request("approvals.setRules", {
       rules: [
         ...rules,
@@ -203,11 +179,7 @@ describe("approvals e2e", () => {
   }, 30000);
 
   test("unanswered approvals expire and tell the bot not to retry", async () => {
-    const pending = c.waitForEventWhere(
-      "approval.updated",
-      (d) => (d as Approval).status === "expired",
-      20000,
-    );
+    const pending = c.waitForEventWhere("approval.updated", (d) => d.status === "expired", 20000);
     const text = await tool(a, "notes-create_note");
     await pending;
     expect(text).toContain("did not approve");
@@ -229,14 +201,14 @@ describe("approvals e2e", () => {
         }),
       ).rejects.toThrow();
     }
-    expect(((await c.request("apps.list", {})) as ConnectedApp[]).length).toBe(1);
+    expect((await c.request("apps.list", {})).length).toBe(1);
   }, 30000);
 
   test("off auto-denies without approval; allow passes; ask creates labeled approval", async () => {
     await c.request("apps.update", { id: app.id, permissions: { write: "off" } });
-    const before = (await c.request("approvals.list", {})) as Approval[];
+    const before = await c.request("approvals.list", {});
     expect(await tool(a, "notes-create_note")).toContain("Notes não permite write");
-    expect(((await c.request("approvals.list", {})) as Approval[]).map((x) => x.id)).toEqual(
+    expect((await c.request("approvals.list", {})).map((x) => x.id)).toEqual(
       before.map((x) => x.id),
     );
     await c.request("apps.update", { id: app.id, permissions: { write: "allow" } });
@@ -267,41 +239,34 @@ describe("approvals e2e", () => {
       );
       expect(called.approval.permission).toBe("send");
       expect(called.text).toBe("tool-ok:message-sent");
-      expect(((await c.request("apps.list", {})) as ConnectedApp[])[0]?.permissions.send).toBe(
-        "ask",
-      );
+      expect((await c.request("apps.list", {}))[0]?.permissions.send).toBe("ask");
       expect(await c.request("approvals.rules", {})).toEqual(before);
     }
   }, 30000);
 
   test("task grant passes another call in the same turn but not the next turn", async () => {
-    const waiting = c.waitForEventWhere(
-      "approval.updated",
-      (d) => (d as Approval).status === "pending",
-    ) as Promise<Approval>;
-    const sent = (await c.request("chat.send", {
+    const waiting = c.waitForEventWhere("approval.updated", (d) => d.status === "pending");
+    const sent = await c.request("chat.send", {
       agentId: a.id,
       text: `mcp-sequence:${JSON.stringify([
         { tool: "notes-create_note", args: {} },
         { tool: "notes-create_note", args: {} },
         { tool: "notes-echo", args: { text: "done" } },
       ])}`,
-    })) as { queueId: string };
+    });
     const ap = await waiting;
     await c.request("approvals.respond", { id: ap.id, decision: "task" });
-    await c.waitForEventWhere("turn.ended", (d) => (d as Turn).queueId === sent.queueId);
-    const approvals = (await c.request("approvals.list", {})) as Approval[];
+    await c.waitForEventWhere("turn.ended", (d) => d.queueId === sent.queueId);
+    const approvals = await c.request("approvals.list", {});
     expect(approvals.filter((x) => x.turnId === ap.turnId)).toHaveLength(1);
-    const { items } = (await c.request("chat.history", { agentId: a.id })) as { items: ChatItem[] };
+    const { items } = await c.request("chat.history", { agentId: a.id });
     expect(
       items
         .filter((x) => x.turnId === ap.turnId && x.kind === "agent_message")
         .map((x) => ("text" in x ? x.text : ""))
         .join(""),
     ).toContain("tool-ok:note-createdtool-ok:note-createdtool-ok:echo:done");
-    expect(((await c.request("apps.list", {})) as ConnectedApp[])[0]?.permissions.write).toBe(
-      "ask",
-    );
+    expect((await c.request("apps.list", {}))[0]?.permissions.write).toBe("ask");
     const next = await withApproval("notes-create_note", {}, (approval) =>
       c.request("approvals.respond", { id: approval.id, decision: "deny" }),
     );
@@ -312,10 +277,10 @@ describe("approvals e2e", () => {
   test("always reports the previous level for honest app-level undo", async () => {
     let result: Approval | undefined;
     await withApproval("notes-create_note", {}, async (ap) => {
-      result = (await c.request("approvals.respond", {
+      result = await c.request("approvals.respond", {
         id: ap.id,
         decision: "always",
-      })) as Approval;
+      });
     });
     expect(result).toMatchObject({
       previousLevel: "ask",
@@ -553,7 +518,7 @@ describe("approvals e2e", () => {
     });
     expect(r.text).toContain('vault as "stripe.key"');
     expect(r.text).not.toContain("sk_test_42");
-    const v = (await c.request("vault.list", {})) as VaultEntry[];
+    const v = await c.request("vault.list", {});
     expect(v.find((e) => e.name === "stripe.key")?.agentIds).toEqual([a.id]);
     expect(await tool(a, "vault_get", { name: "stripe.key" })).toBe("tool-ok:sk_test_42");
   }, 30000);
@@ -587,7 +552,7 @@ describe("approvals e2e", () => {
       db.query("DELETE FROM vault WHERE name = ?").run("unrelated.key");
       db.close();
     }
-    const entries = (await c.request("vault.list", {})) as VaultEntry[];
+    const entries = await c.request("vault.list", {});
     expect(entries.find((e) => e.name === name)?.agentIds.sort()).toEqual([reader.id, a.id].sort());
   });
 
@@ -600,7 +565,7 @@ describe("approvals e2e", () => {
         await withApproval("request_secret", { name, reason: "need access" }, (ap) =>
           c.request("approvals.respond", { id: ap.id, decision: "approve", value }),
         );
-        const entries = (await subscriber.request("vault.list", {})) as VaultEntry[];
+        const entries = await subscriber.request("vault.list", {});
         const events = subscriber.events.slice(start);
         expect(events.filter((event) => event.event === "vault.changed")).toEqual([
           { event: "vault.changed", data: {} },
@@ -660,7 +625,7 @@ describe("approvals e2e", () => {
         await expect(
           c.request("approvals.respond", { id: ap.id, decision: "approve", value: "replacement" }),
         ).rejects.toMatchObject({ code: "internal", message: "internal error" });
-        const approvals = (await c.request("approvals.list", {})) as Approval[];
+        const approvals = await c.request("approvals.list", {});
         expect(approvals.find((entry) => entry.id === ap.id)?.status).toBe("denied");
       });
       expect(r.text).toContain(`did not provide ${name} (denied)`);
@@ -680,7 +645,7 @@ describe("approvals e2e", () => {
     );
     expect(r.approval.kind).toBe("takeover");
     expect(r.text).toContain("the user finished");
-    const list = (await c.request("approvals.list", { agentId: a.id })) as Approval[];
+    const list = await c.request("approvals.list", { agentId: a.id });
     expect(list[0]).toMatchObject({ kind: "takeover", status: "done" });
   }, 30000);
 });

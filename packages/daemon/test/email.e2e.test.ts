@@ -2,15 +2,16 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, ChatItem, EmailAccount, EmailDraft, Turn } from "@upbot/protocol";
+import type { Agent, EmailAccount } from "@upbot/protocol";
 import { SMTPServer } from "smtp-server";
 import {
   DaemonClient,
   type DaemonHandle,
   FAKE_AGENT,
   startDaemon,
-  stopTestChildren,
+  stopDaemon,
   tmp,
+  toolCall,
 } from "./helpers";
 
 const TOKEN = `email-test-${crypto.randomUUID()}`;
@@ -29,22 +30,8 @@ describe("email connector e2e", () => {
   let smtpPort: number;
   const received: { from: string; to: string[]; data: string; user: string; pass: string }[] = [];
 
-  async function tool(agent: Agent, name: string, args: Record<string, unknown> = {}) {
-    const { queueId } = (await c.request("chat.send", {
-      agentId: agent.id,
-      text: `mcp:${name} ${JSON.stringify(args)}`,
-    })) as { queueId: string };
-    const t = (await c.waitForEventWhere(
-      "turn.ended",
-      (d) => (d as Turn).queueId === queueId,
-      20000,
-    )) as Turn;
-    const { items } = (await c.request("chat.history", { agentId: agent.id })) as {
-      items: ChatItem[];
-    };
-    const msg = items.filter((i) => i.turnId === t.id && i.kind === "agent_message").pop();
-    return msg && "text" in msg ? msg.text.replace(/^tool-ok:/, "") : "";
-  }
+  const tool = async (agent: Agent, name: string, args: Record<string, unknown> = {}) =>
+    (await toolCall(c, agent, name, args, 20000)).replace(/^tool-ok:/, "");
 
   beforeAll(async () => {
     let session = { user: "", pass: "" };
@@ -116,26 +103,21 @@ describe("email connector e2e", () => {
       UPBOT_EMAIL_PLAINTEXT: "1",
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
-    a = (await c.request("agents.create", {
+    a = await c.request("agents.create", {
       name: "A",
       provider: "devin",
       instructions: "",
-    })) as Agent;
-    b = (await c.request("agents.create", {
+    });
+    b = await c.request("agents.create", {
       name: "B",
       provider: "devin",
       instructions: "",
-    })) as Agent;
+    });
   });
 
   afterAll(async () => {
-    c?.close();
     smtp?.close();
-    try {
-      daemon.proc.kill("SIGKILL");
-    } catch {}
-    await daemon.proc.exited;
-    await stopTestChildren(stateDir);
+    await stopDaemon(daemon, c, stateDir);
     for (const d of [dataDir, agentsRoot, stateDir, work])
       rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
@@ -143,15 +125,15 @@ describe("email connector e2e", () => {
   let account: EmailAccount;
 
   test("accounts: presets, password kept in the vault and hidden", async () => {
-    const gmail = (await c.request("email.accounts.save", {
+    const gmail = await c.request("email.accounts.save", {
       provider: "gmail",
       address: "me@gmail.com",
       password: "x-secret-x",
-    })) as EmailAccount;
+    });
     expect(gmail).toMatchObject({ imapHost: "imap.gmail.com", smtpPort: 465, hasPassword: true });
     expect(JSON.stringify(gmail)).not.toContain("x-secret-x");
     await c.request("email.accounts.delete", { id: gmail.id });
-    account = (await c.request("email.accounts.save", {
+    account = await c.request("email.accounts.save", {
       provider: "custom",
       label: "Work",
       address: "me@example.com",
@@ -162,12 +144,12 @@ describe("email connector e2e", () => {
       smtpPort,
       smtpSecure: false,
       agentIds: [a.id],
-    })) as EmailAccount;
-    const list = (await c.request("email.accounts.list", {})) as EmailAccount[];
+    });
+    const list = await c.request("email.accounts.list", {});
     expect(list.map((x) => x.label)).toEqual(["Work"]);
-    const vault = (await c.request("vault.list", {})) as { name: string }[];
+    const vault = await c.request("vault.list", {});
     expect(vault.some((v) => v.name.startsWith("email."))).toBe(false);
-    const t = (await c.request("email.accounts.test", { id: account.id })) as { smtp: string };
+    const t = await c.request("email.accounts.test", { id: account.id });
     expect(t.smtp).toBe("ok");
   });
 
@@ -194,10 +176,10 @@ describe("email connector e2e", () => {
     expect(
       await tool(a, "email_draft", { to: ["not-an-address"], subject: "x", body: "y" }),
     ).toContain("not an email address");
-    const [draft] = (await c.request("email.drafts.list", {
+    const [draft] = await c.request("email.drafts.list", {
       agentId: a.id,
       pendingOnly: true,
-    })) as EmailDraft[];
+    });
     expect(draft).toMatchObject({
       status: "pending",
       subject: "Re: Quarterly report",
@@ -205,7 +187,7 @@ describe("email connector e2e", () => {
     });
     expect(received).toHaveLength(0);
     await c.request("email.drafts.update", { id: draft!.id, body: "Here are the Q3 numbers: 42." });
-    const sent = (await c.request("email.drafts.send", { id: draft!.id })) as EmailDraft;
+    const sent = await c.request("email.drafts.send", { id: draft!.id });
     expect(sent.status).toBe("sent");
     expect(received).toHaveLength(1);
     expect(received[0]).toMatchObject({
@@ -224,13 +206,11 @@ describe("email connector e2e", () => {
 
   test("discard, and the app password never reaches the bot or logs", async () => {
     await tool(a, "email_draft", { to: ["x@example.com"], subject: "s", body: "b" });
-    const [d] = (await c.request("email.drafts.list", {
+    const [d] = await c.request("email.drafts.list", {
       agentId: a.id,
       pendingOnly: true,
-    })) as EmailDraft[];
-    expect(((await c.request("email.drafts.discard", { id: d!.id })) as EmailDraft).status).toBe(
-      "discarded",
-    );
+    });
+    expect((await c.request("email.drafts.discard", { id: d!.id })).status).toBe("discarded");
     expect(received).toHaveLength(1);
     const log = readFileSync(join(stateDir, "log.jsonl"), "utf8");
     expect(log).not.toContain(APP_PASSWORD);
@@ -259,7 +239,7 @@ describe("email connector e2e", () => {
       await expect(c.request("email.accounts.delete", { id: doomed.id })).rejects.toMatchObject({
         code: "internal",
       });
-      expect((await c.request("email.accounts.list", {})) as EmailAccount[]).toContainEqual(
+      expect(await c.request("email.accounts.list", {})).toContainEqual(
         expect.objectContaining({ id: doomed.id, hasPassword: true }),
       );
       expect(
@@ -279,7 +259,7 @@ describe("email connector e2e", () => {
       await c.request("email.accounts.delete", { id: doomed.id });
       await changed;
 
-      expect((await c.request("email.accounts.list", {})) as EmailAccount[]).not.toContainEqual(
+      expect(await c.request("email.accounts.list", {})).not.toContainEqual(
         expect.objectContaining({ id: doomed.id }),
       );
       const row = db

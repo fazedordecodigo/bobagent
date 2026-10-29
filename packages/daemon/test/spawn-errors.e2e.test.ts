@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import type { Agent, Turn } from "@upbot/protocol";
+import type { Agent } from "@upbot/protocol";
 import { spawnProvider } from "../src/providers/process";
 import { ProviderError } from "../src/providers/types";
 import {
@@ -8,7 +8,7 @@ import {
   type DaemonHandle,
   FAKE_AGENT,
   startDaemon,
-  stopTestChildren,
+  stopDaemon,
   tmp,
 } from "./helpers";
 
@@ -38,25 +38,20 @@ describe("asynchronous child spawn errors", () => {
       FAKE_ACP_NEW_ERROR: "session new unavailable",
     });
     client = await DaemonClient.connect(daemon.port, TOKEN);
-    agent = (await client.request("agents.create", {
+    agent = await client.request("agents.create", {
       name: "Missing provider",
       provider: "claude",
       instructions: "",
-    })) as Agent;
-    acpAgent = (await client.request("agents.create", {
+    });
+    acpAgent = await client.request("agents.create", {
       name: "Failing ACP provider",
       provider: "devin",
       instructions: "",
-    })) as Agent;
+    });
   });
 
   afterAll(async () => {
-    client?.close();
-    try {
-      daemon.proc.kill("SIGKILL");
-    } catch {}
-    await daemon.proc.exited;
-    await stopTestChildren(stateDir);
+    await stopDaemon(daemon, client, stateDir);
     for (const directory of [dataDir, agentsRoot, stateDir]) {
       if (directory)
         rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
@@ -108,14 +103,11 @@ describe("asynchronous child spawn errors", () => {
   });
 
   test("ACP provider startup failure surfaces a sanitized stderr tail", async () => {
-    const { queueId } = (await client.request("chat.send", {
+    const { queueId } = await client.request("chat.send", {
       agentId: acpAgent.id,
       text: "hello",
-    })) as { queueId: string };
-    const turn = (await client.waitForEventWhere(
-      "turn.ended",
-      (event) => (event as Turn).queueId === queueId,
-    )) as Turn;
+    });
+    const turn = await client.waitForEventWhere("turn.ended", (event) => event.queueId === queueId);
     expect(turn.status).toBe("failed");
     expect(turn.error).toContain("devin failed to start");
     expect(turn.error).toContain("fatal: API key <redacted>");

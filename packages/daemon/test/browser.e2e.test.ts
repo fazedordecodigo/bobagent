@@ -1,14 +1,15 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
-import type { Agent, BrowserState, ChatItem, Turn } from "@upbot/protocol";
+import type { Agent } from "@upbot/protocol";
 import { findBrowser } from "../src/browser";
 import {
   DaemonClient,
   type DaemonHandle,
   FAKE_AGENT,
   startDaemon,
-  stopTestChildren,
+  stopDaemon,
   tmp,
+  toolCall,
 } from "./helpers";
 
 const TOKEN = `br-test-${crypto.randomUUID()}`;
@@ -23,20 +24,8 @@ describe.skipIf(!hasBrowser)("agent browser e2e (headless Chromium over CDP)", (
   let a: Agent;
   let site: ReturnType<typeof Bun.serve>;
 
-  async function tool(name: string, args: Record<string, unknown> = {}): Promise<string> {
-    const { queueId } = (await c.request("chat.send", {
-      agentId: a.id,
-      text: `mcp:${name} ${JSON.stringify(args)}`,
-    })) as { queueId: string };
-    const t = (await c.waitForEventWhere(
-      "turn.ended",
-      (d) => (d as Turn).queueId === queueId,
-      60000,
-    )) as Turn;
-    const { items } = (await c.request("chat.history", { agentId: a.id })) as { items: ChatItem[] };
-    const msg = items.filter((i) => i.turnId === t.id && i.kind === "agent_message").pop();
-    return msg && "text" in msg ? msg.text : "";
-  }
+  const tool = (name: string, args: Record<string, unknown> = {}) =>
+    toolCall(c, a, name, args, 60000);
 
   beforeAll(async () => {
     site = Bun.serve({
@@ -62,22 +51,17 @@ describe.skipIf(!hasBrowser)("agent browser e2e (headless Chromium over CDP)", (
       UPBOT_BROWSER_HEADLESS: "1",
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
-    a = (await c.request("agents.create", {
+    a = await c.request("agents.create", {
       name: "Surfer",
       provider: "devin",
       instructions: "",
-    })) as Agent;
+    });
   });
 
   afterAll(async () => {
     await c?.request("browser.close", {}).catch(() => {});
-    c?.close();
     site?.stop(true);
-    try {
-      daemon.proc.kill("SIGTERM");
-    } catch {}
-    await daemon.proc.exited;
-    await stopTestChildren(stateDir);
+    await stopDaemon(daemon, c, stateDir, "SIGTERM");
     for (const d of [dataDir, agentsRoot, stateDir])
       rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }, 20000);
@@ -94,7 +78,7 @@ describe.skipIf(!hasBrowser)("agent browser e2e (headless Chromium over CDP)", (
       "/result?q=hello+world",
     );
     expect(await tool("browser_snapshot")).toContain("Result: hello world");
-    const st = (await c.request("browser.status", {})) as BrowserState;
+    const st = await c.request("browser.status", {});
     expect(st).toMatchObject({ available: true, running: true });
     expect(st.tabs).toEqual([
       { agentId: a.id, url: `${base}/result?q=hello+world`, title: "Result" },
@@ -111,6 +95,6 @@ describe.skipIf(!hasBrowser)("agent browser e2e (headless Chromium over CDP)", (
       "tool-error:only http(s)",
     );
     expect(await tool("browser_close")).toBe("tool-ok:closed your tab");
-    expect(((await c.request("browser.status", {})) as BrowserState).tabs).toEqual([]);
+    expect((await c.request("browser.status", {})).tabs).toEqual([]);
   }, 120000);
 });

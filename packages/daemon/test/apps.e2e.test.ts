@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, ChatItem, ConnectedApp, Turn } from "@upbot/protocol";
+import type { Agent, ConnectedApp } from "@upbot/protocol";
 import { appToolNames } from "../src/apps";
 import {
   DaemonClient,
@@ -10,8 +10,10 @@ import {
   pidAlive,
   ROOT,
   startDaemon,
+  stopDaemon,
   stopTestChildren,
   tmp,
+  toolCall,
 } from "./helpers";
 
 const TOKEN = `apps-test-${crypto.randomUUID()}`;
@@ -29,22 +31,8 @@ describe("connected apps (MCP) e2e", () => {
   let b: Agent;
   let app: ConnectedApp;
 
-  async function tool(agent: Agent, name: string, args: Record<string, unknown> = {}) {
-    const { queueId } = (await c.request("chat.send", {
-      agentId: agent.id,
-      text: `mcp:${name} ${JSON.stringify(args)}`,
-    })) as { queueId: string };
-    const t = (await c.waitForEventWhere(
-      "turn.ended",
-      (d) => (d as Turn).queueId === queueId,
-      30000,
-    )) as Turn;
-    const { items } = (await c.request("chat.history", { agentId: agent.id })) as {
-      items: ChatItem[];
-    };
-    const msg = items.filter((i) => i.turnId === t.id && i.kind === "agent_message").pop();
-    return msg && "text" in msg ? msg.text : "";
-  }
+  const tool = (agent: Agent, name: string, args: Record<string, unknown> = {}) =>
+    toolCall(c, agent, name, args);
 
   beforeAll(async () => {
     dataDir = tmp("apps-data-");
@@ -65,31 +53,26 @@ describe("connected apps (MCP) e2e", () => {
       }
     })().catch(() => {});
     c = await DaemonClient.connect(daemon.port, TOKEN);
-    a = (await c.request("agents.create", {
+    a = await c.request("agents.create", {
       name: "A",
       provider: "devin",
       instructions: "",
-    })) as Agent;
-    b = (await c.request("agents.create", {
+    });
+    b = await c.request("agents.create", {
       name: "B",
       provider: "devin",
       instructions: "",
-    })) as Agent;
+    });
   });
 
   afterAll(async () => {
-    c?.close();
-    try {
-      daemon.proc.kill("SIGKILL");
-    } catch {}
-    await daemon.proc.exited;
-    await stopTestChildren(stateDir);
+    await stopDaemon(daemon, c, stateDir);
     for (const d of [dataDir, agentsRoot, stateDir])
       rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   test("catalog lists built-in apps; catalog apps require their secret", async () => {
-    const cat = (await c.request("apps.catalog", {})) as { id: string }[];
+    const cat = await c.request("apps.catalog", {});
     expect(cat.map((x) => x.id)).toEqual(
       expect.arrayContaining(["notion", "github", "brave-search"]),
     );
@@ -99,20 +82,20 @@ describe("connected apps (MCP) e2e", () => {
   });
 
   test("a custom stdio app starts, lists tools and keeps its secret out of the UI", async () => {
-    app = (await c.request("apps.connect", {
+    app = await c.request("apps.connect", {
       catalogId: "custom-stdio",
       name: "Fake App",
       permissions: { write: "allow" },
       command: ["bun", FAKE_MCP],
       secrets: { FAKE_APP_TOKEN: APP_SECRET },
       agentIds: [a.id],
-    })) as ConnectedApp;
+    });
     expect(app.slug).toBe("fake_app");
-    const ready = (await c.waitForEventWhere("apps.changed", () => true, 15000)) as unknown;
+    const ready = await c.waitForEventWhere("apps.changed", () => true, 15000);
     expect(ready).toBeDefined();
     let list: ConnectedApp[] = [];
     for (let i = 0; i < 100; i++) {
-      list = (await c.request("apps.list", {})) as ConnectedApp[];
+      list = await c.request("apps.list", {});
       if (list[0]?.status === "ready") break;
       await Bun.sleep(100);
     }
@@ -125,7 +108,7 @@ describe("connected apps (MCP) e2e", () => {
       "foo_bar",
     ]);
     expect(JSON.stringify(list)).not.toContain(APP_SECRET);
-    const vault = (await c.request("vault.list", {})) as { name: string }[];
+    const vault = await c.request("vault.list", {});
     expect(vault.some((v) => v.name.startsWith("app."))).toBe(false);
   });
 
@@ -158,7 +141,7 @@ describe("connected apps (MCP) e2e", () => {
     })) as ConnectedApp;
     let failed: ConnectedApp | undefined;
     for (let i = 0; i < 100; i++) {
-      const list = (await c.request("apps.list", {})) as ConnectedApp[];
+      const list = await c.request("apps.list", {});
       failed = list.find((x) => x.id === bad.id);
       if (failed?.status === "error") break;
       await Bun.sleep(100);
@@ -204,7 +187,7 @@ process.stdin.on("data", (chunk) => {
     try {
       let failed: ConnectedApp | undefined;
       for (let i = 0; i < 100; i++) {
-        const list = (await c.request("apps.list", {})) as ConnectedApp[];
+        const list = await c.request("apps.list", {});
         failed = list.find((x) => x.id === bad.id);
         if (failed?.status === "error") break;
         await Bun.sleep(100);
@@ -236,12 +219,12 @@ process.stdin.on("data", (chunk) => {
     try {
       let failed: ConnectedApp | undefined;
       for (let i = 0; i < 100; i++) {
-        const list = (await c.request("apps.list", {})) as ConnectedApp[];
+        const list = await c.request("apps.list", {});
         failed = list.find((x) => x.id === bad.id);
         if (failed?.status === "error") break;
         await Bun.sleep(100);
       }
-      const list = (await c.request("apps.list", {})) as ConnectedApp[];
+      const list = await c.request("apps.list", {});
       expect(failed?.status).toBe("error");
       expect(failed?.error).toContain("stderr output suppressed");
       expect(JSON.stringify(list)).not.toContain(firstHalf);
@@ -280,7 +263,7 @@ process.stdin.on("data", (chunk) => {
         if (failedStarts >= 2) break;
         await Bun.sleep(100);
       }
-      const list = (await c.request("apps.list", {})) as ConnectedApp[];
+      const list = await c.request("apps.list", {});
       expect(failedStarts).toBeGreaterThanOrEqual(2);
       expect(daemonStderr).not.toContain(oldToken);
       expect(daemonStderr).not.toContain(newToken);
@@ -328,7 +311,7 @@ process.stdin.on("data", (chunk) => {
       })) as ConnectedApp;
       let failed: ConnectedApp | undefined;
       for (let i = 0; i < 100; i++) {
-        const list = (await timeoutClient.request("apps.list", {})) as ConnectedApp[];
+        const list = await timeoutClient.request("apps.list", {});
         failed = list.find((x) => x.id === bad!.id);
         if (failed?.status === "error") break;
         await Bun.sleep(100);
@@ -336,7 +319,7 @@ process.stdin.on("data", (chunk) => {
       for (let i = 0; i < 20 && !timeoutStderr.includes("app start failed"); i++)
         await Bun.sleep(50);
       hungPid = Number(readFileSync(pidFile, "utf8").trim());
-      const list = (await timeoutClient.request("apps.list", {})) as ConnectedApp[];
+      const list = await timeoutClient.request("apps.list", {});
       expect(failed?.status).toBe("error");
       expect(timeoutStderr).toContain("app start failed");
       expect(failed?.error).toContain("app MCP startup timed out (transport initialization)");
@@ -371,7 +354,7 @@ process.stdin.on("data", (chunk) => {
   });
 
   test("disable and delete", async () => {
-    const off = (await c.request("apps.update", { id: app.id, enabled: false })) as ConnectedApp;
+    const off = await c.request("apps.update", { id: app.id, enabled: false });
     expect(off.status).toBe("stopped");
     expect(await tool(a, "fake_app-echo", { text: "x" })).toContain("not available to you");
     await c.request("apps.delete", { id: app.id });

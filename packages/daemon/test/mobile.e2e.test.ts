@@ -1,12 +1,12 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { rmSync } from "node:fs";
-import type { Agent, MobileStatus } from "@upbot/protocol";
+import type { Agent } from "@upbot/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
   FAKE_AGENT,
   startDaemon,
-  stopTestChildren,
+  stopDaemon,
   tmp,
 } from "./helpers";
 
@@ -76,21 +76,16 @@ describe("mobile companion e2e", () => {
       }
     })();
     c = await DaemonClient.connect(daemon.port, TOKEN);
-    a = (await c.request("agents.create", {
+    a = await c.request("agents.create", {
       name: "Pocket",
       provider: "devin",
       instructions: "",
-    })) as Agent;
+    });
   });
 
   afterAll(async () => {
-    c?.close();
-    try {
-      daemon.proc.kill("SIGKILL");
-    } catch {}
-    await daemon.proc.exited;
+    await stopDaemon(daemon, c, stateDir);
     occupied?.stop(true);
-    await stopTestChildren(stateDir);
     for (const d of [dataDir, agentsRoot, stateDir])
       rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
@@ -98,7 +93,7 @@ describe("mobile companion e2e", () => {
   test("disabled by default; enabling audits and serves after a real port collision", async () => {
     expect(await c.request("mobile.status", {})).toEqual({ enabled: false, urls: [], devices: [] });
     await expect(c.request("mobile.pair", {})).rejects.toMatchObject({ code: "bad_request" });
-    const s = (await c.request("mobile.enable", { enabled: true })) as MobileStatus;
+    const s = await c.request("mobile.enable", { enabled: true });
     expect(s.enabled).toBe(true);
     expect(s.urls).toHaveLength(1);
     base = s.urls[0]!.replace(/\/$/, "");
@@ -116,7 +111,7 @@ describe("mobile companion e2e", () => {
   test("pairing: wrong codes count toward a limit, the right code yields a device token once", async () => {
     expect((await api("/api/pair", { code: "000000" }, "")).status).toBe(401);
     await waitForLog('mobile.pair_failed {"reason":"inactive","attempts":0');
-    const { code } = (await c.request("mobile.pair", {})) as { code: string };
+    const { code } = await c.request("mobile.pair", {});
     expect(code).toMatch(/^\d{6}$/);
     const wrong = code === "123456" ? "654321" : "123456";
     expect((await api("/api/pair", { code: wrong }, "")).status).toBe(401);
@@ -132,12 +127,12 @@ describe("mobile companion e2e", () => {
     expect((await api("/api/pair", { code, name: "again" }, "")).status).toBe(401);
     await waitForLog('mobile.pair_failed {"reason":"inactive","attempts":0', afterPair);
     expect(stderrBuf).not.toContain('"reason":"expired"');
-    const { code: c2 } = (await c.request("mobile.pair", {})) as { code: string };
+    const { code: c2 } = await c.request("mobile.pair", {});
     for (let i = 0; i < 5; i++)
       await api("/api/pair", { code: c2 === "111111" ? "222222" : "111111" }, "");
     expect((await api("/api/pair", { code: c2 }, "")).status).toBe(401);
     await waitForLog('mobile.pair_failed {"reason":"exhausted"');
-    const st = (await c.request("mobile.status", {})) as MobileStatus;
+    const st = await c.request("mobile.status", {});
     expect(st.devices.map((d) => d.name)).toEqual([DEVICE_NAME]);
   });
 
@@ -232,7 +227,7 @@ describe("mobile companion e2e", () => {
   });
 
   test("revoke and disable cut access", async () => {
-    const st = (await c.request("mobile.status", {})) as MobileStatus;
+    const st = await c.request("mobile.status", {});
     await c.request("mobile.revoke", { id: st.devices[0]!.id });
     expect((await rpc("agents.list", {})).status).toBe(401);
     await c.request("mobile.enable", { enabled: false });
@@ -247,7 +242,7 @@ describe("mobile companion e2e", () => {
     const daemon2 = await startDaemon(d2, a2, token2, { UPBOT_MOBILE_HOST: "127.0.0.1" });
     const c2 = await DaemonClient.connect(daemon2.port, token2);
     try {
-      let st = (await c2.request("mobile.enable", { enabled: true })) as MobileStatus;
+      let st = await c2.request("mobile.enable", { enabled: true });
       const configured = new URL(st.urls[0]!).port;
       await c2.request("mobile.enable", { enabled: false });
 
@@ -257,13 +252,13 @@ describe("mobile companion e2e", () => {
         port: Number(configured),
         fetch: () => new Response("squat"),
       });
-      st = (await c2.request("mobile.enable", { enabled: true })) as MobileStatus;
+      st = await c2.request("mobile.enable", { enabled: true });
       expect(new URL(st.urls[0]!).port).not.toBe(configured);
 
       // The ephemeral fallback port must not replace the stored one.
       await c2.request("mobile.enable", { enabled: false });
       squatter.stop(true);
-      st = (await c2.request("mobile.enable", { enabled: true })) as MobileStatus;
+      st = await c2.request("mobile.enable", { enabled: true });
       expect(new URL(st.urls[0]!).port).toBe(configured);
       await c2.request("mobile.enable", { enabled: false });
     } finally {

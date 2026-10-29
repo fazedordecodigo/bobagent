@@ -2,14 +2,16 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, ChatItem, Turn } from "@upbot/protocol";
+import type { Agent, Turn } from "@upbot/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
   FAKE_AGENT,
+  lastAgentText,
   readLog,
+  sendAndWait,
   startDaemon,
-  stopTestChildren,
+  stopDaemon,
   tmp,
 } from "./helpers";
 
@@ -26,33 +28,17 @@ describe("agent-to-agent bridge e2e", () => {
   let bob: Agent;
 
   const newAgent = async (name: string) =>
-    (await c.request("agents.create", { name, provider: "devin", instructions: "" })) as Agent;
+    c.request("agents.create", { name, provider: "devin", instructions: "" });
 
-  async function turn(agentId: string, text: string): Promise<Turn> {
-    const { queueId } = (await c.request("chat.send", { agentId, text })) as { queueId: string };
-    return (await c.waitForEventWhere(
-      "turn.ended",
-      (d) => (d as Turn).queueId === queueId,
-      20000,
-    )) as Turn;
-  }
+  const turn = (agentId: string, text: string) => sendAndWait(c, agentId, text, 20000);
 
-  const items = async (agentId: string) =>
-    ((await c.request("chat.history", { agentId })) as { items: ChatItem[] }).items;
+  const items = async (agentId: string) => (await c.request("chat.history", { agentId })).items;
 
-  async function lastText(agentId: string): Promise<string> {
-    const msgs = (await items(agentId)).filter((i) => i.kind === "agent_message");
-    const last = msgs[msgs.length - 1];
-    return last && "text" in last ? last.text : "";
-  }
+  const lastText = (agentId: string) => lastAgentText(c, agentId);
 
   /** Waits for a turn on `agentId` that started from a message by another agent. */
   function nextIncoming(agentId: string): Promise<Turn> {
-    return c.waitForEventWhere(
-      "turn.ended",
-      (d) => (d as Turn).agentId === agentId,
-      20000,
-    ) as Promise<Turn>;
+    return c.waitForEventWhere("turn.ended", (d) => d.agentId === agentId, 20000);
   }
 
   beforeAll(async () => {
@@ -71,12 +57,7 @@ describe("agent-to-agent bridge e2e", () => {
   });
 
   afterAll(async () => {
-    c?.close();
-    try {
-      daemon.proc.kill("SIGKILL");
-    } catch {}
-    await daemon.proc.exited;
-    await stopTestChildren(stateDir);
+    await stopDaemon(daemon, c, stateDir);
     for (const d of [dataDir, agentsRoot, stateDir, sharedRoot]) {
       rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
@@ -123,7 +104,7 @@ describe("agent-to-agent bridge e2e", () => {
     const back = c.waitForEventWhere(
       "item.created",
       (d) => {
-        const i = d as ChatItem;
+        const i = d;
         return (
           i.agentId === alice.id &&
           i.kind === "user_message" &&
@@ -139,7 +120,7 @@ describe("agent-to-agent bridge e2e", () => {
       `mcp:send_message ${JSON.stringify({ to: "Bob", text: `mcp:send_message ${inner}` })}`,
     );
     await back;
-    await c.waitForEventWhere("turn.ended", (d) => (d as Turn).agentId === alice.id, 20000);
+    await c.waitForEventWhere("turn.ended", (d) => d.agentId === alice.id, 20000);
     expect(await lastText(alice.id)).toBe("pong");
   });
 
