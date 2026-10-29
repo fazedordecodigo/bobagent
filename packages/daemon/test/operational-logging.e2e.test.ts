@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import type { Agent, Turn } from "@upbot/protocol";
+import type { Agent, Routine, Turn } from "@upbot/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -111,6 +111,43 @@ describe("daemon operational logging", () => {
     expect(stderr).toMatch(/errorType.*Error/);
     expect(stderr).not.toContain(secret);
     expect(stderr).not.toContain(secret2);
+  });
+
+  test("webhook auth rejection logs are scoped to known routines", async () => {
+    const agent = (await client.request("agents.create", {
+      name: "Webhook logger",
+      provider: "devin",
+      instructions: "",
+    })) as Agent;
+    const createRoutine = (name: string) =>
+      client.request("routines.create", {
+        agentId: agent.id,
+        name,
+        prompt: "echo:hook",
+        webhook: true,
+      }) as Promise<Routine>;
+    const routineA = await createRoutine("Webhook A");
+    const routineB = await createRoutine("Webhook B");
+    const post = (id: string) =>
+      fetch(`http://127.0.0.1:${daemon.port}/hooks/${id}`, {
+        method: "POST",
+        headers: { authorization: "Bearer wrong" },
+      });
+
+    expect((await post(routineA.id)).status).toBe(401);
+    expect((await post(routineA.id)).status).toBe(401);
+    expect((await post(routineB.id)).status).toBe(401);
+    const secret3 = `not-a-routine-${crypto.randomUUID()}`;
+    expect((await post(secret3)).status).toBe(401);
+
+    (daemon.proc.stdin as { end: () => void }).end();
+    await waitForExit(daemon.proc, 5000);
+    const stderr = await stderrText(daemon);
+    const rejectionLogs = stderr.match(/\[upbotd\] auth\.rejected \{[^}]*\}/g) ?? [];
+    expect(stderr).toContain(routineA.id);
+    expect(stderr).toContain(routineB.id);
+    expect(rejectionLogs.filter((line) => line.includes(routineA.id))).toHaveLength(1);
+    expect(stderr).not.toContain(secret3);
   });
 
 });

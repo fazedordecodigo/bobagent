@@ -318,26 +318,28 @@ async function main() {
       }
       const hook = /^\/hooks\/([\w-]+)$/.exec(url.pathname);
       if (hook) {
+        const routineId = hook[1] ?? "";
+        const known = routines.exists(routineId);
         // local webhook trigger for a routine (curl, scripts); never from a browser page
         if (req.method !== "POST" || req.headers.get("origin") !== null) {
-          logLimited("auth.rejected", "/hooks/:id:403", {
+          logLimited("auth.rejected", `/hooks/:id:403:${known ? routineId : "unknown"}`, {
             route: "/hooks/:id",
             status: 403,
             reason: req.headers.get("origin") !== null ? "origin" : "method",
-            routineId: hook[1],
+            routineId: known ? routineId : "unknown",
           });
           return new Response("forbidden", { status: 403 });
         }
         const auth = req.headers.get("authorization") ?? "";
         const id = routines.webhookRoutine(
-          hook[1]!,
+          routineId,
           auth.startsWith("Bearer ") ? auth.slice(7) : "",
         );
         if (!id) {
-          logLimited("auth.rejected", "/hooks/:id:401", {
+          logLimited("auth.rejected", `/hooks/:id:401:${known ? routineId : "unknown"}`, {
             route: "/hooks/:id",
             status: 401,
-            routineId: hook[1],
+            routineId: known ? routineId : "unknown",
           });
           return new Response("unauthorized", { status: 401 });
         }

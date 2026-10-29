@@ -106,6 +106,10 @@ export class RoutineService {
       .get(id) as Row | null;
   }
 
+  exists(id: string): boolean {
+    return this.row(id) !== null;
+  }
+
   get(id: string): Routine {
     const r = this.row(id);
     if (!r) throw new RpcError("not_found", "routine not found");
