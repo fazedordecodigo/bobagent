@@ -58,7 +58,7 @@ export class AgentStore {
     mkdirSync(workspacePath, { recursive: true });
     this.db
       .query(
-        `INSERT INTO agents (id, name, instructions, provider, model, workspace_path, avatar_json, created_at, updated_at)
+        `INSERT INTO agents (id, name, instructions, provider, config_json, workspace_path, avatar_json, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
