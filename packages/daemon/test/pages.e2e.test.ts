@@ -38,6 +38,12 @@ describe("pages e2e", () => {
     return msg && "text" in msg ? msg.text : "";
   }
 
+  const pageId = (out: string) => /\(id ([^,]+), version/.exec(out)?.[1];
+
+  async function page(id: string) {
+    return ((await c.request("pages.list", {})) as Page[]).find((p) => p.id === id);
+  }
+
   beforeAll(async () => {
     dataDir = tmp("pages-data-");
     agentsRoot = tmp("pages-root-");
@@ -111,18 +117,24 @@ describe("pages e2e", () => {
   test("title and description are capped on create and on update", async () => {
     const longTitle = "t".repeat(300);
     const longDesc = "d".repeat(1500);
-    await tool(a, "page_publish", { title: longTitle, description: longDesc, html: "<p>1</p>" });
-    const [page] = (await c.request("pages.list", {})) as Page[];
-    expect(page!.title).toBe("t".repeat(200));
-    expect(page!.description).toBe("d".repeat(1000));
+    const out = await tool(a, "page_publish", {
+      title: longTitle,
+      description: longDesc,
+      html: "<p>1</p>",
+    });
+    const id = pageId(out);
+    expect(id).toBeDefined();
+    const created = await page(id!);
+    expect(created!.title).toBe("t".repeat(200));
+    expect(created!.description).toBe("d".repeat(1000));
 
     await tool(a, "page_publish", {
-      id: page!.id,
+      id: id!,
       title: ` ${"u".repeat(300)}`,
       description: `${longDesc}!`,
       html: "<p>2</p>",
     });
-    const [v2] = (await c.request("pages.list", {})) as Page[];
+    const v2 = await page(id!);
     expect(v2!.title).toBe("u".repeat(200));
     expect(v2!.description).toBe("d".repeat(1000));
   });
