@@ -391,17 +391,7 @@ export class TeamClient {
       team?: { requestId: string; memberId: string; agentId?: string };
     };
     if (!meta.team) return;
-    const text =
-      turn.status === "completed"
-        ? this.chat
-            .itemsForTurn(turn.id)
-            .filter((i) => i.kind === "agent_message")
-            .map((i) => ("text" in i ? i.text : ""))
-            .join("\n\n")
-            .trim() || "(no reply)"
-        : turn.status === "failed"
-          ? `The agent failed: ${turn.error ?? "unknown error"}`
-          : "The agent stopped before replying.";
+    const text = this.chat.turnReplyText(turn);
     const status = turn.status === "completed" ? "completed" : "failed";
     // Only means the reply was handed to an open relay socket: the relay has no delivery
     // ack and drops replies to members that are offline, so the teammate may never get it.

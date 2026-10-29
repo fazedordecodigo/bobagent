@@ -268,20 +268,7 @@ export class GatewayService {
     if (!meta.gateway) return;
     const t = this.transports.get(meta.gateway.id);
     if (!t) return;
-    let reply: string;
-    if (turn.status === "completed") {
-      reply = this.chat
-        .itemsForTurn(turn.id)
-        .filter((i) => i.kind === "agent_message")
-        .map((i) => ("text" in i ? i.text : ""))
-        .join("\n\n")
-        .trim();
-      if (!reply) reply = "(no reply)";
-    } else if (turn.status === "failed") {
-      reply = `The agent failed: ${turn.error ?? "unknown error"}`;
-    } else {
-      reply = "The agent stopped before replying.";
-    }
+    const reply = this.chat.turnReplyText(turn);
     void t
       .send(meta.gateway.chatId, reply.slice(0, MAX_REPLY), meta.gateway.replyTo)
       .catch(() => {});
