@@ -450,7 +450,7 @@ export class Rpc {
         return m;
       }
       case "memories.update": {
-        const p = params as { id: string; text: string };
+        const p = params as MethodParsedParams<typeof method>;
         const m = this.memories.update(p.id, p.text);
         if (!m) throw new RpcError("not_found", "memory not found");
         this.broadcast("memories.changed", { agentId: m.agentId });
