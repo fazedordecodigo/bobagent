@@ -173,6 +173,13 @@ export function RunPanel({
           <Icon name="x" />
         </button>
       </div>
+      {(["history", "status"] as const).map((source) =>
+        chat.errors[source] ? (
+          <p className="notice is-err" key={source} role="alert">
+            {chat.errors[source]}
+          </p>
+        ) : null,
+      )}
       <div className="panel-sec" data-od-id="panel-progress">
         <p className="eyebrow">Tarefa atual</p>
         <h3 className="panel-task">{overview.task ?? "Nenhuma tarefa em andamento"}</h3>
