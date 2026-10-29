@@ -101,20 +101,43 @@ describe("microVM credentials", () => {
       expect(creds.env("codex")).toEqual({});
       expect(err).not.toHaveBeenCalled();
 
-      vault.set("vmcred.codex", "not json", []);
+      vault.set("vmcred.codex", "corrupt-json-secret-sentinel", []);
       expect(creds.env("codex")).toEqual({});
       expect(creds.list().map((c) => c.provider)).not.toContain("codex");
-      expect(err).toHaveBeenCalled();
+      expect(err.mock.calls).toEqual([
+        [
+          "UpBot could not read a stored microVM credential",
+          { provider: "codex", reason: "invalid_entry" },
+        ],
+        [
+          "UpBot could not read a stored microVM credential",
+          { provider: "codex", reason: "invalid_entry" },
+        ],
+      ]);
       err.mockClear();
 
-      vault.set("vmcred.codex", JSON.stringify({ kind: "bogus", value: "x" }), []);
+      vault.set(
+        "vmcred.codex",
+        JSON.stringify({ kind: "corrupt-kind-secret-sentinel", value: "x" }),
+        [],
+      );
       expect(creds.env("codex")).toEqual({});
-      expect(err).toHaveBeenCalled();
+      expect(err.mock.calls).toEqual([
+        [
+          "UpBot could not read a stored microVM credential",
+          { provider: "codex", reason: "invalid_entry" },
+        ],
+      ]);
       err.mockClear();
 
       db.query("UPDATE vault SET data = ? WHERE name = ?").run("AAAA", "vmcred.codex");
       expect(creds.env("codex")).toEqual({});
-      expect(err).toHaveBeenCalled();
+      expect(err.mock.calls).toEqual([
+        [
+          "UpBot could not read a stored microVM credential",
+          { provider: "codex", reason: "invalid_entry" },
+        ],
+      ]);
     } finally {
       err.mockRestore();
       creds.delete("codex");

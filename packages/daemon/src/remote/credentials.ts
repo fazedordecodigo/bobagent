@@ -33,8 +33,11 @@ export class VmCredentials {
     if (!this.vault.internalEntries(name).some((e) => e.name === name)) return null;
     try {
       return STORED_ENTRY.parse(JSON.parse(this.vault.revealInternal(name)));
-    } catch (error) {
-      console.error(`UpBot could not read the stored ${provider} microVM credential:`, error);
+    } catch {
+      console.error("UpBot could not read a stored microVM credential", {
+        provider,
+        reason: "invalid_entry",
+      });
       return null;
     }
   }
