@@ -390,6 +390,9 @@ members connect to `/ws?token=` and exchange `share` / `send` / `incoming` / `re
 No chat content is stored on the relay. Daemon side `src/team.ts` (`settings.team`, token in
 the vault as `team.token`, hidden from `vault.list`, migration 13 `team_messages`): shares
 selected agents, runs incoming messages as `<team_message>` turns and replies on `turn.ended`.
+An incoming row is `completed` once the reply is handed to an open relay socket; if the socket
+is down it is `failed` and logged (`team reply not delivered`). The relay has no delivery ack
+and drops replies to offline members, so the sender's `out` row can stay `pending`.
 RPC `team.status/connect/disconnect/share/send/messages`, events `team.updated/message`;
 UI `TeamView`. Tests: `test/team.e2e.test.ts` (spawns the relay).
 

@@ -26,6 +26,10 @@ type MsgRow = {
   created_at: number;
 };
 
+// Relay-provided ids are untrusted: log them only when they look like ids.
+const logId = (v: unknown) =>
+  typeof v === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(v) ? v : "invalid";
+
 const toMessage = (r: MsgRow): TeamMessage => ({
   id: r.id,
   requestId: r.request_id,
@@ -304,7 +308,7 @@ export class TeamClient {
     const agent = this.agents.get(m.agentId);
     const fail = (text: string, reason: string) => {
       console.error(
-        `[upbotd] team request rejected requestId=${m.requestId} agentId=${m.agentId} reason=${reason}`,
+        `[upbotd] team request rejected requestId=${logId(m.requestId)} agentId=${logId(m.agentId)} reason=${reason}`,
       );
       this.ws?.send(
         JSON.stringify({
@@ -373,8 +377,10 @@ export class TeamClient {
           ? `The agent failed: ${turn.error ?? "unknown error"}`
           : "The agent stopped before replying.";
     const status = turn.status === "completed" ? "completed" : "failed";
-    const delivered = this.connected && this.ws?.readyState === WebSocket.OPEN;
-    if (delivered) {
+    // Only means the reply was handed to an open relay socket: the relay has no delivery
+    // ack and drops replies to members that are offline, so the teammate may never get it.
+    const handedToRelay = this.connected && this.ws?.readyState === WebSocket.OPEN;
+    if (handedToRelay) {
       this.ws?.send(
         JSON.stringify({
           type: "reply",
@@ -386,14 +392,14 @@ export class TeamClient {
       );
     } else {
       console.error(
-        `[upbotd] team reply not delivered requestId=${meta.team.requestId} agentId=${meta.team.agentId ?? "unknown"} memberId=${meta.team.memberId} status=${status}`,
+        `[upbotd] team reply not delivered requestId=${logId(meta.team.requestId)} agentId=${meta.team.agentId ? logId(meta.team.agentId) : "unknown"} memberId=${logId(meta.team.memberId)} status=${status}`,
       );
     }
     this.db
       .query(
         "UPDATE team_messages SET reply = ?, status = ? WHERE request_id = ? AND direction = 'in'",
       )
-      .run(text, delivered ? status : "failed", meta.team.requestId);
+      .run(text, handedToRelay ? status : "failed", meta.team.requestId);
     this.emitMessage(meta.team.requestId, "in");
   }
 }

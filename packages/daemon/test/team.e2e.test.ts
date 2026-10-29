@@ -255,6 +255,69 @@ describe("teams via relay e2e", () => {
         `[upbotd] team request rejected requestId=${sent.requestId} agentId=${caraBroken.id} reason=provider_unavailable`,
       );
     });
+
+    test("relay-supplied ids are not logged verbatim", async () => {
+      const eve = await invite("Eve");
+      const ws = new WebSocket(`${relayUrl.replace(/^http/, "ws")}/ws?token=${eve.token}`);
+      await new Promise((resolve, reject) => {
+        ws.onopen = resolve;
+        ws.onerror = reject;
+      });
+      const reply = new Promise<Record<string, unknown>>((resolve) => {
+        ws.onmessage = (ev) => {
+          const m = JSON.parse(String(ev.data)) as Record<string, unknown>;
+          if (m.type === "reply") resolve(m);
+        };
+      });
+      const requestId = "forged\n[upbotd] fake line";
+      ws.send(
+        JSON.stringify({
+          type: "send",
+          requestId,
+          to: { memberId: caraMemberId, agentId: caraBroken.id },
+          text: "echo:x",
+        }),
+      );
+      expect((await reply).status).toBe("failed");
+      ws.close();
+      await until(async () => (caraLog.text.includes("requestId=invalid") ? true : undefined));
+      expect(caraLog.text).not.toContain("[upbotd] fake line");
+      expect(caraLog.text).not.toContain("forged");
+    });
+
+    test("a reply finished after the relay drops the member is recorded as not delivered", async () => {
+      const sent = (await bob.request("team.send", {
+        memberId: caraMemberId,
+        agentId: caraSlow.id,
+        text: "watchdog-delay:2500",
+      })) as TeamMessage;
+      expect((await until(() => caraIn(sent.requestId))).status).toBe("pending");
+      await fetch(`${relayUrl}/members/${caraMemberId}`, {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${relay.adminToken}` },
+      });
+      await until(async () =>
+        ((await cara.request("team.status", {})) as TeamStatus).connected ? undefined : true,
+      );
+      const inbound = await until(async () => {
+        const m = await caraIn(sent.requestId);
+        return m?.status === "pending" ? undefined : m;
+      });
+      expect(inbound).toMatchObject({ status: "failed", reply: "(no reply)" });
+      await until(async () =>
+        caraLog.text.includes("team reply not delivered") ? true : undefined,
+      );
+      const line = caraLog.text.split("\n").find((l) => l.includes("team reply not delivered"));
+      expect(line).toBe(
+        `[upbotd] team reply not delivered requestId=${sent.requestId} agentId=${caraSlow.id} memberId=${await bobMemberId()} status=completed`,
+      );
+      expect(caraLog.text).not.toContain("watchdog-delay");
+      expect(caraLog.text).not.toContain("token=");
+      // The relay keeps no state and has no delivery ack: the requester stays pending.
+      expect((await bobOut(sent.requestId))?.status).toBe("pending");
+    });
+
+    const bobMemberId = async () => ((await bob.request("team.status", {})) as TeamStatus).me?.id;
   });
 
   test("removed members are disconnected", async () => {
