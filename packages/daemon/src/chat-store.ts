@@ -308,40 +308,88 @@ export type QueueSource = {
   meta?: Record<string, unknown>;
 };
 
-// meta_json on a queue row: extra fields producers attach for the drain loop and for the
-// services that consume the turn's user_message item (routines, gateways, team, attachments).
-export const QueueMeta = z
+const queueRoutineMeta = z.object({
+  id: z.string(),
+  name: z.string(),
+  trigger: RoutineTrigger,
+});
+const queueGatewayMeta = z
   .object({
-    routine: z.object({ id: z.string(), name: z.string(), trigger: RoutineTrigger }).optional(),
-    gateway: z
-      .object({
-        id: z.string(),
-        kind: GatewayKind,
-        name: z.string(),
-        chatId: z.string(),
-        userId: z.string(),
-        userName: z.string(),
-        replyTo: z.string().optional(),
-      })
-      .loose()
-      .optional(),
-    team: z
-      .object({ requestId: z.string(), memberId: z.string(), memberName: z.string() })
-      .optional(),
-    attachments: z.array(ChatAttachment).optional(),
+    id: z.string(),
+    kind: GatewayKind,
+    name: z.string(),
+    chatId: z.string(),
+    userId: z.string(),
+    userName: z.string(),
+    replyTo: z.string().optional(),
   })
   .loose();
-export type QueueMeta = z.infer<typeof QueueMeta>;
+const queueTeamMeta = z.object({
+  requestId: z.string(),
+  memberId: z.string(),
+  memberName: z.string(),
+});
 
-/** Parses a queue row's meta_json; corrupt or malformed meta degrades to no meta. */
-export function parseQueueMeta(row: { meta_json: string | null } | null | undefined): QueueMeta {
-  if (!row?.meta_json) return {};
+export type QueueMeta = {
+  routine?: z.infer<typeof queueRoutineMeta>;
+  gateway?: z.infer<typeof queueGatewayMeta>;
+  team?: z.infer<typeof queueTeamMeta>;
+  attachments?: z.infer<typeof ChatAttachment>[];
+};
+
+/** Parses known queue metadata fields independently and drops malformed fields. */
+export function readQueueMeta(row: { meta_json: string | null } | null | undefined): {
+  meta: QueueMeta;
+  rejected: string[];
+} {
+  if (!row?.meta_json) return { meta: {}, rejected: [] };
+  let value: unknown;
   try {
-    const parsed = QueueMeta.safeParse(JSON.parse(row.meta_json));
-    return parsed.success ? parsed.data : {};
+    value = JSON.parse(row.meta_json);
   } catch {
-    return {};
+    return { meta: {}, rejected: ["meta_json"] };
   }
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return { meta: {}, rejected: ["meta_json"] };
+
+  const source = value as Record<string, unknown>;
+  const meta: QueueMeta = {};
+  const rejected: string[] = [];
+  if (source.routine !== undefined) {
+    const parsed = queueRoutineMeta.safeParse(source.routine);
+    if (parsed.success) meta.routine = parsed.data;
+    else rejected.push("routine");
+  }
+  if (source.gateway !== undefined) {
+    const parsed = queueGatewayMeta.safeParse(source.gateway);
+    if (parsed.success) meta.gateway = parsed.data;
+    else rejected.push("gateway");
+  }
+  if (source.team !== undefined) {
+    const parsed = queueTeamMeta.safeParse(source.team);
+    if (parsed.success) meta.team = parsed.data;
+    else rejected.push("team");
+  }
+  if (Object.hasOwn(source, "attachments")) {
+    if (!Array.isArray(source.attachments)) {
+      rejected.push("attachments");
+    } else {
+      const attachments: z.infer<typeof ChatAttachment>[] = [];
+      let invalid = false;
+      for (const attachment of source.attachments) {
+        const parsed = ChatAttachment.safeParse(attachment);
+        if (parsed.success) attachments.push(parsed.data);
+        else invalid = true;
+      }
+      if (attachments.length) meta.attachments = attachments;
+      if (invalid) rejected.push("attachments");
+    }
+  }
+  return { meta, rejected };
+}
+
+export function parseQueueMeta(row: { meta_json: string | null } | null | undefined): QueueMeta {
+  return readQueueMeta(row).meta;
 }
 
 function rowToQueueItem(r: QueueRow): QueueItemLite {

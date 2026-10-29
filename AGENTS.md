@@ -303,7 +303,10 @@ to an agent with `trigger` schedule|webhook|manual. Schedules: `every <n>m|h|d`,
 `Authorization: Bearer <webhookToken>` (per-routine token; Origin rejected), body passed as
 `<webhook_payload>` (20 KB cap). RPC `routines.list/create/update/delete/run/runs`, events
 `routine.updated`/`routine.deleted`. The prompt is wrapped in `<routine name trigger>`;
-`queue.meta_json` puts `routine`/`attachments` on the user_message item.
+`queue.meta_json` puts `routine`/`attachments` on the user_message item. `readQueueMeta`
+validates each known field (routine/gateway/team/attachments entries) independently; invalid
+ones are dropped (no reply destination is invented), unknown keys are ignored, and an invalid
+or unparseable origin keeps the turn background.
 Attachments: `chat.send {attachments:[{name,mime,dataBase64}]}` (max 10, 25 MB total) are
 written to `<workspace>/attachments/<id>/` (`src/attachments.ts`, basename-sanitized, ZIPs
 extracted with `unzip` or Windows `tar`, with unsafe archive paths rejected) and listed in an
