@@ -29,7 +29,7 @@ describe("pages e2e", () => {
   const pageId = (out: string) => /\(id ([^,]+), version/.exec(out)?.[1];
 
   async function page(id: string) {
-    return ((await c.request("pages.list", {})) as Page[]).find((p) => p.id === id);
+    return (await c.request("pages.list", {})).find((p) => p.id === id);
   }
 
   beforeAll(async () => {

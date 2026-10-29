@@ -11,6 +11,7 @@ import {
   ROOT,
   startDaemon,
   stopDaemon,
+  stopTestChildren,
   tmp,
   toolCall,
 } from "./helpers";

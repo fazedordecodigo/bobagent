@@ -1,7 +1,9 @@
 import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DEFAULT_BOT_NAME } from "../src/persona";
 import {
   DAEMON,
   DaemonClient,
@@ -202,4 +204,48 @@ describe("daemon e2e", () => {
     expect(stderr).toContain("stdin EOF");
     expect(stderr).not.toContain("wrong-token");
   });
+
+  test("fresh install seeds the default UpBot bot once, not again after delete + restart", async () => {
+    const freshDataDir = tmp("upbotd-default-bot-data-");
+    const freshAgentsRoot = tmp("upbotd-default-bot-agents-");
+    let freshDaemon: DaemonHandle | undefined;
+    let freshClient: DaemonClient | undefined;
+
+    try {
+      freshDaemon = await startDaemon(freshDataDir, freshAgentsRoot, TOKEN, {
+        UPBOT_DEFAULT_BOT: "on",
+      });
+      freshClient = await DaemonClient.connect(freshDaemon.port, TOKEN);
+      const agents = await freshClient.request("agents.list", {});
+      expect(agents).toHaveLength(1);
+      const defaultBot = agents[0];
+      if (!defaultBot) throw new Error("expected default bot");
+      expect(defaultBot.name).toBe(DEFAULT_BOT_NAME);
+      expect(defaultBot.provider).toBe("claude");
+      expect(defaultBot.workspacePath.startsWith(freshAgentsRoot)).toBe(true);
+
+      await freshClient.request("agents.delete", { id: defaultBot.id });
+      await stopDaemon(freshDaemon, freshClient, undefined, "SIGTERM");
+      freshDaemon = undefined;
+      freshClient = undefined;
+
+      freshDaemon = await startDaemon(freshDataDir, freshAgentsRoot, TOKEN, {
+        UPBOT_DEFAULT_BOT: "on",
+      });
+      freshClient = await DaemonClient.connect(freshDaemon.port, TOKEN);
+      expect(await freshClient.request("agents.list", {})).toEqual([]);
+    } finally {
+      try {
+        if (freshDaemon) await stopDaemon(freshDaemon, freshClient);
+      } finally {
+        rmSync(freshDataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+        rmSync(freshAgentsRoot, {
+          recursive: true,
+          force: true,
+          maxRetries: 10,
+          retryDelay: 100,
+        });
+      }
+    }
+  }, 30000);
 });

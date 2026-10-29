@@ -552,7 +552,7 @@ describe("approvals e2e", () => {
       db.query("DELETE FROM vault WHERE name = ?").run("unrelated.key");
       db.close();
     }
-    const entries = (await c.request("vault.list", {})) as VaultEntry[];
+    const entries = await c.request("vault.list", {});
     expect(entries.find((e) => e.name === name)?.agentIds.sort()).toEqual([reader.id, a.id].sort());
   });
 
@@ -565,7 +565,7 @@ describe("approvals e2e", () => {
         await withApproval("request_secret", { name, reason: "need access" }, (ap) =>
           c.request("approvals.respond", { id: ap.id, decision: "approve", value }),
         );
-        const entries = (await subscriber.request("vault.list", {})) as VaultEntry[];
+        const entries = await subscriber.request("vault.list", {});
         const events = subscriber.events.slice(start);
         expect(events.filter((event) => event.event === "vault.changed")).toEqual([
           { event: "vault.changed", data: {} },

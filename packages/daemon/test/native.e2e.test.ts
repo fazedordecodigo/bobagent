@@ -309,7 +309,7 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
     const stderrChunks = await restartDaemon();
     const t = await turn(a.id, "whoami");
     expect(t.status).toBe("completed");
-    const who = await lastAgentText(a.id);
+    const who = await agentText(a.id);
     expect(who).not.toContain(`=${oldSessionId}`);
     const log = readLog(stateDir);
     let freshSessionId: string;
@@ -360,18 +360,13 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
     expect(stderr).toContain("provider.resume_failed");
 
     rmSync(join(stateDir, "fail-start"));
-    const { queueId } = (await c.request("chat.send", { agentId: a.id, text: "whoami" })) as {
-      queueId: string;
-    };
-    const retryTurn = c.waitForEventWhere(
-      "turn.ended",
-      (d) => (d as Turn).queueId === queueId,
-    ) as Promise<Turn>;
+    const { queueId } = await c.request("chat.send", { agentId: a.id, text: "whoami" });
+    const retryTurn = c.waitForEventWhere("turn.ended", (d) => d.queueId === queueId);
     const queue = (await c.request("queue.get", { agentId: a.id })) as { paused: boolean };
     if (queue.paused) await c.request("queue.resume", { agentId: a.id });
     const completed = await retryTurn;
     expect(completed.status).toBe("completed");
-    const who = await lastAgentText(a.id);
+    const who = await agentText(a.id);
     expect(who).toContain(
       cs.provider === "claude" ? `session=${oldSessionId}` : `thread=${oldSessionId}`,
     );
