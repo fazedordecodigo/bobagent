@@ -214,6 +214,40 @@ process.stdin.on("data", (chunk) => {
     }
   });
 
+  test("redacts a credential split across stderr chunks", async () => {
+    const secret = `splitcred-${crypto.randomUUID().replaceAll("-", "")}`;
+    const firstHalf = secret.slice(0, Math.floor(secret.length / 2));
+    const secondHalf = secret.slice(firstHalf.length);
+    const bad = (await c.request("apps.connect", {
+      catalogId: "custom-stdio",
+      name: "Split Credential App",
+      command: [
+        "bun",
+        "-e",
+        "const token=process.env.SPLIT_TOKEN; const half=Math.floor(token.length/2); process.stderr.write('tok='+token.slice(0,half)); setTimeout(() => { process.stderr.write(token.slice(half)+'\\n'); setTimeout(() => process.exit(1),100); },150);",
+      ],
+      secrets: { SPLIT_TOKEN: secret },
+    })) as ConnectedApp;
+    try {
+      let failed: ConnectedApp | undefined;
+      for (let i = 0; i < 100; i++) {
+        const list = (await c.request("apps.list", {})) as ConnectedApp[];
+        failed = list.find((x) => x.id === bad.id);
+        if (failed?.status === "error") break;
+        await Bun.sleep(100);
+      }
+      const list = (await c.request("apps.list", {})) as ConnectedApp[];
+      expect(failed?.status).toBe("error");
+      expect(failed?.error).toContain("tok=[redacted]");
+      expect(JSON.stringify(list)).not.toContain(firstHalf);
+      expect(JSON.stringify(list)).not.toContain(secondHalf);
+      expect(daemonStderr).not.toContain(firstHalf);
+      expect(daemonStderr).not.toContain(secondHalf);
+    } finally {
+      await c.request("apps.delete", { id: bad.id });
+    }
+  });
+
   test("disable and delete", async () => {
     const off = (await c.request("apps.update", { id: app.id, enabled: false })) as ConnectedApp;
     expect(off.status).toBe("stopped");

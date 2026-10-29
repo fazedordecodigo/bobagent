@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
+import { StringDecoder } from "node:string_decoder";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   getDefaultEnvironment,
@@ -174,6 +175,76 @@ export function boundedAppError(message: string, tail: string, max = 500): strin
   if (!tail) return message.slice(0, max);
   const tailPart = tail.slice(-Math.max(max - 1 - message.length, Math.floor(max / 2)));
   return `${message.slice(0, max - 1 - tailPart.length)}\n${tailPart}`;
+}
+
+export function redactValues(text: string, values: Iterable<string>): string {
+  const needles = new Set<string>();
+  for (const value of values) {
+    if (!value) continue;
+    needles.add(value);
+    if (/[\r\n]/.test(value)) {
+      for (const part of value.split(/[\r\n]/)) {
+        const trimmed = part.trim();
+        if (trimmed.length >= 8) needles.add(trimmed);
+      }
+    }
+  }
+  return [...needles]
+    .sort((a, b) => b.length - a.length)
+    .reduce((result, value) => result.split(value).join("[redacted]"), text);
+}
+
+export function stderrLineBuffer(
+  maxLines = STDERR_TAIL_LINES,
+  maxLineChars = 8192,
+): {
+  push(chunk: Buffer | string): void;
+  end(): void;
+  lines(): string[];
+} {
+  const decoder = new StringDecoder("utf8");
+  const stored: string[] = [];
+  let pending = "";
+  let dropping = false;
+  let ended = false;
+
+  const store = (line: string) => {
+    stored.push(line.replace(/\r$/, ""));
+    if (stored.length > maxLines * 2) stored.splice(0, stored.length - maxLines);
+  };
+  const consume = (text: string) => {
+    for (const char of text) {
+      if (dropping) {
+        if (char === "\n") dropping = false;
+      } else if (char === "\n") {
+        store(pending);
+        pending = "";
+      } else {
+        pending += char;
+        if (pending.length > maxLineChars) {
+          pending = "";
+          dropping = true;
+          store("[stderr line truncated]");
+        }
+      }
+    }
+  };
+
+  return {
+    push(chunk) {
+      if (!ended) consume(decoder.write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    },
+    end() {
+      if (ended) return;
+      ended = true;
+      consume(decoder.end());
+      if (!dropping && pending) store(pending);
+      pending = "";
+    },
+    lines() {
+      return stored.slice(-maxLines);
+    },
+  };
 }
 
 export class AppsService {
@@ -387,9 +458,9 @@ export class AppsService {
     this.live.set(id, l);
     this.changed();
     const startedAt = Date.now();
-    const stderrLines: string[] = [];
+    const stderr = stderrLineBuffer();
     const stderrTail = () =>
-      this.redact(id, redactSecrets(stderrLines.slice(-STDERR_TAIL_LINES).join("\n"))).trim();
+      this.redact(id, redactSecrets(stderr.lines().join("\n"))).trim();
     let ctx: { catalogId: string; transport: Config["transport"] } | null = null;
     l.starting = (async () => {
       const r = this.row(id);
@@ -417,12 +488,8 @@ export class AppsService {
               stderr: "pipe",
             });
       if (transport instanceof StdioClientTransport) {
-        transport.stderr?.on("data", (d: Buffer) => {
-          for (const line of d.toString("utf8").split("\n")) stderrLines.push(line);
-          if (stderrLines.length > STDERR_TAIL_LINES * 2) {
-            stderrLines.splice(0, stderrLines.length - STDERR_TAIL_LINES);
-          }
-        });
+        transport.stderr?.on("data", (d: Buffer) => stderr.push(d));
+        transport.stderr?.on("end", () => stderr.end());
       }
       const client = new Client({ name: "upbot", version: "0.3.0" });
       const timeout = AbortSignal.timeout(Number(process.env.UPBOT_APP_START_TIMEOUT_MS) || 60_000);
@@ -479,10 +546,7 @@ export class AppsService {
   private redact(id: string, text: string): string {
     try {
       const c = this.config(this.row(id));
-      let out = text;
-      for (const v of Object.values(this.secrets(id, c)))
-        if (v) out = out.split(v).join("[redacted]");
-      return out;
+      return redactValues(text, Object.values(this.secrets(id, c)));
     } catch {
       return text;
     }
