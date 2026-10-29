@@ -248,6 +248,44 @@ process.stdin.on("data", (chunk) => {
     }
   });
 
+  test("redacts the spawn credential after it is rotated during startup", async () => {
+    const oldToken = `rotold-${crypto.randomUUID().replaceAll("-", "")}`;
+    const newToken = `rotnew-${crypto.randomUUID().replaceAll("-", "")}`;
+    const rotating = (await c.request("apps.connect", {
+      catalogId: "custom-stdio",
+      name: "Rotating Credential App",
+      command: [
+        "bun",
+        "-e",
+        "process.stderr.write('rot='+process.env.ROT_TOKEN+'\\n'); setTimeout(() => process.exit(1),1500);",
+      ],
+      secrets: { ROT_TOKEN: oldToken },
+    })) as ConnectedApp;
+    try {
+      await c.request("apps.update", {
+        id: rotating.id,
+        secrets: { ROT_TOKEN: newToken },
+      });
+      let failedStarts = 0;
+      for (let i = 0; i < 80; i++) {
+        failedStarts = daemonStderr
+          .split("[upbotd] app start failed")
+          .slice(1)
+          .filter((entry) => entry.includes(rotating.id)).length;
+        if (failedStarts >= 2) break;
+        await Bun.sleep(100);
+      }
+      const list = (await c.request("apps.list", {})) as ConnectedApp[];
+      expect(failedStarts).toBeGreaterThanOrEqual(2);
+      expect(daemonStderr).not.toContain(oldToken);
+      expect(daemonStderr).not.toContain(newToken);
+      expect(JSON.stringify(list)).not.toContain(oldToken);
+      expect(JSON.stringify(list)).not.toContain(newToken);
+    } finally {
+      await c.request("apps.delete", { id: rotating.id });
+    }
+  });
+
   test("disable and delete", async () => {
     const off = (await c.request("apps.update", { id: app.id, enabled: false })) as ConnectedApp;
     expect(off.status).toBe("stopped");

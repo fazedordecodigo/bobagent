@@ -134,6 +134,7 @@ type Live = {
   status: ConnectedApp["status"];
   error: string | null;
   tools: Tool[];
+  secretValues: string[];
 };
 
 export function slugFor(name: string): string {
@@ -454,19 +455,29 @@ export class AppsService {
     const existing = this.live.get(id);
     if (existing?.client && existing.status === "ready") return Promise.resolve();
     if (existing?.starting) return existing.starting;
-    const l: Live = { client: null, starting: null, status: "starting", error: null, tools: [] };
+    const l: Live = {
+      client: null,
+      starting: null,
+      status: "starting",
+      error: null,
+      tools: [],
+      secretValues: [],
+    };
     this.live.set(id, l);
     this.changed();
     const startedAt = Date.now();
+    let secretValues: string[] = [];
     const stderr = stderrLineBuffer();
     const stderrTail = () =>
-      this.redact(id, redactSecrets(stderr.lines().join("\n"))).trim();
+      this.redact(id, redactSecrets(stderr.lines().join("\n")), secretValues).trim();
     let ctx: { catalogId: string; transport: Config["transport"] } | null = null;
     l.starting = (async () => {
       const r = this.row(id);
       const c = this.config(r);
       ctx = { catalogId: r.catalog_id, transport: c.transport };
       const secrets = this.secrets(id, c);
+      secretValues = Object.values(secrets);
+      l.secretValues = secretValues;
       const fill = (s: string) => s.replace(/\{([A-Za-z0-9_]+)\}/g, (_, k) => secrets[k] ?? "");
       const transport =
         c.transport === "http"
@@ -526,7 +537,7 @@ export class AppsService {
       .catch((e) => {
         const tail = stderrTail();
         l.status = "error";
-        l.error = boundedAppError(this.redact(id, (e as Error).message), tail);
+        l.error = boundedAppError(this.redact(id, (e as Error).message, secretValues), tail);
         console.error("[upbotd] app start failed", {
           appId: id,
           catalogId: ctx?.catalogId ?? null,
@@ -543,13 +554,13 @@ export class AppsService {
     return l.starting;
   }
 
-  private redact(id: string, text: string): string {
+  private redact(id: string, text: string, extra: readonly string[] = []): string {
+    let current: string[] = [];
     try {
       const c = this.config(this.row(id));
-      return redactValues(text, Object.values(this.secrets(id, c)));
-    } catch {
-      return text;
-    }
+      current = Object.values(this.secrets(id, c));
+    } catch {}
+    return redactValues(text, [...extra, ...current]);
   }
 
   private appsFor(agentId: string): Row[] {
@@ -628,6 +639,9 @@ export class AppsService {
     const text = content
       .map((c) => (c.type === "text" ? (c.text ?? "") : `[${c.type} content]`))
       .join("\n");
-    return { text: this.redact(r.id, text).slice(0, 100_000), isError: res.isError === true };
+    return {
+      text: this.redact(r.id, text, l.secretValues).slice(0, 100_000),
+      isError: res.isError === true,
+    };
   }
 }
