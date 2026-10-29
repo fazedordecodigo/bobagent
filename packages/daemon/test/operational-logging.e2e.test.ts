@@ -128,17 +128,27 @@ describe("daemon operational logging", () => {
       }) as Promise<Routine>;
     const routineA = await createRoutine("Webhook A");
     const routineB = await createRoutine("Webhook B");
-    const post = (id: string) =>
+    const post = (id: string, token = "wrong") =>
       fetch(`http://127.0.0.1:${daemon.port}/hooks/${id}`, {
         method: "POST",
-        headers: { authorization: "Bearer wrong" },
+        headers: { authorization: `Bearer ${token}` },
       });
 
     expect((await post(routineA.id)).status).toBe(401);
     expect((await post(routineA.id)).status).toBe(401);
     expect((await post(routineB.id)).status).toBe(401);
+    if (!routineA.webhookToken) throw new Error("webhook token was not created");
+    expect((await post(routineA.id, routineA.webhookToken)).status).toBe(202);
     const secret3 = `not-a-routine-${crypto.randomUUID()}`;
     expect((await post(secret3)).status).toBe(401);
+    const secret4 = `get-unknown-${crypto.randomUUID()}`;
+    expect(
+      (
+        await fetch(`http://127.0.0.1:${daemon.port}/hooks/${secret4}`, {
+          method: "GET",
+        })
+      ).status,
+    ).toBe(403);
 
     (daemon.proc.stdin as { end: () => void }).end();
     await waitForExit(daemon.proc, 5000);
@@ -148,6 +158,12 @@ describe("daemon operational logging", () => {
     expect(stderr).toContain(routineB.id);
     expect(rejectionLogs.filter((line) => line.includes(routineA.id))).toHaveLength(1);
     expect(stderr).not.toContain(secret3);
+    expect(
+      rejectionLogs.some(
+        (line) => line.includes("routineId") && line.includes("unknown") && line.includes("403"),
+      ),
+    ).toBe(true);
+    expect(stderr).not.toContain(secret4);
   });
 
   test.skipIf(process.platform === "win32")("SIGTERM logs the shutdown reason", async () => {

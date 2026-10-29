@@ -60,6 +60,11 @@ type RunRow = {
   created_at: number;
 };
 
+export type WebhookAuth =
+  | { kind: "ok"; routineId: string }
+  | { kind: "notFound" }
+  | { kind: "unauthorized"; known: boolean };
+
 const toRun = (r: RunRow): RoutineRun => ({
   id: r.id,
   routineId: r.routine_id,
@@ -259,14 +264,14 @@ export class RoutineService {
     return toRun(this.db.query("SELECT * FROM routine_runs WHERE id = ?").get(runId) as RunRow);
   }
 
-  /** Routine id for a webhook call, or null when the token does not match. */
-  webhookRoutine(id: string, token: string): string | { notFound: true } | null {
+  webhookAuth(id: string, token: string): WebhookAuth {
     const r = this.row(id);
-    if (!r?.webhook_token || !r.enabled) return null;
+    if (!r?.webhook_token || !r.enabled) return { kind: "unauthorized", known: r !== null };
     const a = Buffer.from(r.webhook_token);
     const b = Buffer.from(token);
-    if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
-    return this.agents.get(r.agent_id) ? r.id : { notFound: true };
+    if (a.length !== b.length || !timingSafeEqual(a, b))
+      return { kind: "unauthorized", known: true };
+    return this.agents.get(r.agent_id) ? { kind: "ok", routineId: r.id } : { kind: "notFound" };
   }
 
   tick(now = Date.now()): void {

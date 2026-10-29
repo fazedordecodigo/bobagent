@@ -324,34 +324,35 @@ async function main() {
       const hook = /^\/hooks\/([\w-]+)$/.exec(url.pathname);
       if (hook) {
         const routineId = hook[1] ?? "";
-        const known = routines.exists(routineId);
         // local webhook trigger for a routine (curl, scripts); never from a browser page
         if (req.method !== "POST" || req.headers.get("origin") !== null) {
-          logLimited("auth.rejected", `/hooks/:id:403:${known ? routineId : "unknown"}`, {
+          const label = routines.exists(routineId) ? routineId : "unknown";
+          logLimited("auth.rejected", `/hooks/:id:403:${label}`, {
             route: "/hooks/:id",
             status: 403,
             reason: req.headers.get("origin") !== null ? "origin" : "method",
-            routineId: known ? routineId : "unknown",
+            routineId: label,
           });
           return new Response("forbidden", { status: 403 });
         }
         const auth = req.headers.get("authorization") ?? "";
-        const id = routines.webhookRoutine(
+        const authz = routines.webhookAuth(
           routineId,
           auth.startsWith("Bearer ") ? auth.slice(7) : "",
         );
-        if (id && typeof id === "object") return new Response("not found", { status: 404 });
-        if (!id) {
-          logLimited("auth.rejected", `/hooks/:id:401:${known ? routineId : "unknown"}`, {
+        if (authz.kind === "notFound") return new Response("not found", { status: 404 });
+        if (authz.kind === "unauthorized") {
+          const label = authz.known ? routineId : "unknown";
+          logLimited("auth.rejected", `/hooks/:id:401:${label}`, {
             route: "/hooks/:id",
             status: 401,
-            routineId: known ? routineId : "unknown",
+            routineId: label,
           });
           return new Response("unauthorized", { status: 401 });
         }
         return req.text().then(
           (payload) => {
-            const run = routines.run(id, "webhook", payload);
+            const run = routines.run(authz.routineId, "webhook", payload);
             return Response.json(run, { status: run.error ? 409 : 202 });
           },
           () => new Response("bad request", { status: 400 }),
