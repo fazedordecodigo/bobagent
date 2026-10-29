@@ -35,7 +35,7 @@ export function ChatView({
     runningTurn,
     loaded,
     queue,
-    error,
+    errors,
     loadEarlier,
     queuePause,
     queueResume,
@@ -170,10 +170,12 @@ export function ChatView({
         </button>
       </header>
       {modeError && <div className="notice is-err">{modeError}</div>}
-      {error && (
-        <div className="notice is-err" role="alert">
-          {error}
-        </div>
+      {(["history", "status", "queue", "earlier", "action"] as const).map((source) =>
+        errors[source] ? (
+          <div className="notice is-err" key={source} role="alert">
+            {errors[source]}
+          </div>
+        ) : null,
       )}
       <MessageList
         agent={agent}
