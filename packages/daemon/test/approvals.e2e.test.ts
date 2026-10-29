@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
@@ -333,6 +334,63 @@ describe("approvals e2e", () => {
     const v = (await c.request("vault.list", {})) as VaultEntry[];
     expect(v.find((e) => e.name === "stripe.key")?.agentIds).toEqual([a.id]);
     expect(await tool(a, "vault_get", { name: "stripe.key" })).toBe("tool-ok:sk_test_42");
+  });
+
+  test("secret approvals preserve existing readers despite an unrelated corrupt vault row", async () => {
+    const reader = (await c.request("agents.create", {
+      name: "Existing reader",
+      provider: "devin",
+      instructions: "",
+    })) as Agent;
+    const name = "shared.key";
+    await c.request("vault.set", { name, value: "original", agentIds: [reader.id] });
+    await c.request("vault.set", { name: "unrelated.key", value: "unused", agentIds: [] });
+    const db = new Database(join(dataDir, "upbot.db"));
+    try {
+      db.query("UPDATE vault SET agent_ids = ? WHERE name = ?").run("[", "unrelated.key");
+      for (const value of ["updated", "rotated"]) {
+        const r = await withApproval("request_secret", { name, reason: "need access" }, (ap) =>
+          c.request("approvals.respond", { id: ap.id, decision: "approve", value }),
+        );
+        expect(r.text).toContain("gave you access");
+        expect(r.text).not.toContain(value);
+        const row = db.query("SELECT agent_ids FROM vault WHERE name = ?").get(name) as {
+          agent_ids: string;
+        };
+        expect(JSON.parse(row.agent_ids).sort()).toEqual([reader.id, a.id].sort());
+        expect(await tool(reader, "vault_get", { name })).toBe(`tool-ok:${value}`);
+        expect(await tool(a, "vault_get", { name })).toBe(`tool-ok:${value}`);
+      }
+    } finally {
+      db.query("DELETE FROM vault WHERE name = ?").run("unrelated.key");
+      db.close();
+    }
+    const entries = (await c.request("vault.list", {})) as VaultEntry[];
+    expect(entries.find((e) => e.name === name)?.agentIds.sort()).toEqual([reader.id, a.id].sort());
+  });
+
+  test("a secret vault read failure rejects the RPC, denies the bridge request and preserves storage", async () => {
+    const name = "unreadable.key";
+    await c.request("vault.set", { name, value: "original", agentIds: [a.id] });
+    const db = new Database(join(dataDir, "upbot.db"));
+    try {
+      db.query("UPDATE vault SET agent_ids = ? WHERE name = ?").run("[", name);
+      const before = db.query("SELECT * FROM vault WHERE name = ?").get(name);
+      const r = await withApproval("request_secret", { name, reason: "rotate" }, async (ap) => {
+        await expect(
+          c.request("approvals.respond", { id: ap.id, decision: "approve", value: "replacement" }),
+        ).rejects.toMatchObject({ code: "internal", message: "internal error" });
+        const approvals = (await c.request("approvals.list", {})) as Approval[];
+        expect(approvals.find((entry) => entry.id === ap.id)?.status).toBe("denied");
+      });
+      expect(r.text).toContain(`did not provide ${name} (denied)`);
+      expect(r.text).not.toContain("replacement");
+      expect(db.query("SELECT * FROM vault WHERE name = ?").get(name)).toEqual(before);
+    } finally {
+      db.query("UPDATE vault SET agent_ids = ? WHERE name = ?").run(JSON.stringify([a.id]), name);
+      db.close();
+    }
+    expect(await tool(a, "vault_get", { name })).toBe("tool-ok:original");
   });
 
   test("take-over waits for the user to finish", async () => {
