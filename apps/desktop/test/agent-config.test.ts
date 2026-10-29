@@ -30,7 +30,9 @@ const handoff = join(
   "handoff",
   "upbot-config-agente-handoff",
 );
-const fixture = JSON.parse(readFileSync(join(handoff, "data", "agente.json"), "utf8")) as {
+const fixture = JSON.parse(
+  readFileSync(join(import.meta.dir, "fixtures", "agent-config.json"), "utf8"),
+) as {
   agent: {
     name: string;
     createdAt: string;
