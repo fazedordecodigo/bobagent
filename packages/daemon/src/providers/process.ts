@@ -197,7 +197,11 @@ export function spawnProvider(
           env: spawnEnv({ NO_COLOR: "1", ...extraEnv }),
         });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
+    let detail = error instanceof Error ? error.message : String(error);
+    detail = redactSecrets(detail);
+    for (const value of Object.values(extraEnv ?? {})) {
+      if (value) detail = detail.replaceAll(value, "<redacted>");
+    }
     throw new ProviderError("provider_unavailable", `${bin} failed to start: ${detail}`);
   }
   const spawnReady = waitForChildSpawn(child);
