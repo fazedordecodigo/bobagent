@@ -1,6 +1,9 @@
+import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
+import { join } from "node:path";
 import type { Agent, Turn } from "@upbot/protocol";
+import { safeConfigOptionId } from "../src/runtime/agent-runtime";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -102,6 +105,33 @@ describe("runtime turn-lifecycle logging", () => {
     expect(entry).toContain("provider=devin");
     expect(entry).toContain("errorType=");
     expect(stderrText.includes(secret)).toBe(false);
+  });
+
+  test("skipping invalid saved config does not log the value", async () => {
+    const secret = "sk-test-SECRETVALUE123";
+    const agent = await newAgent("Runtime logging invalid config");
+    const db = new Database(join(dataDir, "upbot.db"));
+    try {
+      db.query("UPDATE agents SET config_json = ? WHERE id = ?").run(
+        JSON.stringify({ mode: secret }),
+        agent.id,
+      );
+    } finally {
+      db.close();
+    }
+
+    const turn = await sendAndWait(agent.id, "echo:invalid config");
+    expect(turn.status).toBe("completed");
+
+    const entry = await waitForLog("skipping invalid config", agent.id);
+    expect(entry).toContain("option=mode");
+    expect(stderrText).not.toContain(secret);
+  });
+
+  test("unsafe config option IDs are redacted", () => {
+    expect(safeConfigOptionId("mode")).toBe("mode");
+    expect(safeConfigOptionId(`sk-${"A".repeat(37)}`)).toBe("<redacted>");
+    expect(safeConfigOptionId(42)).toBe("<redacted>");
   });
 
   test("provider crash logs provider exited without stderr detail", async () => {
