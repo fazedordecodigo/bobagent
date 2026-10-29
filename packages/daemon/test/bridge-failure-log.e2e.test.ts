@@ -36,7 +36,16 @@ async function runMcpBridge(
   let stderr = "";
   let buffered = "";
   const lines: string[] = [];
-  const waiters: ((line: string) => void)[] = [];
+  const waiters: {
+    resolve: (line: string) => void;
+    reject: (error: Error) => void;
+  }[] = [];
+  let exitError: Error | undefined;
+  const rejectWaiters = (error: Error) => {
+    if (exitError) return;
+    exitError = error;
+    for (const waiter of waiters.splice(0)) waiter.reject(error);
+  };
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk: string) => {
     stdout += chunk;
@@ -46,8 +55,8 @@ async function runMcpBridge(
       if (newline < 0) break;
       const line = buffered.slice(0, newline);
       buffered = buffered.slice(newline + 1);
-      const resolve = waiters.shift();
-      if (resolve) resolve(line);
+      const waiter = waiters.shift();
+      if (waiter) waiter.resolve(line);
       else lines.push(line);
     }
   });
@@ -55,17 +64,31 @@ async function runMcpBridge(
   child.stderr.on("data", (chunk: string) => {
     stderr += chunk;
   });
+  child.stdin.on("error", () => {});
   const nextLine = () => {
     const line = lines.shift();
-    return line === undefined
-      ? new Promise<string>((resolve) => waiters.push(resolve))
-      : Promise.resolve(line);
+    if (line !== undefined) return Promise.resolve(line);
+    if (exitError) return Promise.reject(exitError);
+    return new Promise<string>((resolve, reject) => waiters.push({ resolve, reject }));
   };
   const replies: Record<string, unknown>[] = [];
   const closed = new Promise<void>((resolve, reject) => {
-    child.once("error", reject);
-    child.once("close", (code) => (code === 0 ? resolve() : reject(new Error(`exit ${code}`))));
+    child.once("error", (error) => {
+      rejectWaiters(
+        new Error(
+          `mcp-bridge exited (code ${child.exitCode}, signal ${child.signalCode}) before replying`,
+        ),
+      );
+      reject(error);
+    });
+    child.once("close", (code, signal) => {
+      rejectWaiters(
+        new Error(`mcp-bridge exited (code ${code}, signal ${signal}) before replying`),
+      );
+      code === 0 ? resolve() : reject(new Error(`exit ${code}`));
+    });
   });
+  void closed.catch(() => {});
   try {
     for (const request of requests) {
       const response = nextLine();
@@ -86,6 +109,16 @@ async function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void
     if (Date.now() >= deadline) throw new Error("timed out waiting for daemon stderr");
     await Bun.sleep(25);
   }
+}
+
+function readMcpSpec(stateDir: string): McpSpec {
+  const session = readLog(stateDir)
+    .filter((entry) => entry.method === "session/new")
+    .at(-1);
+  const params = session?.params as { mcpServers?: { name: string }[] } | undefined;
+  const spec = params?.mcpServers?.find((server) => server.name === "upbot") as McpSpec | undefined;
+  if (!spec) throw new Error("upbot MCP server spec missing from session/new");
+  return spec;
 }
 
 describe("bridge failure diagnostics", () => {
@@ -147,15 +180,7 @@ describe("bridge failure diagnostics", () => {
   });
 
   test("reject and failed bridge requests log only allowlisted diagnostics", async () => {
-    const session = readLog(stateDir)
-      .filter((entry) => entry.method === "session/new")
-      .at(-1);
-    const params = session?.params as { mcpServers?: { name: string }[] } | undefined;
-    const rawSpec = params?.mcpServers?.find((server) => server.name === "upbot") as
-      | (McpSpec & { env: { name: string; value: string }[] })
-      | undefined;
-    if (!rawSpec) throw new Error("upbot MCP server spec missing from session/new");
-    const spec = rawSpec;
+    const spec = readMcpSpec(stateDir);
     const wrongToken = `wrong-SENTINEL-${crypto.randomUUID()}`;
     const rejected = await runMcpBridge(spec, { UPBOT_BRIDGE_TOKEN: wrongToken }, [
       {
@@ -233,5 +258,16 @@ describe("bridge failure diagnostics", () => {
     } finally {
       await server.stop(true);
     }
+  });
+
+  test("mcp-bridge exits before replying without hanging the harness", async () => {
+    const spec = readMcpSpec(stateDir);
+    const startedAt = Date.now();
+    await expect(
+      runMcpBridge(spec, { UPBOT_BRIDGE_TOKEN: "" }, [
+        { jsonrpc: "2.0", id: 1, method: "tools/list" },
+      ]),
+    ).rejects.toThrow(/mcp-bridge exited/);
+    expect(Date.now() - startedAt).toBeLessThan(5000);
   });
 });
