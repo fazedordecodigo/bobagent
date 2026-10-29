@@ -2,7 +2,8 @@ import type { Database } from "bun:sqlite";
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { networkInterfaces } from "node:os";
 import { type MobileDevice, type MobileStatus, methodMap } from "@upbot/protocol";
-import { getSetting, setSetting } from "./db";
+import { z } from "zod";
+import { getSetting, InvalidSettingError, setSetting } from "./db/settings";
 import { envNumber } from "./env/vars";
 import { MOBILE_HTML } from "./mobile-app";
 import { ERRNO_RE, RpcError } from "./runtime/agent-runtime";
@@ -53,6 +54,11 @@ const AUDIT_HTTP_METHODS = new Set([
   "TRACE",
 ]);
 
+const settingSchema = z.looseObject({
+  enabled: z.boolean(),
+  port: z.number(),
+});
+
 type DeviceRow = {
   id: string;
   name: string;
@@ -78,7 +84,7 @@ export class MobileServer {
   constructor(private db: Database) {}
 
   private setting(): { enabled: boolean; port: number } {
-    return getSetting(this.db, "mobile", { enabled: false, port: 0 });
+    return getSetting(this.db, "mobile", settingSchema, { enabled: false, port: 0 });
   }
 
   private devices(): DeviceRow[] {
@@ -112,11 +118,23 @@ export class MobileServer {
   }
 
   start(): void {
-    if (this.setting().enabled) this.listen();
+    try {
+      if (this.setting().enabled) this.listen();
+    } catch (e) {
+      if (!(e instanceof InvalidSettingError)) throw e;
+      console.error("[upbotd] mobile access stays off:", e.message);
+    }
   }
 
   setEnabled(enabled: boolean): MobileStatus {
-    const s = this.setting();
+    let s: { enabled: boolean; port: number };
+    try {
+      s = this.setting();
+    } catch (e) {
+      if (!(e instanceof InvalidSettingError)) throw e;
+      s = { enabled: false, port: 0 };
+      setSetting(this.db, "mobile", s);
+    }
     if (enabled) this.listen();
     else this.close();
     // After a fallback bind, keep the configured port so the ephemeral one doesn't replace it.

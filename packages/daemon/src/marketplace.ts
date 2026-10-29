@@ -3,8 +3,9 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { type Agent, AgentAvatar, type MarketplaceItem, ProviderId } from "@upbot/protocol";
+import { z } from "zod";
 import type { AgentStore } from "./agents";
-import { getSetting, setSetting } from "./db";
+import { getSetting, setSetting } from "./db/settings";
 import { RpcError } from "./runtime/agent-runtime";
 import type { SkillLibrary } from "./skills";
 
@@ -16,6 +17,8 @@ export const DEFAULT_REGISTRY =
 const LEGACY_REGISTRY =
   "https://raw.githubusercontent.com/fazedordecodigo/bobagent/main/marketplace/index.json";
 const MAX_BYTES = 1024 * 1024;
+
+const sourcesSchema = z.array(z.string()).nullable();
 
 export class MarketplaceFetchError extends Error {
   constructor(
@@ -59,7 +62,7 @@ export class Marketplace {
   ) {}
 
   sources(): string[] {
-    const saved = getSetting<string[] | null>(this.db, "marketplace_sources", null);
+    const saved = getSetting(this.db, "marketplace_sources", sourcesSchema, null);
     if (!saved) return [process.env.UPBOT_MARKETPLACE_URL ?? DEFAULT_REGISTRY];
     // sources saved before the repo moved to fazedordecodigo/upbot
     return saved.map((u) => (u === LEGACY_REGISTRY ? DEFAULT_REGISTRY : u));

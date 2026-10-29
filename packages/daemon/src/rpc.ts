@@ -7,6 +7,7 @@ import { type BrowserService, findBrowser } from "./browser";
 import type { ChannelService } from "./channels";
 import type { ChatStore, QueueStore } from "./chat-store";
 import type { ComputerUse } from "./computer";
+import { InvalidSettingError } from "./db/settings";
 import { draftAgent } from "./draft";
 import type { EmailService } from "./email";
 import type { GatewayService } from "./gateways";
@@ -137,6 +138,13 @@ export class Rpc {
           JSON.stringify({ method, code: e.code, durationMs, error: errorDiagnostics(e) }),
         );
         return JSON.stringify({ id, error: { code: e.code, message: e.message } });
+      }
+      if (e instanceof InvalidSettingError) {
+        console.error(
+          "[upbotd] handler error",
+          JSON.stringify({ method, durationMs, error: errorDiagnostics(e) }),
+        );
+        return JSON.stringify({ id, error: { code: "internal", message: e.message } });
       }
       console.error(
         "[upbotd] handler error",
