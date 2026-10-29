@@ -10,6 +10,7 @@ import type {
 import { useCallback, useEffect, useState } from "react";
 import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 import { btnCls, inputCls } from "./AgentSettings";
 
 function Preflight({ h }: { h: RemoteHost }) {
@@ -164,10 +165,7 @@ export function HostsView({ client, agents }: { client: DaemonClient; agents: Ag
   const [form, setForm] = useState({ name: "", target: "", port: "22", identityFile: "" });
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const fail = useCallback(
-    (e: unknown) => setError(e instanceof Error ? e.message : String(e)),
-    [],
-  );
+  const fail = useCallback((e: unknown) => setError(errorMessage(e)), []);
 
   const reload = useCallback(() => {
     client.request("hosts.list", {}).then(setHosts).catch(fail);

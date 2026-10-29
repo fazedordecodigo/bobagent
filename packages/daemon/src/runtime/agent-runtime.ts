@@ -13,12 +13,11 @@ import type { AgentStore } from "../agents";
 import type { ChatStore, QueueSource, QueueStore } from "../chat-store";
 import { checkProviderAvailable, DEFAULT_MODE, getDriver } from "../providers";
 import { withTimeout } from "../providers/process";
-import {
-  type McpServerSpec,
-  ProviderError,
-  type ProviderHooks,
-  type ProviderSession,
-  type RemoteLaunch,
+import type {
+  McpServerSpec,
+  ProviderHooks,
+  ProviderSession,
+  RemoteLaunch,
 } from "../providers/types";
 import { buildHandoff } from "./handoff";
 
@@ -516,11 +515,22 @@ export class AgentRuntime {
     }
   }
 
-  async setConfig(configId: string, value: string): Promise<ConfigOption[]> {
+  async setConfig(configId: string, value: string | null): Promise<ConfigOption[]> {
     if (this.turn) throw new RpcError("busy", "a turn is running for this agent");
     const session = await this.ensureSession();
     const opt = session.configOptions.find((o) => o.id === configId);
     if (!opt) throw new RpcError("bad_request", `unknown configId ${configId}`);
+    if (value === null) {
+      if (!Object.hasOwn(this.agent.config, configId)) return session.configOptions;
+      const config = { ...this.agent.config };
+      delete config[configId];
+      this.agents.setConfig(this.agent.id, config);
+      this.agent = { ...this.agent, config };
+      this.store.clearAgentSession(this.agent.id);
+      this.dropSession();
+      this.broadcast("agent.updated", this.agent);
+      return this.configOptionsList();
+    }
     if (!opt.options.some((v) => v.value === value)) {
       throw new RpcError("bad_request", `invalid value ${value} for ${configId}`);
     }
@@ -766,8 +776,4 @@ export class AgentRuntime {
   async kill(): Promise<void> {
     await this.dispose();
   }
-}
-
-export function isProviderError(e: unknown): e is ProviderError {
-  return e instanceof ProviderError;
 }

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import { permissionLabels } from "../lib/app-permissions";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 import { btnCls, inputCls } from "./AgentSettings";
 import { AppPermissionsDialog } from "./AppPermissionsDialog";
 import { AppApprovalCards } from "./ApprovalsView";
@@ -58,7 +59,7 @@ export function AppsView({ client, agents }: { client: DaemonClient; agents: Age
   const [error, setError] = useState<string | null>(null);
   const [permissionsId, setPermissionsId] = useState<string | null>(null);
   const permissionsApp = apps.find((app) => app.id === permissionsId);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   const entry = catalog.find((e) => e.id === picked);
   const reset = () => {
     setPicked(null);

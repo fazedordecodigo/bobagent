@@ -5,6 +5,7 @@ import { daemonOn, useDaemonQuery } from "../hooks/useDaemonQuery";
 import { useLayerFocus, useMediaQuery } from "../hooks/useLayerFocus";
 import type { AgentOverview } from "../hooks/useOverview";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 import { Pill, type UiStatus } from "../lib/ui";
 import { Icon, type IconName } from "./icons";
 import { UsageBar } from "./UsageBar";
@@ -103,7 +104,7 @@ export function RunPanel({
     try {
       setRules(await client.request("approvals.setRules", { rules: next }));
     } catch (e) {
-      setRulesError(e instanceof Error ? e.message : String(e));
+      setRulesError(errorMessage(e));
     } finally {
       setRulesBusy(false);
     }
