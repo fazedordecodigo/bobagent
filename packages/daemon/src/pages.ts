@@ -36,6 +36,10 @@ const PAGE_SIZE_ERROR = `pages are limited to ${MAX_PAGE_BYTES / (1024 * 1024)} 
 export const PAGE_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'";
 
+function clampText(s: string, max: number): string {
+  return s.slice(0, max);
+}
+
 function inside(root: string, p: string): boolean {
   const rel = relative(root, p);
   return rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel));
@@ -124,7 +128,12 @@ export class PageLibrary {
         .query(
           "UPDATE pages SET title = ?, description = ?, version = version + 1, updated_at = ? WHERE id = ?",
         )
-        .run(title || prev.title, description ?? prev.description, now, prev.id);
+        .run(
+          title || clampText(prev.title, MAX_TITLE),
+          description ?? clampText(prev.description, MAX_DESCRIPTION),
+          now,
+          prev.id,
+        );
       this.broadcast("pages.changed", {});
       return this.get(prev.id);
     }

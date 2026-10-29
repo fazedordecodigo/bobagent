@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { Database } from "bun:sqlite";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Agent, ChatItem, Page, Turn } from "@upbot/protocol";
 import {
@@ -137,5 +138,24 @@ describe("pages e2e", () => {
     const v2 = await page(id!);
     expect(v2!.title).toBe("u".repeat(200));
     expect(v2!.description).toBe("d".repeat(1000));
+  });
+
+  test("legacy page metadata is capped on update", async () => {
+    const id = crypto.randomUUID();
+    const now = Date.now();
+    const db = new Database(join(dataDir, "upbot.db"));
+    db.exec("PRAGMA busy_timeout=5000");
+    db.query(
+      "INSERT INTO pages (id, agent_id, title, description, version, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)",
+    ).run(id, a.id, "L".repeat(300), "x".repeat(1500), now, now);
+    db.close();
+    mkdirSync(join(agentsRoot, "Workspace", "Pages", id), { recursive: true });
+
+    await tool(a, "page_publish", { id, html: "<p>new</p>" });
+
+    const updated = await page(id);
+    expect(updated!.title).toBe("L".repeat(200));
+    expect(updated!.description).toBe("x".repeat(1000));
+    expect(updated!.version).toBe(2);
   });
 });
