@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Agent, Approval, ChatItem, ConnectedApp, Turn, VaultEntry } from "@upbot/protocol";
@@ -314,6 +315,134 @@ describe("approvals e2e", () => {
       c.request("approvals.respond", { id: ap.id, decision: "deny" }),
     );
     expect(asked.text).toContain("declined");
+  });
+
+  test("persists the approval audit trail through daemon RPC", async () => {
+    const dbPath = join(dataDir, "upbot.db");
+    let db: Database;
+    try {
+      db = new Database(dbPath, { readonly: true });
+    } catch {
+      db = new Database(dbPath);
+    }
+    try {
+      const startSeq =
+        (db.query("SELECT MAX(seq) AS seq FROM approval_audit").get() as { seq: number | null })
+          .seq ?? 0;
+
+      const approved = await withApproval(
+        "notes-create_note",
+        { title: "audit-arg-marker" },
+        (ap) => c.request("approvals.respond", { id: ap.id, decision: "approve" }),
+      );
+      await withApproval("notes-create_note", {}, (ap) =>
+        c.request("approvals.respond", { id: ap.id, decision: "always" }),
+      );
+
+      await c.request("apps.update", { id: app.id, permissions: { write: "off" } });
+      await tool(a, "notes-create_note");
+
+      await c.request("approvals.setRules", {
+        rules: [{ id: "e2e-r", pattern: "list_agents", action: "ask", agentId: null }],
+      });
+      await c.request("approvals.setRules", {
+        rules: [{ id: "e2e-r", pattern: "list_agents", action: "allow", agentId: null }],
+      });
+
+      const secretName = "audit.secret";
+      await withApproval(
+        "request_secret",
+        { name: secretName, label: "Audit secret", reason: "audit" },
+        (ap) =>
+          c.request("approvals.respond", {
+            id: ap.id,
+            decision: "approve",
+            value: "sk_audit_marker_77",
+          }),
+      );
+
+      const rows = db
+        .query(
+          "SELECT seq, event, agent_id, data_json FROM approval_audit WHERE seq > ? ORDER BY seq",
+        )
+        .all(startSeq) as {
+        seq: number;
+        event: string;
+        agent_id: string | null;
+        data_json: string;
+      }[];
+      const entries = rows.map((row) => ({
+        ...row,
+        data: JSON.parse(row.data_json) as Record<string, unknown>,
+      }));
+      const decided = entries.find(
+        (row) =>
+          row.event === "approval.decided" && row.data.approvalId === approved.approval.id,
+      )!;
+      expect(decided.data).toMatchObject({
+        kind: "tool",
+        tool: "notes-create_note",
+        appId: app.id,
+        permission: "write",
+        status: "approved",
+        decision: "approve",
+      });
+      expect(decided.agent_id).toBe(a.id);
+
+      expect(
+        entries.find((row) => row.event === "approval.permission_escalated")?.data,
+      ).toMatchObject({
+        appId: app.id,
+        permission: "write",
+        previousLevel: "ask",
+      });
+      expect(
+        entries.find(
+          (row) =>
+            row.event === "approval.app_permissions_changed" &&
+            row.data.source === "update" &&
+            JSON.stringify(row.data.changes).includes('"to":"allow"'),
+        )?.data,
+      ).toMatchObject({
+        appId: app.id,
+        source: "update",
+        changes: [{ permission: "write", from: "ask", to: "allow" }],
+      });
+      expect(
+        entries.find(
+          (row) =>
+            row.event === "approval.app_permissions_changed" &&
+            row.data.source === "update" &&
+            JSON.stringify(row.data.changes).includes('"to":"off"'),
+        )?.data,
+      ).toMatchObject({
+        appId: app.id,
+        source: "update",
+        changes: [{ permission: "write", from: "allow", to: "off" }],
+      });
+      expect(entries.find((row) => row.event === "approval.auto_denied")?.data).toMatchObject({
+        tool: "notes-create_note",
+        permission: "write",
+        reason: "permission_off",
+      });
+      expect(
+        entries.filter((row) => row.event === "approval.rules_changed").at(-1)?.data,
+      ).toMatchObject({ changedRuleIds: ["e2e-r"] });
+      expect(
+        entries.find(
+          (row) =>
+            row.event === "approval.decided" &&
+            row.data.kind === "secret" &&
+            row.data.secretName === secretName,
+        )?.data,
+      ).toMatchObject({ kind: "secret", secretName, status: "approved" });
+
+      const serialized = entries.map((row) => row.data_json).join("\n");
+      expect(serialized).not.toContain("audit-arg-marker");
+      expect(serialized).not.toContain("sk_audit_marker_77");
+    } finally {
+      db.close();
+    }
   });
 
   test("secure secret request stores the value in the vault for that bot only", async () => {

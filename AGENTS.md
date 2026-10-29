@@ -83,8 +83,11 @@ Every terminal decision persists to `approval_audit` (migration 20): `approval.d
 (status, decision, kind, tool, app/permission, ageMs — never args or secret values),
 `approval.auto_denied` for off permissions, `approval.permission_escalated` for
 `always` escalations (app previousLevel or created ruleId), `approval.rules_changed`
-(added/removed rule ids) and `approval.secret_allowlist_read_failed` (also on stderr)
-when the vault allowlist cannot be read before re-sharing a secret.
+(added/removed/changed rule ids) and `approval.app_permissions_changed` (source connect/update/
+restore, per-kind from/to). Failed or overridden decisions include requestedDecision, reason
+and failure. `approval.secret_allowlist_read_failed` (also on stderr) records when the vault
+allowlist cannot be read before re-sharing a secret. Tests: `test/approval-audit.test.ts` and
+`test/approvals.e2e.test.ts` cover the audit trail.
 
 Desktop notifications: `apps/desktop/src/lib/notifications.ts` owns approval eligibility,
 bounded summaries, actions, persisted one-hour mute and daemon decisions. Only pending
