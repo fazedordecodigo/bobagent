@@ -163,7 +163,7 @@ test("CLI periodically reports quiet actors' suppressed audit events without log
       env: {
         ...process.env,
         RELAY_ADMIN_TOKEN: "admin-secret",
-        RELAY_AUDIT_WINDOW_MS: "1500",
+        RELAY_AUDIT_WINDOW_MS: "3000",
       },
       stdin: "pipe",
       stdout: "pipe",
