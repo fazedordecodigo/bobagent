@@ -14,6 +14,7 @@ import {
   fullApprovalArguments,
   requiresFullReview,
 } from "../lib/approval-description";
+import { nextApprovalRules } from "../lib/approval-rules";
 import type { DaemonClient } from "../lib/daemon";
 import { errorMessage } from "../lib/errors";
 import { btnCls, inputCls } from "./AgentSettings";
@@ -271,7 +272,12 @@ export function AppApprovalCards({
 
 export function ApprovalsView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
   const items = useApprovals(client);
-  const { data: rules = [], error: rulesLoadError } = useDaemonQuery(
+  const {
+    data: rules = [],
+    error: rulesLoadError,
+    loaded: rulesLoaded,
+    reload: reloadRules,
+  } = useDaemonQuery(
     client,
     "approvals.rules",
     {},
@@ -279,10 +285,19 @@ export function ApprovalsView({ client, agents }: { client: DaemonClient; agents
       events: { "approvals.rulesChanged": true },
     },
   );
+  // Mutations write the whole list via approvals.setRules, so they stay closed
+  // until the current list is known — a failed or pending load must not send a
+  // partial list that would wipe unseen rules.
+  const rulesReady = rulesLoaded && !rulesLoadError;
+  const knownRules = rulesReady ? rules : null;
   const [form, setForm] = useState({ pattern: "", action: "ask" as "ask" | "allow", agentId: "" });
   const [error, setError] = useState<string | null>(null);
-  const save = (next: ApprovalRule[]) =>
-    client.request("approvals.setRules", { rules: next }).catch((e) => setError(errorMessage(e)));
+  const save = (next: ApprovalRule[] | null) => {
+    if (next === null) return Promise.resolve();
+    return client
+      .request("approvals.setRules", { rules: next })
+      .catch((e) => setError(errorMessage(e)));
+  };
   const nameOf = (id: string | null) =>
     id ? (agents.find((a) => a.id === id)?.name ?? "Bot removido") : "Todos os bots";
   return (
@@ -306,29 +321,39 @@ export function ApprovalsView({ client, agents }: { client: DaemonClient; agents
             <span className="text-xs text-zinc-500">{nameOf(r.agentId)}</span>
             <button
               type="button"
-              className="ml-auto text-xs text-zinc-500 hover:text-red-400"
-              onClick={() => save(rules.filter((x) => x.id !== r.id))}
+              className="ml-auto text-xs text-zinc-500 hover:text-red-400 disabled:opacity-40"
+              disabled={!rulesReady}
+              onClick={() =>
+                save(nextApprovalRules(knownRules, (all) => all.filter((x) => x.id !== r.id)))
+              }
             >
               Remover
             </button>
           </li>
         ))}
-        {rules.length === 0 && <li className="text-sm text-zinc-500">Nenhuma regra ainda.</li>}
+        {rulesReady && rules.length === 0 && (
+          <li className="text-sm text-zinc-500">Nenhuma regra ainda.</li>
+        )}
+        {!rulesLoaded && !rulesLoadError && (
+          <li className="text-sm text-zinc-500">Carregando regras…</li>
+        )}
       </ul>
       <form
         className="flex flex-wrap gap-2"
         onSubmit={(e) => {
           e.preventDefault();
           setError(null);
-          void save([
-            ...rules,
-            {
-              id: crypto.randomUUID(),
-              pattern: form.pattern.trim(),
-              action: form.action,
-              agentId: form.agentId || null,
-            },
-          ]).then(() => setForm({ ...form, pattern: "" }));
+          void save(
+            nextApprovalRules(knownRules, (all) => [
+              ...all,
+              {
+                id: crypto.randomUUID(),
+                pattern: form.pattern.trim(),
+                action: form.action,
+                agentId: form.agentId || null,
+              },
+            ]),
+          ).then(() => setForm({ ...form, pattern: "" }));
         }}
       >
         <select
@@ -361,13 +386,23 @@ export function ApprovalsView({ client, agents }: { client: DaemonClient; agents
             </option>
           ))}
         </select>
-        <button type="submit" className={`${btnCls} bg-zinc-700 hover:bg-zinc-600`}>
+        <button
+          type="submit"
+          className={`${btnCls} bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40`}
+          disabled={!rulesReady}
+        >
           Adicionar
         </button>
       </form>
-      {(error || rulesLoadError) && (
-        <div className="text-xs text-red-400">{error ?? rulesLoadError}</div>
+      {rulesLoadError && (
+        <div className="text-xs text-red-400">
+          Não foi possível carregar as regras.{" "}
+          <button type="button" className="underline" onClick={reloadRules}>
+            Tentar novamente
+          </button>
+        </div>
       )}
+      {error && <div className="text-xs text-red-400">{error}</div>}
       <h3 className="text-sm font-semibold text-zinc-300">Pedidos</h3>
       <div className="space-y-2">
         {items.map((a) => (
