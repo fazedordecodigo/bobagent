@@ -537,6 +537,20 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
       await retryToast.getByRole("button", { name: "Desfazer", exact: true }).click();
       const failureToast = page.getByRole("status").filter({ hasText: "Não deu para desfazer:" });
       await failureToast.getByRole("button", { name: "Desfazer", exact: true }).waitFor();
+      await rpc.request("agents.delete", { id: currentAgent.id });
+      await failureToast.getByRole("button", { name: "Desfazer", exact: true }).click();
+      await page.getByLabel("Instruções").waitFor();
+      await failureToast.waitFor({ state: "detached" });
+      await page.waitForFunction(
+        (expected) =>
+          (document.querySelector("#agent-name") as HTMLInputElement | null)?.value === expected,
+        currentAgent.name,
+      );
+      expect(
+        ((await rpc.request("agents.list", {})) as Agent[]).some(
+          (item) => item.id === currentAgent.id,
+        ),
+      ).toBe(true);
       continue;
     }
 
