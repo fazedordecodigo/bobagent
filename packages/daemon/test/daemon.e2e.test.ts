@@ -319,4 +319,27 @@ describe("daemon e2e", () => {
     (d.proc.stdin as { end: () => void }).end();
     await waitForExit(d.proc, 5000);
   });
+
+  test("logs auth rejections and the shutdown reason to stderr", async () => {
+    const d = await startDaemon(
+      mkdtempSync(join(tmpdir(), "upbotd-data3-")),
+      mkdtempSync(join(tmpdir(), "upbotd-agents3-")),
+    );
+    const stderrText = new Response(d.proc.stderr as ReadableStream<Uint8Array>).text();
+
+    const rejected = await fetch(`http://127.0.0.1:${d.port}/health`, {
+      headers: { Authorization: "Bearer wrong-token" },
+    });
+    expect(rejected.status).toBe(401);
+
+    d.proc.kill("SIGTERM");
+    await waitForExit(d.proc, 5000);
+
+    const stderr = await stderrText;
+    expect(stderr).toContain("auth.rejected");
+    expect(stderr).toContain("/health");
+    expect(stderr).toContain("shutting down");
+    expect(stderr).toContain("SIGTERM");
+    expect(stderr).not.toContain("wrong-token");
+  });
 });
