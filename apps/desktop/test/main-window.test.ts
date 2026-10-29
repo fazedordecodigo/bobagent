@@ -2,7 +2,14 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Agent, Approval, ApprovalRule, ConnectedApp, Routine } from "@upbot/protocol";
+import type {
+  Agent,
+  Approval,
+  ApprovalRule,
+  ChannelMessage,
+  ConnectedApp,
+  Routine,
+} from "@upbot/protocol";
 import { type Browser, chromium, type Page } from "playwright-core";
 import {
   DaemonClient,
@@ -340,6 +347,31 @@ test("real chat, approval once/always/undo, details, palette, settings and drawe
 
 test("RunPanel switch tracks contain their knobs on and off in both themes", async () => {
   const previous = (await rpc.request("approvals.rules", {})) as ApprovalRule[];
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  page.setDefaultTimeout(5000);
+  await page.addInitScript((id) => {
+    localStorage.setItem("upbot.agent", id);
+    localStorage.setItem("upbot.view", "chat");
+  }, bot.id);
+  await page.routeWebSocket(`ws://127.0.0.1:${daemon.port}/ws?*`, (socket) => {
+    const server = socket.connectToServer();
+    const delayed = new Set<string>();
+    let closed = false;
+    socket.onMessage((message) => {
+      const request = JSON.parse(String(message));
+      if (request.method === "agents.list") delayed.add(request.id);
+      server.send(message);
+    });
+    server.onMessage(async (message) => {
+      const response = JSON.parse(String(message));
+      if (delayed.delete(response.id)) await Bun.sleep(500);
+      if (!closed) socket.send(message);
+    });
+    socket.onClose(() => {
+      closed = true;
+      server.close();
+    });
+  });
   try {
     for (const theme of ["light", "dark"]) {
       await rpc.request("approvals.setRules", {
@@ -356,11 +388,7 @@ test("RunPanel switch tracks contain their knobs on and off in both themes", asy
       await page.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
       await page.evaluate((value) => localStorage.setItem("upbot.theme", value), theme);
       await page.reload();
-      await page.locator(".side").waitFor();
-      await page.keyboard.press("Meta+1");
-      if (!(await page.locator(".panel").isVisible())) {
-        await page.getByRole("button", { name: "Alternar painel de execução" }).click();
-      }
+      await page.locator(".panel").waitFor();
       const permissions = page.locator('[data-od-id="panel-perms"]');
       for (const name of ["Agir sem perguntar", "switch_geometry_check"]) {
         const control = permissions.getByRole("switch", { name, exact: true });
@@ -382,6 +410,7 @@ test("RunPanel switch tracks contain their knobs on and off in both themes", asy
       if (out) await permissions.screenshot({ path: join(out, `switch-runpanel-${theme}.png`) });
     }
   } finally {
+    await page.close();
     await rpc.request("approvals.setRules", { rules: previous });
   }
 }, 30000);
@@ -726,6 +755,170 @@ test("Buscar matches instructions without exposing them and shows live overview 
   } finally {
     await target.close();
     await rpc.request("agents.delete", { id: agent.id });
+  }
+}, 15000);
+
+test("chat uses a single composer row and anonymous left/right bubbles in both themes", async () => {
+  const agent = (await rpc.request("agents.create", {
+    name: "Rascunhos",
+    provider: "devin",
+    instructions: "Organiza ideias para a semana.",
+  })) as Agent;
+  const target = await browser.newPage({ viewport: { width: 1568, height: 1089 } });
+  target.setDefaultTimeout(5000);
+  try {
+    await target.addInitScript((id) => {
+      localStorage.setItem("upbot.agent", id);
+      localStorage.setItem("upbot.view", "chat");
+    }, agent.id);
+    for (const theme of ["light", "dark"]) {
+      await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+      await target.evaluate((value) => localStorage.setItem("upbot.theme", value), theme);
+      await target.reload();
+      const prompt = target.getByRole("textbox", { name: "Mensagem para o bot", exact: true });
+      await prompt.waitFor();
+      const composer = target.locator("form.composer");
+      expect(await target.locator(".side-settings svg").innerHTML()).toBe(
+        await target
+          .locator(".main-head button svg")
+          .filter({ has: target.locator('path[d^="M19.4 15"]') })
+          .innerHTML(),
+      );
+      const send = composer.getByRole("button", { name: "Enviar", exact: true });
+      expect(await send.isDisabled()).toBe(true);
+      expect(await composer.locator(".ctx, #ctxChip, .composer-bar").count()).toBe(0);
+      expect(await composer.getByRole("button", { name: "Escolher ferramentas" }).count()).toBe(0);
+      expect(await composer.textContent()).not.toContain("ferramenta");
+      const attach = composer.getByRole("button", { name: "Anexar arquivo" });
+      await composer.locator('input[type="file"]').setInputFiles({
+        name: "ideias.txt",
+        mimeType: "text/plain",
+        buffer: Buffer.from("Ideias para revisão."),
+      });
+      await target.getByTitle("Remover anexo", { exact: true }).waitFor();
+      expect(await send.isEnabled()).toBe(true);
+      await target.getByTitle("Remover anexo", { exact: true }).click();
+      expect(await send.isDisabled()).toBe(true);
+      await prompt.fill(`echo:As ideias estão organizadas para revisão em tema ${theme}.`);
+      await send.click();
+      await target
+        .locator(".msg-agent .md")
+        .filter({ hasText: `revisão em tema ${theme}.` })
+        .waitFor();
+      await prompt.fill("");
+      expect(await target.locator(".thread .mono-av").count()).toBe(0);
+      expect((await target.locator(".thread .who").allTextContents()).join(" ")).not.toContain(
+        agent.name,
+      );
+      const user = await target.locator(".msg-user").last().boundingBox();
+      const reply = await target.locator(".msg-agent").last().boundingBox();
+      expect(user).not.toBeNull();
+      expect(reply).not.toBeNull();
+      if (!user || !reply) throw new Error("Mensagens não visíveis");
+      expect(user.x).toBeGreaterThan(reply.x);
+      expect(await target.locator(".thread .msg-agent .who").count()).toBe(0);
+      for (const bubble of [
+        target.locator(".msg-user").last(),
+        target.locator(".msg-agent .body").last(),
+      ]) {
+        const details = await bubble.evaluate((element) => {
+          const time = element.querySelector("time");
+          const text = element.querySelector("p");
+          if (!time || !text) throw new Error("Mensagem sem texto ou horário");
+          const style = getComputedStyle(time);
+          return {
+            below: time.getBoundingClientRect().top >= text.getBoundingClientRect().bottom,
+            numeric: style.fontVariantNumeric,
+            font: style.fontFamily,
+            color: style.color,
+            muted: getComputedStyle(element).getPropertyValue("--muted").trim(),
+            padding: getComputedStyle(element).padding,
+          };
+        });
+        expect(details.below).toBe(true);
+        expect(details.numeric).toBe("tabular-nums");
+        expect(details.font).toContain("monospace");
+        expect(details.padding).toBe("10px 14px");
+      }
+      const checkRow = async () => {
+        const boxes = await Promise.all([
+          attach.boundingBox(),
+          prompt.boundingBox(),
+          send.boundingBox(),
+        ]);
+        const [a, t, s] = boxes;
+        if (!a || !t || !s) throw new Error("Compositor não visível");
+        expect(a.x + a.width).toBeLessThanOrEqual(t.x);
+        expect(t.x + t.width).toBeLessThanOrEqual(s.x);
+        expect(Math.abs(a.y + a.height - s.y - s.height)).toBeLessThan(1);
+        expect(Math.abs(t.y + t.height - s.y - s.height)).toBeLessThan(1);
+        for (const box of [a, s]) {
+          expect(box.width).toBeGreaterThanOrEqual(44);
+          expect(box.height).toBeGreaterThanOrEqual(44);
+        }
+      };
+      await checkRow();
+      await prompt.fill("Primeira linha\nSegunda linha\nTerceira linha");
+      await checkRow();
+      await prompt.focus();
+      expect(await prompt.evaluate((element) => getComputedStyle(element).outlineWidth)).toBe(
+        "0px",
+      );
+      expect(await composer.evaluate((element) => getComputedStyle(element).outlineWidth)).toBe(
+        "2px",
+      );
+      expect(await composer.evaluate((element) => getComputedStyle(element).outlineOffset)).toBe(
+        "3px",
+      );
+      await capture(`chat-${theme}`, target);
+      await prompt.fill("");
+      await capture(`chat-empty-${theme}`, target);
+      await target.setViewportSize({ width: 700, height: 900 });
+      await checkRow();
+      await target.setViewportSize({ width: 1568, height: 1089 });
+    }
+  } finally {
+    await target.close();
+    await rpc.request("agents.delete", { id: agent.id });
+  }
+}, 30000);
+
+test("group chat keeps only speaker names and its composer stays on one row", async () => {
+  const channel = (await rpc.request("channels.create", {
+    name: "Ideias em grupo",
+    memberIds: [bot.id],
+    ownerId: bot.id,
+  })) as { id: string };
+  const target = await browser.newPage();
+  try {
+    await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+    await target.getByRole("button", { name: "Ideias em grupo", exact: false }).click();
+    const prompt = target.getByRole("textbox", {
+      name: "Mensagem para #Ideias em grupo",
+      exact: true,
+    });
+    const reply = rpc.waitForEventWhere("channel.message", (event) => {
+      const message = event as ChannelMessage;
+      return message.channelId === channel.id && message.authorKind === "agent";
+    });
+    await prompt.fill("echo:Podemos revisar juntos.");
+    await target
+      .locator(".channel-composer")
+      .getByRole("button", { name: "Enviar", exact: true })
+      .click();
+    await reply;
+    await target.locator(".msg-agent .md").filter({ hasText: "Podemos revisar juntos." }).waitFor();
+    expect(await target.locator(".msg-agent .who").textContent()).toContain(bot.name);
+    expect(await target.locator(".thread .mono-av").count()).toBe(0);
+    const input = await prompt.boundingBox();
+    const send = await target.locator(".channel-composer .send").boundingBox();
+    expect(input).not.toBeNull();
+    expect(send).not.toBeNull();
+    if (!input || !send) throw new Error("Compositor não visível");
+    expect(Math.abs(input.y + input.height - send.y - send.height)).toBeLessThan(1);
+  } finally {
+    await target.close();
+    await rpc.request("channels.archive", { channelId: channel.id });
   }
 }, 15000);
 

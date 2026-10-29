@@ -585,10 +585,6 @@ export default function App() {
               agent={selected}
               overview={selectedOverview}
               onOpenSettings={() => navigate("agent-settings")}
-              onOpenApps={() => {
-                setSettingsTab("apps");
-                navigate("settings");
-              }}
               notice={notice}
               onNoticeDismiss={() => setNotice(null)}
               onPanelToggle={togglePanel}

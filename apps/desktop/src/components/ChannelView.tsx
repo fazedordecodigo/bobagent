@@ -1,7 +1,6 @@
 import type { Agent, Channel, ChannelMessage } from "@upbot/protocol";
 import { useEffect, useRef, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
-import { MonoAv } from "../lib/ui";
 import { btnCls, inputCls } from "./AgentSettings";
 import { CopyButton } from "./CopyButton";
 import { Icon } from "./icons";
@@ -217,15 +216,6 @@ export function ChannelView({
                   </div>
                 ) : (
                   <div className="msg-agent">
-                    <MonoAv
-                      agent={
-                        agents.find((agent) => agent.id === m.authorAgentId) ?? {
-                          name: "?",
-                          avatar: null,
-                        }
-                      }
-                      dot={false}
-                    />
                     <div className="body">
                       <div className="who">
                         {name(m.authorAgentId)}
@@ -316,29 +306,32 @@ export function ChannelView({
               ))}
             </div>
           )}
-          <textarea
-            ref={inputRef}
-            rows={1}
-            aria-label={`Mensagem para #${channel.name}`}
-            placeholder={
-              active
-                ? `Mensagem para #${channel.name}`
-                : archived
-                  ? "Conversa em grupo arquivada"
-                  : "Conversa em grupo parada"
-            }
-            disabled={!active}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                send();
+          <div className="composer-row">
+            <textarea
+              ref={inputRef}
+              rows={1}
+              aria-label={`Mensagem para #${channel.name}`}
+              placeholder={
+                active
+                  ? `Mensagem para #${channel.name}`
+                  : archived
+                    ? "Conversa em grupo arquivada"
+                    : "Conversa em grupo parada"
               }
-            }}
-          />
-          <div className="composer-bar">
-            <span className="grow" />
+              disabled={!active}
+              value={text}
+              onChange={(e) => {
+                setText(e.target.value);
+                e.target.style.height = "auto";
+                e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
+            />
             <button
               type="submit"
               className="send"

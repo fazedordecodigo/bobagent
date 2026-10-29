@@ -1,5 +1,5 @@
 import type { Agent } from "@upbot/protocol";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useChat } from "../hooks/useChat";
 import type { AgentOverview } from "../hooks/useOverview";
 import type { DaemonClient } from "../lib/daemon";
@@ -9,7 +9,7 @@ import { PermissionNotice } from "./AgentSettings";
 import { ApprovalCards } from "./ApprovalsView";
 import { Composer } from "./Composer";
 import { DraftCards } from "./EmailView";
-import { Icon, type IconName } from "./icons";
+import { Icon } from "./icons";
 import { MessageList } from "./MessageList";
 
 export function ChatView({
@@ -17,7 +17,6 @@ export function ChatView({
   agent,
   overview,
   onOpenSettings,
-  onOpenApps,
   notice,
   onNoticeDismiss,
   onPanelToggle,
@@ -26,7 +25,6 @@ export function ChatView({
   agent: Agent;
   overview: AgentOverview | undefined;
   onOpenSettings: () => void;
-  onOpenApps: () => void;
   notice: string | null;
   onNoticeDismiss: () => void;
   onPanelToggle: () => void;
@@ -60,28 +58,6 @@ export function ChatView({
   const supportsModes = isClaude || isCodex;
   const mode = agent.config?.mode ?? (isClaude ? "default" : "auto");
   const safeMode = mode === "plan" || mode === "read-only";
-  const toolCount = useMemo(
-    () =>
-      overview
-        ? overview.apps.reduce((count, app) => count + app.tools.length, 0) +
-          (overview.emailAccounts.length ? 4 : 0)
-        : 0,
-    [overview],
-  );
-  const contextIcon = useMemo<IconName>(() => {
-    const name = overview?.apps[0]?.name.toLowerCase() ?? "";
-    if (name.includes("email") || name.includes("e-mail") || name.includes("gmail")) return "mail";
-    if (name.includes("github")) return "code";
-    if (name.includes("brave") || name.includes("web")) return "web";
-    if (name.includes("airtable") || name.includes("sheet") || name.includes("planilha"))
-      return "sheet";
-    if (name.includes("stripe") || name.includes("cartão")) return "card";
-    if (name.includes("agenda") || name.includes("calendar")) return "cal";
-    if (name.includes("notion")) return "doc";
-    if (name.includes("arquivo") || name.includes("file")) return "folder";
-    if (!name && overview?.emailAccounts.length) return "mail";
-    return "plug";
-  }, [overview]);
   const latestUser = [...items].reverse().find((item) => item.kind === "user_message");
   const isDirectMessage =
     latestUser?.kind === "user_message" &&
@@ -224,9 +200,6 @@ export function ChatView({
         placeholder={placeholder}
         hint={hint}
         hintError={sendError}
-        toolCount={toolCount}
-        contextIcon={contextIcon}
-        onTools={onOpenApps}
         onSend={send}
         onStop={() => void client.request("chat.cancel", { agentId: agent.id }).catch(() => {})}
         onTranscribe={
