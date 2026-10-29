@@ -757,6 +757,7 @@ async function bridge() {
   if (!token) die("UPBOT_BRIDGE_TOKEN missing", 2);
   const send = (m: unknown) => process.stdout.write(`${JSON.stringify(m)}\n`);
   type Msg = { id?: number | string; method?: string; params?: unknown };
+  const listedTools = new Set<string>();
   const forward = async (method: string, params: unknown) => {
     const res = await fetch("http://localhost/bridge", {
       unix: sock,
@@ -764,7 +765,10 @@ async function bridge() {
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ method, params }),
     } as RequestInit);
-    if (!res.ok) throw new Error(`daemon returned ${res.status}: ${await res.text()}`);
+    if (!res.ok)
+      throw Object.assign(new Error(`daemon returned ${res.status}: ${await res.text()}`), {
+        status: res.status,
+      });
     return res.json();
   };
   const rl = createInterface({ input: process.stdin, terminal: false });
@@ -789,9 +793,26 @@ async function bridge() {
           },
         });
       } else if (m.method === "ping") send({ jsonrpc: "2.0", id: m.id, result: {} });
-      else if (m.method === "tools/list" || m.method === "tools/call")
-        send({ jsonrpc: "2.0", id: m.id, result: await forward(m.method, m.params ?? {}) });
-      else
+      else if (m.method === "tools/list" || m.method === "tools/call") {
+        const result = await forward(m.method, m.params ?? {});
+        if (m.method === "tools/list") {
+          listedTools.clear();
+          const tools =
+            result && typeof result === "object" && "tools" in result
+              ? (result as { tools?: unknown }).tools
+              : undefined;
+          if (Array.isArray(tools))
+            for (const tool of tools)
+              if (
+                tool &&
+                typeof tool === "object" &&
+                "name" in tool &&
+                typeof tool.name === "string"
+              )
+                listedTools.add(tool.name);
+        }
+        send({ jsonrpc: "2.0", id: m.id, result });
+      } else
         send({
           jsonrpc: "2.0",
           id: m.id,
@@ -799,17 +820,28 @@ async function bridge() {
         });
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
-      const status =
-        /daemon returned (\d+)/.exec(err.message)?.[1] ??
-        (err as NodeJS.ErrnoException).code ??
-        "-";
-      const tool =
+      const method =
+        m.method === "initialize" ||
+        m.method === "ping" ||
+        m.method === "tools/list" ||
         m.method === "tools/call"
-          ? String((m.params as { name?: unknown } | undefined)?.name ?? "-")
+          ? m.method
+          : "other";
+      const name = (m.params as { name?: unknown } | undefined)?.name;
+      const tool =
+        method === "tools/call"
+          ? typeof name === "string" && listedTools.has(name)
+            ? name
+            : "unlisted"
           : "-";
-      process.stderr.write(
-        `upbot-host bridge: method=${m.method ?? "-"} tool=${tool} status=${status} error=${err.message.replace(/\s+/g, " ")}\n`,
-      );
+      const errorStatus = (err as Error & { status?: unknown }).status;
+      const errorCode = (err as NodeJS.ErrnoException).code;
+      const status = Number.isInteger(errorStatus)
+        ? String(errorStatus)
+        : typeof errorCode === "string" && /^[A-Za-z0-9_]{1,40}$/.test(errorCode)
+          ? errorCode
+          : "-";
+      process.stderr.write(`upbot-host bridge: method=${method} tool=${tool} status=${status}\n`);
       if (m.method === "tools/call")
         send({
           jsonrpc: "2.0",

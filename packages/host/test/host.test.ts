@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -195,10 +195,15 @@ describe("upbot-host", () => {
 
   test("bridge reports daemon failures on stderr without the token", () => {
     const dir = mkdtempSync(join(tmpdir(), "bridge-test-"));
+    const secretName = "sk-live-SENTINEL";
     try {
       const r = spawnSync("bun", [MAIN, "bridge"], {
-        input:
-          '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_agents","arguments":{}}}\n',
+        input: `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: secretName, arguments: {} },
+        })}\n`,
         env: {
           ...process.env,
           UPBOT_BRIDGE_SOCKET: join(dir, "missing.sock"),
@@ -208,9 +213,103 @@ describe("upbot-host", () => {
         timeout: 15000,
       });
       expect(r.stdout).toContain('"isError":true');
-      expect(r.stderr).toContain("upbot-host bridge: method=tools/call tool=list_agents");
+      expect(r.stderr).toContain("upbot-host bridge: method=tools/call tool=unlisted");
       expect(r.stderr).not.toContain("sentinel-token");
+      expect(r.stderr).not.toContain(secretName);
     } finally {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+
+  test("bridge diagnostics omit untrusted daemon response and tool values", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bridge-test-"));
+    const socket = join(dir, "bridge.sock");
+    const token = "bridge-token-SENTINEL";
+    const server = Bun.serve({
+      unix: socket,
+      async fetch(req) {
+        const body = (await req.json()) as { method: string };
+        if (body.method === "tools/list")
+          return Response.json({ tools: [{ name: "list_agents" }] });
+        return new Response('no agent named "SECRET-VALUE-123"', { status: 400 });
+      },
+    });
+    const child = spawn("bun", [MAIN, "bridge"], {
+      env: {
+        ...process.env,
+        UPBOT_BRIDGE_SOCKET: socket,
+        UPBOT_BRIDGE_TOKEN: token,
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    const pendingLines: ((line: string) => void)[] = [];
+    const lines: string[] = [];
+    let buffered = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+      buffered += chunk;
+      for (;;) {
+        const newline = buffered.indexOf("\n");
+        if (newline < 0) break;
+        const line = buffered.slice(0, newline);
+        buffered = buffered.slice(newline + 1);
+        const resolve = pendingLines.shift();
+        if (resolve) resolve(line);
+        else lines.push(line);
+      }
+    });
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    const nextLine = () => {
+      const line = lines.shift();
+      return line === undefined
+        ? new Promise<string>((resolve) => pendingLines.push(resolve))
+        : Promise.resolve(line);
+    };
+    const request = async (message: unknown) => {
+      const response = nextLine();
+      child.stdin.write(`${JSON.stringify(message)}\n`);
+      const line = await response;
+      return JSON.parse(line) as {
+        result?: { content?: { text?: string }[]; isError?: boolean; tools?: unknown[] };
+      };
+    };
+    const exited = new Promise<void>((resolve, reject) => {
+      child.once("close", (code) => (code === 0 ? resolve() : reject(new Error(`exit ${code}`))));
+    });
+    try {
+      const listed = await request({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+      expect(listed.result?.tools).toEqual([{ name: "list_agents" }]);
+      const listedCall = await request({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "list_agents", arguments: {} },
+      });
+      const secretCall = await request({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "sk-live-SENTINEL", arguments: {} },
+      });
+      expect(listedCall.result?.content?.[0]?.text).toContain('no agent named "SECRET-VALUE-123"');
+      expect(secretCall.result?.content?.[0]?.text).toContain('no agent named "SECRET-VALUE-123"');
+      child.stdin.end();
+      await exited;
+      expect(stdout).toContain("SECRET-VALUE-123");
+      expect(stderr).toContain("method=tools/call tool=list_agents status=400");
+      expect(stderr).toContain("method=tools/call tool=unlisted status=400");
+      expect(stderr).not.toContain("SECRET-VALUE-123");
+      expect(stderr).not.toContain("sk-live-SENTINEL");
+      expect(stderr).not.toContain(token);
+    } finally {
+      if (child.exitCode === null) child.kill("SIGKILL");
+      await server.stop(true);
       rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
