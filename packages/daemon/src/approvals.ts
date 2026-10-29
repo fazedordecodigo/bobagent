@@ -30,6 +30,17 @@ export function legacyPattern(pattern: string): string {
   return pattern.includes("__") ? pattern.replace("__", "-").replace(/_{2,}/g, "_") : pattern;
 }
 
+/** Expected tool-call rejection: the user denied, the approval expired or the app forbids it. */
+export class GateRejection extends Error {
+  constructor(
+    readonly reason: "denied" | "expired",
+    message: string,
+  ) {
+    super(message);
+    this.name = "GateRejection";
+  }
+}
+
 export class ApprovalService {
   private pending = new Map<string, Approval>();
   private waiters = new Map<string, Waiter>();
@@ -215,7 +226,7 @@ export class ApprovalService {
     if (isAppTool && !app) throw new RpcError("not_found", "app not found");
     const permission = classifyAppTool(tool);
     if (app?.permissions[permission] === "off")
-      throw new Error(`${app.name} não permite ${permission}`);
+      throw new GateRejection("denied", `${app.name} não permite ${permission}`);
     if (this.decide(agentId, tool, isAppTool) === "allow") return;
     const detail = JSON.stringify(args ?? {}, null, 2);
     const { approval } = await this.open(agentId, {
@@ -227,7 +238,8 @@ export class ApprovalService {
       ...(app ? { appId: app.id, appName: app.name, permission } : {}),
     });
     if (approval.status === "approved") return;
-    throw new Error(
+    throw new GateRejection(
+      approval.status === "expired" ? "expired" : "denied",
       approval.status === "expired"
         ? `the user did not approve ${tool} in time; do not retry it, report back and wait for instructions`
         : `the user declined ${tool}; do not retry it`,

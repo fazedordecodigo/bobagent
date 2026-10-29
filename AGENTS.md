@@ -312,7 +312,10 @@ scheduled runs. Webhooks: `POST /hooks/<routineId>` with
 `Authorization: Bearer <webhookToken>` (per-routine token; Origin rejected), body passed as
 `<webhook_payload>` (20 KB cap). RPC `routines.list/create/update/delete/run/runs`, events
 `routine.updated`/`routine.deleted`. The prompt is wrapped in `<routine name trigger>`;
-`queue.meta_json` puts `routine`/`attachments` on the user_message item.
+`queue.meta_json` puts `routine`/`attachments` on the user_message item. `readQueueMeta`
+validates each known field (routine/gateway/team/attachments entries) independently; invalid
+ones are dropped (no reply destination is invented), unknown keys are ignored, and an invalid
+or unparseable origin keeps the turn background.
 Attachments: `chat.send {attachments:[{name,mime,dataBase64}]}` (max 10, 25 MB total) are
 written to `<workspace>/attachments/<id>/` (`src/attachments.ts`, basename-sanitized, ZIPs
 extracted with `unzip` or Windows `tar`, with unsafe archive paths rejected) and listed in an
@@ -461,7 +464,8 @@ per-run root disk on session end. With `setpriv` installed, Firecracker runs wit
 `--pdeathsig KILL`. On the Linux x86_64/KVM test host, boot to first guest output measured 1.7
 seconds. The proxy resolves DNS once, rejects a hostname if any IPv4 answer is non-public, and
 connects to the approved address. CONNECT requests are audited at `vms/<agentId>/proxy.log`
-(rotated to `.1` above 1 MiB); provider processes drop inherited `UPBOT_*` variables while
+(rotated to `.1` above 1 MiB) with allow/deny decisions plus `connected`/`upstream error`
+outcomes per destination; provider processes drop inherited `UPBOT_*` variables while
 retaining explicit RunSpec env.
 MicroVM sign-in (`src/remote/credentials.ts`): `vmCredentials.list/set/delete` store
 `vmcred.<provider>` in the vault (hidden from `vault.list`, never on an allowlist):

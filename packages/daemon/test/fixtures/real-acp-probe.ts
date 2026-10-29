@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
+import { VERSION } from "../../src/version";
 
 const provider = process.argv[2] as "gemini" | "opencode" | "cursor";
 const commands = {
@@ -53,7 +54,7 @@ try {
         fs: { readTextFile: false, writeTextFile: false },
         terminal: false,
       },
-      clientInfo: { name: "upbot-acp-probe", version: "0.3.0" },
+      clientInfo: { name: "upbot-acp-probe", version: VERSION },
     } as never),
   )) as Record<string, unknown>;
   await conn.agent.notify("initialized");
