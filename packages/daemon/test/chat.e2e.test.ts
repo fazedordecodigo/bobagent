@@ -120,6 +120,56 @@ describe("chat e2e (fake acp agent)", () => {
     expect(JSON.stringify(envDump.env)).not.toContain(TOKEN);
   });
 
+  test("slow stream: timed flush persists chunks; mid-stream history is complete", async () => {
+    const agent = await newAgent("StreamFlush", "devin");
+    await send(agent.id, "slow");
+    await c.waitForEventWhere("item.delta", (d) => (d as { agentId: string }).agentId === agent.id);
+    await Bun.sleep(350); // > TEXT_FLUSH_MS: the timed flush must have persisted emitted chunks
+
+    // the background timer persisted without any RPC
+    const ro = new Database(join(dataDir, "upbot.db"), { readonly: true });
+    const row = ro
+      .query("SELECT data_json FROM items WHERE agent_id = ? AND kind = 'agent_message'")
+      .get(agent.id) as { data_json: string };
+    ro.close();
+    const persisted = (JSON.parse(row.data_json) as { text: string }).text;
+    expect(persisted.length).toBeGreaterThan(0);
+
+    const deltasSoFar = () =>
+      c.events
+        .filter(
+          (e) => e.event === "item.delta" && (e.data as { agentId: string }).agentId === agent.id,
+        )
+        .map((e) => (e.data as { text: string }).text)
+        .join("");
+    const emitted = deltasSoFar();
+    // ws delivery and the db write race; both are prefixes of the true stream
+    expect(persisted.startsWith(emitted) || emitted.startsWith(persisted)).toBe(true);
+
+    // chat.history mid-stream returns every emitted chunk (the read flushes pending text)
+    const created = c.events
+      .filter(
+        (e) =>
+          e.event === "item.created" &&
+          (e.data as ChatItem).agentId === agent.id &&
+          (e.data as ChatItem).kind === "agent_message",
+      )
+      .map((e) => (e.data as { text: string }).text)
+      .join("");
+    const mid = await history(agent.id);
+    const msg = mid.items.find((i) => i.kind === "agent_message") as { text: string };
+    expect(msg.text.startsWith(created + emitted)).toBe(true);
+
+    await c.request("chat.cancel", { agentId: agent.id });
+    const t = await waitTurnEnd(agent.id);
+    expect(t.status).toBe("cancelled");
+
+    // the close flush persisted every chunk emitted before the turn ended
+    const h2 = await history(agent.id);
+    const msg2 = h2.items.find((i) => i.kind === "agent_message") as { text: string };
+    expect(msg2.text).toBe(created + deltasSoFar());
+  });
+
   test("instructions prefix on first prompt of a new session only", async () => {
     const agent = await newAgent("Instructed", "devin", "Always answer in lowercase.");
     await send(agent.id, "echo:hi");
@@ -316,6 +366,12 @@ describe("chat e2e (fake acp agent)", () => {
     await send(agent.id, "slow");
     await c.waitForEventWhere("turn.started", (d) => (d as Turn).agentId === agent.id);
     const qx = await send(agent.id, "echo:x");
+    const slowPrompts = () =>
+      readLog(stateDir)
+        .filter((l) => l.method === "session/prompt")
+        .map((l) => (l.params as { prompt: { text: string }[] }).prompt[0]?.text ?? "")
+        .filter((p) => p.endsWith("slow")).length;
+    const slowBefore = slowPrompts();
     daemon.proc.kill("SIGKILL");
     await daemon.proc.exited;
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
@@ -338,8 +394,8 @@ describe("chat e2e (fake acp agent)", () => {
     const prompts = readLog(stateDir)
       .filter((l) => l.method === "session/prompt")
       .map((l) => (l.params as { prompt: { text: string }[] }).prompt[0]?.text ?? "");
-    // slow's started queue item must not re-run; echo:x drains (possibly prefixed)
-    expect(prompts.filter((p) => p.endsWith("slow")).length).toBeLessThanOrEqual(1);
+    // slow's started queue item must not re-run after the restart; echo:x drains (possibly prefixed)
+    expect(slowPrompts()).toBe(slowBefore);
     expect(prompts.some((p) => p.endsWith("echo:x"))).toBe(true);
   });
 
