@@ -27,6 +27,7 @@ test("reads a split READY line and leaves stdout available", async () => {
     },
     cancel(reason) {
       cancelled = reason;
+      return new Promise<void>(() => {});
     },
   });
 
@@ -60,6 +61,30 @@ test("cancels stdout and releases its reader on timeout", async () => {
   expect(cancelled).toBeInstanceOf(Error);
   expect(stdout.locked).toBe(false);
 });
+
+test("rejects on timeout even if stdout cancellation never settles", async () => {
+  let cancelled: unknown;
+  const stdout = new ReadableStream<Uint8Array>({
+    pull() {},
+    cancel(reason) {
+      cancelled = reason;
+      return new Promise<void>(() => {});
+    },
+  });
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const result = Promise.race([
+    readReadyPort(fakeProc(stdout, []), "tok", 50),
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("READY rejection test timed out")), 1500);
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+  await expect(result).rejects.toThrow("daemon did not print READY");
+  expect(cancelled).toBeInstanceOf(Error);
+  expect(stdout.locked).toBe(false);
+}, 2000);
 
 test("releases its reader when stdout closes before READY", async () => {
   const stdout = new ReadableStream<Uint8Array>({

@@ -7,8 +7,8 @@ export function readyLine(port: number): string {
 
 /**
  * Delivers the auth token as the first stdin line, then reads stdout until the
- * READY line and resolves with the announced port. On failure, stdout is
- * cancelled and the reader is released.
+ * READY line and resolves with the announced port. On failure, stdout
+ * cancellation is best-effort and never delays the rejection.
  */
 export async function readReadyPort(
   proc: { stdin: unknown; stdout: unknown },
@@ -40,15 +40,11 @@ export async function readReadyPort(
       }
       settled = true;
       clearTimeout(timer);
-      void (async () => {
-        try {
-          await reader.cancel(result.error).catch(() => {});
-        } catch {}
-        try {
-          reader.releaseLock();
-        } catch {}
-        reject(result.error);
-      })();
+      void reader.cancel(result.error).catch(() => {});
+      try {
+        reader.releaseLock();
+      } catch {}
+      reject(result.error);
     };
     timer = setTimeout(() => settle({ error: new Error("daemon did not print READY") }), timeoutMs);
     const pump = async () => {
