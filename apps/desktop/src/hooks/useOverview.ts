@@ -1,7 +1,6 @@
 import type {
   Agent,
   AgentStatusInfo,
-  Approval,
   ChatItem,
   ConnectedApp,
   EmailAccount,
@@ -47,25 +46,33 @@ export function useOverview(
     Record<string, { items: ChatItem[]; turn: Turn | null }>
   >({});
   const [queues, setQueues] = useState<Record<string, QueueState>>({});
-  const [approvals, refreshApprovals, setApprovals] = useDaemonQuery(
+  const { data: approvalsData, setData: setApprovals } = useDaemonQuery(
     client,
     "approvals.list",
     {},
-    [] as Approval[],
-    [],
-    { enabled },
+    { events: { "approvals.rulesChanged": true }, enabled },
   );
-  const [apps, refreshApps] = useDaemonQuery(client, "apps.list", {}, [] as ConnectedApp[], [], {
-    enabled,
-  });
-  const [emailAccounts, refreshEmail] = useDaemonQuery(
+  const approvals = approvalsData ?? [];
+  const { data: appsData } = useDaemonQuery(
+    client,
+    "apps.list",
+    {},
+    {
+      events: { "apps.changed": true },
+      enabled,
+    },
+  );
+  const apps = appsData ?? [];
+  const { data: emailAccountsData } = useDaemonQuery(
     client,
     "email.accounts.list",
     {},
-    [] as EmailAccount[],
-    [],
-    { enabled },
+    {
+      events: { "email.accounts.changed": true },
+      enabled,
+    },
   );
+  const emailAccounts = emailAccountsData ?? [];
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const loadAgent = useCallback(
@@ -112,20 +119,15 @@ export function useOverview(
       }),
       client.on("approval.updated", (approval) =>
         setApprovals((prev) => {
-          const found = prev.some((item) => item.id === approval.id);
+          const list = prev ?? [];
+          const found = list.some((item) => item.id === approval.id);
           return found
-            ? prev.map((item) => (item.id === approval.id ? approval : item))
-            : [...prev, approval];
+            ? list.map((item) => (item.id === approval.id ? approval : item))
+            : [...list, approval];
         }),
       ),
-      client.on("apps.changed", refreshApps),
-      client.on("email.accounts.changed", refreshEmail),
-      client.on("approvals.rulesChanged", refreshApprovals),
       client.onReconnect(() => {
         for (const agent of agents) void loadAgent(agent.id);
-        refreshApprovals();
-        refreshApps();
-        refreshEmail();
       }),
     ];
     return () => {
@@ -133,16 +135,7 @@ export function useOverview(
       for (const timer of timers.current.values()) clearTimeout(timer);
       timers.current.clear();
     };
-  }, [
-    agents,
-    client,
-    enabled,
-    loadAgent,
-    refreshApprovals,
-    refreshApps,
-    refreshEmail,
-    setApprovals,
-  ]);
+  }, [agents, client, enabled, loadAgent, setApprovals]);
 
   return useMemo(() => {
     const pendingByAgent = new Map<string, number>();

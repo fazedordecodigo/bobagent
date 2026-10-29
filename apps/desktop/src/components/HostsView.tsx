@@ -3,7 +3,6 @@ import type {
   AgentPlacement,
   RemoteHost,
   Subagent,
-  VmCredential,
   VmCredentialKind,
   VmCredentialProvider,
 } from "@upbot/protocol";
@@ -57,16 +56,15 @@ function VmCredentials({
   client: DaemonClient;
   onError: (e: unknown) => void;
 }) {
-  const [creds, reload] = useDaemonQuery(
-    client,
-    "vmCredentials.list",
-    {},
-    [] as VmCredential[],
-    ["hosts.changed"],
-    {
-      onError,
-    },
-  );
+  const {
+    data: credsData,
+    error: credsError,
+    reload,
+  } = useDaemonQuery(client, "vmCredentials.list", {}, { events: { "hosts.changed": true } });
+  const creds = credsData ?? [];
+  useEffect(() => {
+    if (credsError) onError(credsError);
+  }, [credsError, onError]);
   const [form, setForm] = useState<{
     provider: VmCredentialProvider;
     kind: VmCredentialKind;
