@@ -1,7 +1,8 @@
 import { listen } from "@tauri-apps/api/event";
-import type { AgentAvatar, ApprovalRule, ProviderId } from "@upbot/protocol";
+import type { Agent, ApprovalRule } from "@upbot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AgentSettings } from "./components/AgentSettings";
+import { AgentConfigScreen } from "./components/AgentConfigScreen";
+import agentConfigStyles from "./components/AgentConfigScreen.module.css";
 import { AgentsView } from "./components/AgentsView";
 import { ChannelCreateForm, ChannelView } from "./components/ChannelView";
 import { ChatView } from "./components/ChatView";
@@ -9,7 +10,6 @@ import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
 import { CreateAgentDialog, type NewAgentForm } from "./components/CreateAgentDialog";
 import { IconButton } from "./components/ds/controls";
 import { Icon } from "./components/icons";
-import { AvatarEditor, ComputerUsePanel, MemoriesPanel, RoutinesPanel } from "./components/Library";
 import { PagesView } from "./components/PagesView";
 import { RunPanel } from "./components/RunPanel";
 import { ScheduledView } from "./components/ScheduledView";
@@ -21,6 +21,7 @@ import { useDaemonState } from "./hooks/useDaemonState";
 import { useLayerFocus, useMediaQuery } from "./hooks/useLayerFocus";
 import { useOverview } from "./hooks/useOverview";
 import { DaemonClient } from "./lib/daemon";
+import { errorMessage } from "./lib/errors";
 import { nativeCommand } from "./lib/native";
 import { useNativeNotifications } from "./lib/native-notifications";
 import { mod } from "./lib/platform";
@@ -72,6 +73,21 @@ export default function App() {
     refresh,
   } = useDaemonState(client);
   const [selectedId, setSelectedId] = useState<string | null>(() => readStorage("upbot.agent"));
+  const [agentNameDraft, setAgentNameDraft] = useState<{
+    agentId: string;
+    name: string;
+  } | null>(null);
+  const updateAgentNameDraft = useCallback(
+    (agentId: string, name: string | null) =>
+      setAgentNameDraft(name === null ? null : { agentId, name }),
+    [],
+  );
+  const [deletedAgentSnapshot, setDeletedAgentSnapshot] = useState<Agent | null>(null);
+  const [agentUndoToast, setAgentUndoToast] = useState<{
+    text: string;
+    undo?: () => void;
+  } | null>(null);
+  const agentUndoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [channelId, setChannelId] = useState<string | null>(null);
   const [view, setView] = useState<View>(readView);
   const [creating, setCreating] = useState(false);
@@ -106,6 +122,7 @@ export default function App() {
 
   const overview = useOverview(client, agents, statuses, clientReady);
   const selected = agents.find((agent) => agent.id === selectedId) ?? null;
+  const settingsAgent = selected ?? deletedAgentSnapshot;
   const selectedOverview = selected ? overview[selected.id] : undefined;
   const selectedChannel = channels.find((channel) => channel.id === channelId) ?? null;
 
@@ -115,6 +132,44 @@ export default function App() {
     if (RAIL_VIEWS.includes(next as RailView)) writeStorage("upbot.view", next);
     setCreating(false);
   }, []);
+
+  const showAgentUndoToast = useCallback((text: string, undo?: () => void) => {
+    if (agentUndoTimer.current) clearTimeout(agentUndoTimer.current);
+    setAgentUndoToast({ text, ...(undo ? { undo } : {}) });
+    agentUndoTimer.current = setTimeout(() => setAgentUndoToast(null), 5000);
+  }, []);
+
+  const restoreDeletedAgent = useCallback(
+    async (agentId: string) => {
+      if (agentUndoTimer.current) clearTimeout(agentUndoTimer.current);
+      setAgentUndoToast(null);
+      try {
+        const restored = await client.request("agents.restore", { id: agentId });
+        setDeletedAgentSnapshot(null);
+        setAgents((current) =>
+          current.some((item) => item.id === restored.id)
+            ? current.map((item) => (item.id === restored.id ? restored : item))
+            : [...current, restored],
+        );
+        setSelectedId(restored.id);
+        writeStorage("upbot.agent", restored.id);
+        navigate("agent-settings");
+      } catch (e) {
+        showAgentUndoToast(
+          `Não deu para desfazer: ${e instanceof Error ? e.message : String(e)}`,
+          () => void restoreDeletedAgent(agentId),
+        );
+      }
+    },
+    [client, navigate, setAgents, showAgentUndoToast],
+  );
+
+  useEffect(
+    () => () => {
+      if (agentUndoTimer.current) clearTimeout(agentUndoTimer.current);
+    },
+    [],
+  );
 
   const openAgent = useCallback(
     (id: string) => {
@@ -160,7 +215,7 @@ export default function App() {
           return nativeCommand("main_ready");
         }
       })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => setError(errorMessage(e)));
     return () => {
       disposed = true;
       unlisten?.();
@@ -169,6 +224,7 @@ export default function App() {
 
   useEffect(() => {
     if (!clientReady || !agents.length) return;
+    if (view === "agent-settings" && deletedAgentSnapshot) return;
     if (!selectedId || !agents.some((agent) => agent.id === selectedId)) {
       const first = agents[0];
       if (first) {
@@ -176,7 +232,7 @@ export default function App() {
         writeStorage("upbot.agent", first.id);
       }
     }
-  }, [agents, clientReady, selectedId]);
+  }, [agents, clientReady, deletedAgentSnapshot, selectedId, view]);
 
   const shortcutsRef = useRef<(e: KeyboardEvent) => void>(() => {});
   shortcutsRef.current = (e) => {
@@ -340,38 +396,12 @@ export default function App() {
           await client.request("approvals.setRules", { rules: [...rules, rule] });
         } catch (e) {
           setNotice(
-            `Bot criado, mas não foi possível salvar a regra de autonomia: ${
-              e instanceof Error ? e.message : String(e)
-            }`,
+            `Bot criado, mas não foi possível salvar a regra de autonomia: ${errorMessage(e)}`,
           );
         }
       }
     },
     [client, navigate, setAgents],
-  );
-
-  const updateAgent = useCallback(
-    async (
-      id: string,
-      patch: {
-        name?: string;
-        instructions?: string;
-        provider?: ProviderId;
-        avatar?: AgentAvatar | null;
-      },
-    ) => {
-      await client.request("agents.update", { id, ...patch });
-    },
-    [client],
-  );
-
-  const deleteAgent = useCallback(
-    async (id: string) => {
-      await client.request("agents.delete", { id });
-      setSelectedId(null);
-      navigate("agents");
-    },
-    [client, navigate],
   );
 
   const togglePanel = () => {
@@ -391,6 +421,7 @@ export default function App() {
   const appClass = [
     "app",
     `view-${appView}`,
+    view === "agent-settings" ? "agent-config-shell" : "",
     noPanel && view === "chat" ? "no-panel" : "",
     panelOpen && view === "chat" ? "panel-open" : "",
     sideOpen ? "side-open" : "",
@@ -408,6 +439,7 @@ export default function App() {
         overview={overview}
         statuses={statuses}
         selectedId={selectedId}
+        agentNameOverride={agentNameDraft}
         channelId={channelId}
         current={view === "settings" && settingsTab === "apps" ? "apps" : view}
         profileName={profileName}
@@ -548,39 +580,36 @@ export default function App() {
           <section className="view on">
             <PagesView client={client} agents={agents} onOpenBot={openAgent} />
           </section>
-        ) : view === "agent-settings" && selected ? (
+        ) : view === "agent-settings" && settingsAgent ? (
           <section className="view on">
-            <div className="page agent-settings-page">
-              <div className="page-inner">
-                <div className="page-top">
-                  <div>
-                    <h1>{selected.name}</h1>
-                    <p>Configurações do bot</p>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => navigate("chat")}
-                  >
-                    Voltar à conversa
-                  </button>
-                </div>
-                <AvatarEditor
-                  agent={selected}
-                  onSave={(avatar) => updateAgent(selected.id, { avatar })}
-                />
-                <AgentSettings
-                  key={selected.id}
-                  client={client}
-                  agent={selected}
-                  onUpdate={updateAgent}
-                  onDelete={deleteAgent}
-                />
-                <MemoriesPanel client={client} agentId={selected.id} />
-                <RoutinesPanel client={client} agentId={selected.id} />
-                <ComputerUsePanel client={client} agentId={selected.id} />
-              </div>
-            </div>
+            <AgentConfigScreen
+              key={settingsAgent.id}
+              agent={settingsAgent}
+              client={client}
+              deleted={!selected}
+              onBack={() => navigate("chat")}
+              onHome={() => {
+                setDeletedAgentSnapshot(null);
+                setSelectedId(null);
+                navigate("home");
+              }}
+              onName={updateAgentNameDraft}
+              onDeleted={(deletedAgent, committed) => {
+                setDeletedAgentSnapshot(deletedAgent);
+                if (committed) {
+                  setSelectedId(null);
+                  setAgents((current) => current.filter((item) => item.id !== deletedAgent.id));
+                  showAgentUndoToast(
+                    "Agente excluído.",
+                    () => void restoreDeletedAgent(deletedAgent.id),
+                  );
+                }
+              }}
+              onOpenApps={() => {
+                setSettingsTab("apps");
+                navigate("settings");
+              }}
+            />
           </section>
         ) : (
           <section className="view on">
@@ -618,6 +647,16 @@ export default function App() {
           {...(palette.group ? { initialGroup: palette.group } : {})}
           onClose={() => setPalette(null)}
         />
+      )}
+      {agentUndoToast && (
+        <div role="status" className={agentConfigStyles.toast}>
+          {agentUndoToast.text}
+          {agentUndoToast.undo && (
+            <button type="button" onClick={agentUndoToast.undo}>
+              Desfazer
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

@@ -100,8 +100,12 @@ function renderAgents() {
   $("back").hidden = true; $("composer").hidden = true; $("title").textContent = "Agents";
   const list = agents.map((a) => {
     const row = el("div", "agent");
-    const av = el("span", "avatar", a.avatar ? a.avatar.emoji : a.name.slice(0, 1));
-    if (a.avatar) av.style.background = a.avatar.color;
+    const av = el(
+      "span",
+      "avatar",
+      a.avatar && "emoji" in a.avatar ? a.avatar.emoji : a.name.slice(0, 1),
+    );
+    if (a.avatar && "color" in a.avatar) av.style.background = a.avatar.color;
     const name = el("div"); name.append(el("div", null, a.name), el("div", "meta", a.provider));
     row.append(av, name, el("span", "dot " + (statuses[a.id] || "idle")));
     row.onclick = () => openAgent(a);

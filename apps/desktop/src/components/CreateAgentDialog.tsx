@@ -1,6 +1,7 @@
 import type { AgentAvatar, ProviderId } from "@upbot/protocol";
 import { useEffect, useRef, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 import { statusProvider } from "../lib/ui";
 import { PROVIDERS } from "./AgentSettings";
 import { Icon } from "./icons";
@@ -45,7 +46,7 @@ export function CreateAgentDialog({
       setInstructions(proposal.instructions);
       setAvatar(proposal.avatar);
     } catch (e) {
-      setDraftError(e instanceof Error ? e.message : String(e));
+      setDraftError(errorMessage(e));
     } finally {
       setDrafting(false);
     }
@@ -86,7 +87,7 @@ export function CreateAgentDialog({
               avatar,
             });
           } catch (e) {
-            setSubmitError(e instanceof Error ? e.message : String(e));
+            setSubmitError(errorMessage(e));
             setBusy(false);
           }
         }}
