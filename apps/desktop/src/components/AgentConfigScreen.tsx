@@ -25,6 +25,7 @@ import {
   toRoutineSchedule,
 } from "../lib/agent-config";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 import { isWindows, mod } from "../lib/platform";
 import s from "./AgentConfigScreen.module.css";
 import { PermissionNotice } from "./AgentSettings";
@@ -226,7 +227,7 @@ export function AgentConfigScreen({
         const config = await client.request("agents.configOptions", { agentId });
         nextOptions = config.configOptions;
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
+        const message = errorMessage(e);
         nextOptionsError = `Não deu para carregar os modelos: ${message === "internal error" ? "erro interno" : message}`;
       }
       const computerUse = access.agentIds.includes(agentId);
@@ -413,7 +414,7 @@ export function AgentConfigScreen({
         }
       } catch (e) {
         failed.add(section(mutation.type));
-        message ||= e instanceof Error ? e.message : String(e);
+        message ||= errorMessage(e);
       }
     }
     try {
@@ -444,7 +445,7 @@ export function AgentConfigScreen({
         showToast("Configurações salvas.");
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   }, [agent.id, client, draft, reload, saved, showToast]);
 
@@ -1014,7 +1015,7 @@ export function AgentConfigScreen({
                   if (abort.current) clearTimeout(abort.current);
                   setToast(null);
                 } catch (e) {
-                  setError(e instanceof Error ? e.message : String(e));
+                  setError(errorMessage(e));
                 }
                 setDialog(null);
               }}
