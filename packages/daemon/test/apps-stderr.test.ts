@@ -79,6 +79,10 @@ describe("app stderr helpers", () => {
     );
   });
 
+  test("redacts short multiline secret parts", () => {
+    expect(redactValues("part", ["first\npart\nlast"])).toBe("[redacted]");
+  });
+
   test("keeps the stderr tail when the startup message exceeds the bound", () => {
     const result = boundedAppError("x".repeat(600), "stderr-tail-marker");
     expect(result.length).toBeLessThanOrEqual(500);

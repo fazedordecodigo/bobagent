@@ -186,7 +186,7 @@ function secretNeedles(values: Iterable<string>): Set<string> {
     if (/[\r\n]/.test(value)) {
       for (const part of value.split(/[\r\n]/)) {
         const trimmed = part.trim();
-        if (trimmed.length >= 8) needles.add(trimmed);
+        if (trimmed.length >= 4) needles.add(trimmed);
       }
     }
   }
