@@ -3,7 +3,9 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { type Agent, AgentAvatar, type MarketplaceItem, ProviderId } from "@upbot/protocol";
+import { z } from "zod";
 import type { AgentStore } from "./agents";
+import { getSetting, setSetting } from "./db/settings";
 import { RpcError } from "./runtime/agent-runtime";
 import type { SkillLibrary } from "./skills";
 
@@ -15,6 +17,8 @@ export const DEFAULT_REGISTRY =
 const LEGACY_REGISTRY =
   "https://raw.githubusercontent.com/fazedordecodigo/bobagent/main/marketplace/index.json";
 const MAX_BYTES = 1024 * 1024;
+
+const sourcesSchema = z.array(z.string()).nullable();
 
 type IndexItem = Omit<MarketplaceItem, "source" | "installed">;
 type Template = {
@@ -44,16 +48,9 @@ export class Marketplace {
   ) {}
 
   sources(): string[] {
-    const r = this.db
-      .query("SELECT value FROM settings WHERE key = 'marketplace_sources'")
-      .get() as {
-      value: string;
-    } | null;
+    const urls = getSetting(this.db, "marketplace_sources", sourcesSchema, null);
     // sources saved before the repo moved to fazedordecodigo/upbot
-    if (r)
-      return (JSON.parse(r.value) as string[]).map((u) =>
-        u === LEGACY_REGISTRY ? DEFAULT_REGISTRY : u,
-      );
+    if (urls) return urls.map((u) => (u === LEGACY_REGISTRY ? DEFAULT_REGISTRY : u));
     return [process.env.UPBOT_MARKETPLACE_URL ?? DEFAULT_REGISTRY];
   }
 
@@ -68,9 +65,7 @@ export class Marketplace {
       if (!["https:", "http:", "file:"].includes(p))
         throw new RpcError("bad_request", `unsupported URL: ${u}`);
     }
-    this.db
-      .query("INSERT OR REPLACE INTO settings (key, value) VALUES ('marketplace_sources', ?)")
-      .run(JSON.stringify([...new Set(urls)]));
+    setSetting(this.db, "marketplace_sources", [...new Set(urls)]);
   }
 
   private async index(source: string): Promise<IndexItem[]> {

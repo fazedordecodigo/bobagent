@@ -1,7 +1,9 @@
 import type { Database } from "bun:sqlite";
 import type { TeamMember, TeamMessage, TeamStatus, Turn } from "@upbot/protocol";
+import { z } from "zod";
 import type { AgentStore } from "./agents";
 import type { ChatStore } from "./chat-store";
+import { deleteSetting, getSetting, setSetting } from "./db/settings";
 import type { Broadcast } from "./rpc";
 import { RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
@@ -12,6 +14,10 @@ import type { Vault } from "./vault";
 // answer for that turn. The member token lives in the vault as team.token.
 
 type Config = { url: string; sharedAgentIds: string[] };
+
+const configSchema = z
+  .looseObject({ url: z.string(), sharedAgentIds: z.array(z.string()) })
+  .nullable();
 type MsgRow = {
   id: string;
   request_id: string;
@@ -58,18 +64,12 @@ export class TeamClient {
   ) {}
 
   private config(): Config | null {
-    const r = this.db.query("SELECT value FROM settings WHERE key = 'team'").get() as {
-      value: string;
-    } | null;
-    return r ? (JSON.parse(r.value) as Config) : null;
+    return getSetting(this.db, "team", configSchema, null);
   }
 
   private setConfig(c: Config | null) {
-    if (c)
-      this.db
-        .query("INSERT OR REPLACE INTO settings (key, value) VALUES ('team', ?)")
-        .run(JSON.stringify(c));
-    else this.db.query("DELETE FROM settings WHERE key = 'team'").run();
+    if (c) setSetting(this.db, "team", c);
+    else deleteSetting(this.db, "team");
   }
 
   status(): TeamStatus {
