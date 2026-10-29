@@ -480,14 +480,15 @@ describe("approvals e2e", () => {
           label: "Corrupt vault row",
           reason: "test audit logging",
         },
-        (ap) =>
-          expect(
+        async (ap) => {
+          await expect(
             c.request("approvals.respond", {
               id: ap.id,
               decision: "approve",
               value: secretValue,
             }),
-          ).rejects.toMatchObject({ code: "internal" }),
+          ).rejects.toMatchObject({ code: "internal" });
+        },
       );
       expect(r.text).toContain("did not provide audit.corrupt (denied)");
       expect(r.text).not.toContain(secretValue);
