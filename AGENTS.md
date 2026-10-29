@@ -334,8 +334,9 @@ is `UPBOT_VAULT_KEY` (64 hex, tests), macOS Keychain (service `UpBot`, account `
 an existing `<data-dir>/vault.key`, then Windows DPAPI or Linux Secret Service. Linux writes
 `vault.key.location` after a successful Secret Service store so a locked/unavailable keyring
 cannot silently orphan secrets; when secure storage is unavailable, a 0600 plaintext key file
-is used with a warning. Existing plaintext keys are kept without migration. Per-secret agent
-allowlist. RPC
+is used with a warning. Fallback diagnostics are covered by `test/vault-platform.test.ts` and
+`test/vault-fallback.e2e.test.ts`. Existing plaintext keys are kept without migration.
+Per-secret agent allowlist. RPC
 `vault.list/set/setAccess/delete` (values never returned), event `vault.changed`; bridge
 `vault_list`, `vault_get`. Connectors (`src/connectors.ts`) use shared secrets without
 returning them: `connector.github` -> `github_api` (REST proxy, token redacted,
