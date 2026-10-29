@@ -230,6 +230,13 @@ export class Vault {
     return this.db.query("SELECT * FROM vault WHERE name = ?").get(name) as Row | null;
   }
 
+  /** Entry (name, allowlist, timestamp) for one secret, or null when absent. */
+  get(name: string): VaultEntry | null {
+    const r = this.row(name);
+    if (!r) return null;
+    return { name: r.name, agentIds: JSON.parse(r.agent_ids) as string[], updatedAt: r.updated_at };
+  }
+
   list(): VaultEntry[] {
     const rows = this.db
       .query(
