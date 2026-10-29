@@ -8,6 +8,7 @@ import type {
   VmCredentialProvider,
 } from "@upbot/protocol";
 import { useCallback, useEffect, useState } from "react";
+import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { DaemonClient } from "../lib/daemon";
 import { btnCls, inputCls } from "./AgentSettings";
 
@@ -55,19 +56,21 @@ function VmCredentials({
   client: DaemonClient;
   onError: (e: unknown) => void;
 }) {
-  const [creds, setCreds] = useState<VmCredential[]>([]);
+  const [creds, reload] = useDaemonQuery(
+    client,
+    "vmCredentials.list",
+    {},
+    [] as VmCredential[],
+    ["hosts.changed"],
+    {
+      onError,
+    },
+  );
   const [form, setForm] = useState<{
     provider: VmCredentialProvider;
     kind: VmCredentialKind;
     value: string;
   }>({ provider: "claude", kind: "oauth_token", value: "" });
-  const reload = useCallback(() => {
-    client.request("vmCredentials.list", {}).then(setCreds).catch(onError);
-  }, [client, onError]);
-  useEffect(() => {
-    reload();
-    return client.on("hosts.changed", reload);
-  }, [client, reload]);
   const kinds = Object.keys(CRED_HINT[form.provider]) as VmCredentialKind[];
   return (
     <section className="space-y-2">

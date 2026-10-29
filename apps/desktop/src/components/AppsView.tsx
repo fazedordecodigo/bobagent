@@ -1,5 +1,6 @@
 import type { Agent, AppCatalogEntry, AppPermissionKind, ConnectedApp } from "@upbot/protocol";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import { permissionLabels } from "../lib/app-permissions";
 import type { DaemonClient } from "../lib/daemon";
 import { btnCls, inputCls } from "./AgentSettings";
@@ -49,8 +50,8 @@ function BotAccess({
 }
 
 export function AppsView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
-  const [catalog, setCatalog] = useState<AppCatalogEntry[]>([]);
-  const [apps, setApps] = useState<ConnectedApp[]>([]);
+  const [catalog] = useDaemonQuery(client, "apps.catalog", {}, [] as AppCatalogEntry[]);
+  const [apps] = useDaemonQuery(client, "apps.list", {}, [] as ConnectedApp[], ["apps.changed"]);
   const [picked, setPicked] = useState<string | null>(null);
   const [secrets, setSecrets] = useState<Record<string, string>>({});
   const [custom, setCustom] = useState({ name: "", command: "", url: "", key: "", value: "" });
@@ -58,20 +59,6 @@ export function AppsView({ client, agents }: { client: DaemonClient; agents: Age
   const [permissionsId, setPermissionsId] = useState<string | null>(null);
   const permissionsApp = apps.find((app) => app.id === permissionsId);
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
-  const load = useCallback(() => {
-    client
-      .request("apps.list", {})
-      .then(setApps)
-      .catch(() => {});
-  }, [client]);
-  useEffect(() => {
-    client
-      .request("apps.catalog", {})
-      .then(setCatalog)
-      .catch(() => {});
-    load();
-    return client.on("apps.changed", load);
-  }, [client, load]);
   const entry = catalog.find((e) => e.id === picked);
   const reset = () => {
     setPicked(null);

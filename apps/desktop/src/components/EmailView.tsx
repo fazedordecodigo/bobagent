@@ -1,5 +1,6 @@
 import type { Agent, EmailAccount, EmailDraft, EmailProvider } from "@upbot/protocol";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+import { daemonOn, useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { DaemonClient } from "../lib/daemon";
 import { btnCls, inputCls } from "./AgentSettings";
 
@@ -19,19 +20,13 @@ const splitList = (s: string) =>
     .filter(Boolean);
 
 function useDrafts(client: DaemonClient, agentId?: string) {
-  const [drafts, setDrafts] = useState<EmailDraft[]>([]);
-  const load = useCallback(() => {
-    client
-      .request("email.drafts.list", agentId ? { agentId, pendingOnly: true } : {})
-      .then(setDrafts)
-      .catch(() => {});
-  }, [client, agentId]);
-  useEffect(() => {
-    load();
-    return client.on("email.draft.updated", (d) => {
-      if (!agentId || d.agentId === agentId) load();
-    });
-  }, [client, agentId, load]);
+  const [drafts] = useDaemonQuery(
+    client,
+    "email.drafts.list",
+    agentId ? { agentId, pendingOnly: true } : {},
+    [] as EmailDraft[],
+    [daemonOn("email.draft.updated", (d) => !agentId || d.agentId === agentId)],
+  );
   return drafts;
 }
 
@@ -143,17 +138,9 @@ export function DraftCard({
 }
 
 function useAccounts(client: DaemonClient) {
-  const [accounts, setAccounts] = useState<EmailAccount[]>([]);
-  const load = useCallback(() => {
-    client
-      .request("email.accounts.list", {})
-      .then(setAccounts)
-      .catch(() => {});
-  }, [client]);
-  useEffect(() => {
-    load();
-    return client.on("email.accounts.changed", load);
-  }, [client, load]);
+  const [accounts] = useDaemonQuery(client, "email.accounts.list", {}, [] as EmailAccount[], [
+    "email.accounts.changed",
+  ]);
   return accounts;
 }
 

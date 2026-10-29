@@ -15,6 +15,7 @@ import type {
   VaultEntry,
 } from "@upbot/protocol";
 import { useCallback, useEffect, useState } from "react";
+import { daemonOn, useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { DaemonClient } from "../lib/daemon";
 import { btnCls, inputCls, PROVIDERS } from "./AgentSettings";
 import { Markdown } from "./Markdown";
@@ -91,20 +92,10 @@ export function AvatarEditor({
 }
 
 export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agentId: string }) {
-  const [items, setItems] = useState<Memory[]>([]);
+  const [items] = useDaemonQuery(client, "memories.list", { agentId }, [] as Memory[], [
+    daemonOn("memories.changed", (d) => d.agentId === agentId),
+  ]);
   const [text, setText] = useState("");
-  const load = useCallback(() => {
-    client
-      .request("memories.list", { agentId })
-      .then(setItems)
-      .catch(() => {});
-  }, [client, agentId]);
-  useEffect(() => {
-    load();
-    return client.on("memories.changed", (d) => {
-      if (d.agentId === agentId) load();
-    });
-  }, [client, agentId, load]);
   return (
     <section className="mx-auto max-w-lg space-y-2 px-6 pb-6">
       <h3 className="text-sm font-semibold text-zinc-300">Memories</h3>
@@ -150,21 +141,11 @@ export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agent
 }
 
 export function SkillsView({ client }: { client: DaemonClient }) {
-  const [skills, setSkills] = useState<Skill[]>([]);
+  const [skills] = useDaemonQuery(client, "skills.list", {}, [] as Skill[], ["skills.changed"]);
   const [edit, setEdit] = useState<{ name: string; description: string; body: string } | null>(
     null,
   );
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("skills.list", {})
-      .then(setSkills)
-      .catch(() => {});
-  }, [client]);
-  useEffect(() => {
-    load();
-    return client.on("skills.changed", load);
-  }, [client, load]);
 
   if (edit) {
     return (
@@ -261,26 +242,12 @@ export function SkillsView({ client }: { client: DaemonClient }) {
 }
 
 export function RoutinesPanel({ client, agentId }: { client: DaemonClient; agentId: string }) {
-  const [items, setItems] = useState<Routine[]>([]);
+  const [items] = useDaemonQuery(client, "routines.list", { agentId }, [] as Routine[], [
+    daemonOn("routine.updated", (r) => r.agentId === agentId),
+    "routine.deleted",
+  ]);
   const [form, setForm] = useState({ name: "", prompt: "", schedule: "", webhook: false });
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("routines.list", { agentId })
-      .then(setItems)
-      .catch(() => {});
-  }, [client, agentId]);
-  useEffect(() => {
-    load();
-    const offU = client.on("routine.updated", (r) => {
-      if (r.agentId === agentId) load();
-    });
-    const offD = client.on("routine.deleted", load);
-    return () => {
-      offU();
-      offD();
-    };
-  }, [client, agentId, load]);
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
   return (
     <section className="mx-auto max-w-lg space-y-2 px-6 pb-6">
@@ -395,17 +362,9 @@ export function RoutinesPanel({ client, agentId }: { client: DaemonClient; agent
 }
 
 export function BrowserView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
-  const [state, setState] = useState<BrowserState | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("browser.status", {})
-      .then(setState)
-      .catch(() => {});
-  }, [client]);
-  useEffect(() => {
-    load();
-    return client.on("browser.updated", load);
-  }, [client, load]);
+  const [state] = useDaemonQuery(client, "browser.status", {}, null as BrowserState | null, [
+    "browser.updated",
+  ]);
   if (!state) return null;
   const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? "deleted bot";
   return (
@@ -465,19 +424,9 @@ const CONNECTORS = [
 ] as const;
 
 export function VaultView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
-  const [entries, setEntries] = useState<VaultEntry[]>([]);
+  const [entries] = useDaemonQuery(client, "vault.list", {}, [] as VaultEntry[], ["vault.changed"]);
   const [form, setForm] = useState({ name: "", value: "", agentIds: [] as string[] });
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("vault.list", {})
-      .then(setEntries)
-      .catch(() => {});
-  }, [client]);
-  useEffect(() => {
-    load();
-    return client.on("vault.changed", load);
-  }, [client, load]);
   const toggle = (ids: string[], id: string) =>
     ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id];
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
@@ -591,17 +540,13 @@ export function VaultView({ client, agents }: { client: DaemonClient; agents: Ag
 }
 
 export function ComputerUsePanel({ client, agentId }: { client: DaemonClient; agentId: string }) {
-  const [state, setState] = useState<{ available: boolean; agentIds: string[] } | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("computer.access", {})
-      .then(setState)
-      .catch(() => {});
-  }, [client]);
-  useEffect(() => {
-    load();
-    return client.on("computer.changed", load);
-  }, [client, load]);
+  const [state] = useDaemonQuery(
+    client,
+    "computer.access",
+    {},
+    null as { available: boolean; agentIds: string[] } | null,
+    ["computer.changed"],
+  );
   if (!state?.available) return null;
   const on = state.agentIds.includes(agentId);
   return (
@@ -649,7 +594,10 @@ const GATEWAY_HELP: Record<GatewayKind, { fields: [string, string][]; help: stri
 };
 
 export function GatewaysView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
-  const [items, setItems] = useState<Gateway[]>([]);
+  const [items] = useDaemonQuery(client, "gateways.list", {}, [] as Gateway[], [
+    "gateway.updated",
+    "gateway.deleted",
+  ]);
   const [kind, setKind] = useState<GatewayKind>("telegram");
   const [form, setForm] = useState({
     name: "",
@@ -658,21 +606,6 @@ export function GatewaysView({ client, agents }: { client: DaemonClient; agents:
     tokens: {} as Record<string, string>,
   });
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("gateways.list", {})
-      .then(setItems)
-      .catch(() => {});
-  }, [client]);
-  useEffect(() => {
-    load();
-    const a = client.on("gateway.updated", load);
-    const b = client.on("gateway.deleted", load);
-    return () => {
-      a();
-      b();
-    };
-  }, [client, load]);
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
   const users = (s: string) =>
     s

@@ -1,6 +1,7 @@
 import type { Agent, AgentPlacement, ApprovalRule } from "@upbot/protocol";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "../hooks/useChat";
+import { daemonOn, useDaemonQuery } from "../hooks/useDaemonQuery";
 import { useLayerFocus, useMediaQuery } from "../hooks/useLayerFocus";
 import type { AgentOverview } from "../hooks/useOverview";
 import type { DaemonClient } from "../lib/daemon";
@@ -45,37 +46,19 @@ export function RunPanel({
   const overlay = useMediaQuery("(max-width: 1180px)");
   useLayerFocus(panelRef, overlay && overlayOpen);
   const chat = useChat(client, agent.id);
-  const [rules, setRules] = useState<ApprovalRule[]>([]);
+  const [rules, , setRules] = useDaemonQuery(client, "approvals.rules", {}, [] as ApprovalRule[], [
+    "approvals.rulesChanged",
+  ]);
   const [placement, setPlacement] = useState<AgentPlacement | null>(null);
-  const [memories, setMemories] = useState<{ id: string; text: string }[]>([]);
+  const [memories] = useDaemonQuery(
+    client,
+    "memories.list",
+    { agentId: agent.id },
+    [],
+    [daemonOn("memories.changed", (event) => event.agentId === agent.id)],
+  );
   const [rulesError, setRulesError] = useState<string | null>(null);
   const [rulesBusy, setRulesBusy] = useState(false);
-
-  const loadRules = useCallback(() => {
-    client
-      .request("approvals.rules", {})
-      .then(setRules)
-      .catch(() => {});
-  }, [client]);
-  const loadMemories = useCallback(() => {
-    client
-      .request("memories.list", { agentId: agent.id })
-      .then(setMemories)
-      .catch(() => {});
-  }, [agent.id, client]);
-
-  useEffect(() => {
-    loadRules();
-    loadMemories();
-    const offRules = client.on("approvals.rulesChanged", loadRules);
-    const offMemory = client.on("memories.changed", (event) => {
-      if (event.agentId === agent.id) loadMemories();
-    });
-    return () => {
-      offRules();
-      offMemory();
-    };
-  }, [agent.id, client, loadMemories, loadRules]);
 
   useEffect(() => {
     let alive = true;

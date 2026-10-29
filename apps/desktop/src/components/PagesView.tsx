@@ -1,5 +1,6 @@
 import type { Agent, Page } from "@upbot/protocol";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { DaemonClient } from "../lib/daemon";
 import { btnCls } from "./AgentSettings";
 
@@ -12,18 +13,8 @@ export function PagesView({
   agents: Agent[];
   onOpenBot: (id: string) => void;
 }) {
-  const [pages, setPages] = useState<Page[]>([]);
+  const [pages] = useDaemonQuery(client, "pages.list", {}, [] as Page[], ["pages.changed"]);
   const [selected, setSelected] = useState<string | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("pages.list", {})
-      .then(setPages)
-      .catch(() => {});
-  }, [client]);
-  useEffect(() => {
-    load();
-    return client.on("pages.changed", load);
-  }, [client, load]);
   const page = pages.find((p) => p.id === selected) ?? pages[0] ?? null;
   const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? "bot removido";
   return (
