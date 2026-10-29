@@ -14,6 +14,7 @@ import type {
   ConnectedApp,
 } from "@upbot/protocol";
 import { AppPermissions, defaultAppPermissions } from "@upbot/protocol";
+import { redactSecrets, STDERR_TAIL_LINES } from "./providers/process";
 import { RpcError } from "./runtime/agent-runtime";
 import type { Vault } from "./vault";
 
@@ -379,8 +380,15 @@ export class AppsService {
     const l: Live = { client: null, starting: null, status: "starting", error: null, tools: [] };
     this.live.set(id, l);
     this.changed();
+    const startedAt = Date.now();
+    const stderrLines: string[] = [];
+    const stderrTail = () =>
+      this.redact(id, redactSecrets(stderrLines.slice(-STDERR_TAIL_LINES).join("\n"))).trim();
+    let ctx: { catalogId: string; transport: Config["transport"] } | null = null;
     l.starting = (async () => {
-      const c = this.config(this.row(id));
+      const r = this.row(id);
+      const c = this.config(r);
+      ctx = { catalogId: r.catalog_id, transport: c.transport };
       const secrets = this.secrets(id, c);
       const fill = (s: string) => s.replace(/\{([A-Za-z0-9_]+)\}/g, (_, k) => secrets[k] ?? "");
       const transport =
@@ -400,8 +408,16 @@ export class AppsService {
                 PATH: process.env.PATH ?? "",
                 ...secrets,
               },
-              stderr: "ignore",
+              stderr: "pipe",
             });
+      if (transport instanceof StdioClientTransport) {
+        transport.stderr?.on("data", (d: Buffer) => {
+          for (const line of d.toString("utf8").split("\n")) stderrLines.push(line);
+          if (stderrLines.length > STDERR_TAIL_LINES * 2) {
+            stderrLines.splice(0, stderrLines.length - STDERR_TAIL_LINES);
+          }
+        });
+      }
       const client = new Client({ name: "upbot", version: "0.3.0" });
       const timeout = AbortSignal.timeout(Number(process.env.UPBOT_APP_START_TIMEOUT_MS) || 60_000);
       await client.connect(transport as Transport, { signal: timeout });
@@ -414,9 +430,19 @@ export class AppsService {
       } while (cursor && tools.length < 500);
       client.onclose = () => {
         if (this.live.get(id) === l) {
+          const wasReady = l.status === "ready";
           l.status = "error";
           l.error = "the app's MCP server exited";
           l.client = null;
+          if (wasReady) {
+            const tail = stderrTail();
+            console.error("[upbotd] app MCP server exited", {
+              appId: id,
+              catalogId: r.catalog_id,
+              transport: c.transport,
+              ...(tail ? { stderrTail: tail } : {}),
+            });
+          }
           this.changed();
         }
       };
@@ -425,8 +451,18 @@ export class AppsService {
       l.status = "ready";
     })()
       .catch((e) => {
+        const tail = stderrTail();
         l.status = "error";
-        l.error = this.redact(id, (e as Error).message).slice(0, 500);
+        l.error = this.redact(id, (e as Error).message);
+        if (tail) l.error += `\n${tail}`;
+        l.error = l.error.slice(0, 500);
+        console.error("[upbotd] app start failed", {
+          appId: id,
+          catalogId: ctx?.catalogId ?? null,
+          transport: ctx?.transport ?? null,
+          durationMs: Date.now() - startedAt,
+          error: l.error,
+        });
         throw new Error(l.error);
       })
       .finally(() => {
@@ -505,7 +541,21 @@ export class AppsService {
     const l = this.live.get(r.id)!;
     const tool = appToolNames(slug, l.tools).get(name);
     if (!tool) throw new Error(`unknown tool ${name}`);
-    const res = await l.client!.callTool({ name: tool.name, arguments: args });
+    const callStart = Date.now();
+    const logCallFailure = () =>
+      console.error("[upbotd] app tool call failed", {
+        appId: r.id,
+        tool: name,
+        durationMs: Date.now() - callStart,
+      });
+    let res: Awaited<ReturnType<Client["callTool"]>>;
+    try {
+      res = await l.client!.callTool({ name: tool.name, arguments: args });
+    } catch (e) {
+      logCallFailure();
+      throw e;
+    }
+    if (res.isError === true) logCallFailure();
     const content = (res.content ?? []) as { type: string; text?: string }[];
     const text = content
       .map((c) => (c.type === "text" ? (c.text ?? "") : `[${c.type} content]`))

@@ -134,6 +134,29 @@ describe("connected apps (MCP) e2e", () => {
     expect(log).not.toContain(APP_SECRET);
   });
 
+  test("a failing stdio app surfaces its stderr tail in the error", async () => {
+    const bad = (await c.request("apps.connect", {
+      catalogId: "custom-stdio",
+      name: "Bad App",
+      command: [
+        "bun",
+        "-e",
+        "console.error('boom-stderr-marker'); setTimeout(() => process.exit(1), 100)",
+      ],
+      secrets: {},
+    })) as ConnectedApp;
+    let failed: ConnectedApp | undefined;
+    for (let i = 0; i < 100; i++) {
+      const list = (await c.request("apps.list", {})) as ConnectedApp[];
+      failed = list.find((x) => x.id === bad.id);
+      if (failed?.status === "error") break;
+      await Bun.sleep(100);
+    }
+    expect(failed?.status).toBe("error");
+    expect(failed?.error).toContain("boom-stderr-marker");
+    await c.request("apps.delete", { id: bad.id });
+  });
+
   test("disable and delete", async () => {
     const off = (await c.request("apps.update", { id: app.id, enabled: false })) as ConnectedApp;
     expect(off.status).toBe("stopped");
