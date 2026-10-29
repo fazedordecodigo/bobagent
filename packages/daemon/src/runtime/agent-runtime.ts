@@ -13,12 +13,11 @@ import type { AgentStore } from "../agents";
 import type { ChatStore, QueueSource, QueueStore } from "../chat-store";
 import { checkProviderAvailable, DEFAULT_MODE, getDriver } from "../providers";
 import { withTimeout } from "../providers/process";
-import {
-  type McpServerSpec,
-  ProviderError,
-  type ProviderHooks,
-  type ProviderSession,
-  type RemoteLaunch,
+import type {
+  McpServerSpec,
+  ProviderHooks,
+  ProviderSession,
+  RemoteLaunch,
 } from "../providers/types";
 import { buildHandoff } from "./handoff";
 
@@ -766,8 +765,4 @@ export class AgentRuntime {
   async kill(): Promise<void> {
     await this.dispose();
   }
-}
-
-export function isProviderError(e: unknown): e is ProviderError {
-  return e instanceof ProviderError;
 }
