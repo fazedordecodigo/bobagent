@@ -6,13 +6,16 @@ import { deleteSetting, getSetting, setSetting } from "./db";
 import type { Broadcast } from "./rpc";
 import { RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
-import type { Vault } from "./vault";
+import { TEAM_PREFIX, type Vault } from "./vault";
 
 // Team client: connects this daemon to a UpBot relay (packages/relay) so teammates can
 // message the agents you share, and you can message theirs. Replies are each agent's final
 // answer for that turn. The member token lives in the vault as team.token.
 
 type Config = { url: string; sharedAgentIds: string[] };
+
+const TOKEN_NAME = `${TEAM_PREFIX}token`;
+
 type MsgRow = {
   id: string;
   request_id: string;
@@ -132,7 +135,7 @@ export class TeamClient {
     }
     if (!["http:", "https:", "ws:", "wss:"].includes(u.protocol))
       throw new RpcError("bad_request", "invalid relay URL");
-    this.vault.set("team.token", token.trim(), []);
+    this.vault.set(TOKEN_NAME, token.trim(), []);
     this.setConfig({
       url: u.href.replace(/\/$/, ""),
       sharedAgentIds: this.config()?.sharedAgentIds ?? [],
@@ -145,7 +148,7 @@ export class TeamClient {
   disconnect(): void {
     this.close();
     this.setConfig(null);
-    this.vault.delete("team.token");
+    this.vault.delete(TOKEN_NAME);
     this.roster = [];
     this.me = null;
     this.error = null;
@@ -257,7 +260,7 @@ export class TeamClient {
     if (!c) return;
     let token: string;
     try {
-      token = this.vault.revealInternal("team.token");
+      token = this.vault.revealInternal(TOKEN_NAME);
     } catch {
       this.error = "missing team token";
       this.emit();

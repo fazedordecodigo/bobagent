@@ -5,7 +5,7 @@ import type { ChatStore } from "../chat-store";
 import type { Broadcast } from "../rpc";
 import { RpcError } from "../runtime/agent-runtime";
 import type { RuntimeManager } from "../runtime/runtime-manager";
-import type { Vault } from "../vault";
+import { GATEWAY_PREFIX, type Vault } from "../vault";
 import type { Inbound, Transport, TransportHooks } from "./common";
 import { DiscordTransport } from "./discord";
 import { SlackTransport } from "./slack";
@@ -21,6 +21,8 @@ export const TOKEN_FIELDS: Record<GatewayKind, string[]> = {
   discord: ["botToken"],
 };
 const MAX_REPLY = 20_000;
+
+const tokenName = (id: string, field: string) => `${GATEWAY_PREFIX}${id}.${field}`;
 
 type Row = {
   id: string;
@@ -89,7 +91,7 @@ export class GatewayService {
   ) {
     for (const f of TOKEN_FIELDS[kind]) {
       const v = tokens[f]?.trim();
-      if (v) this.vault.set(`gateway.${id}.${f}`, v, []);
+      if (v) this.vault.set(tokenName(id, f), v, []);
       else if (required)
         throw new RpcError("bad_request", `${kind} needs ${TOKEN_FIELDS[kind].join(" and ")}`);
     }
@@ -97,7 +99,7 @@ export class GatewayService {
 
   private tokens(id: string, kind: GatewayKind): Record<string, string> {
     const out: Record<string, string> = {};
-    for (const f of TOKEN_FIELDS[kind]) out[f] = this.vault.revealInternal(`gateway.${id}.${f}`);
+    for (const f of TOKEN_FIELDS[kind]) out[f] = this.vault.revealInternal(tokenName(id, f));
     return out;
   }
 
@@ -165,7 +167,7 @@ export class GatewayService {
     if (!r) throw new RpcError("not_found", "gateway not found");
     this.stopTransport(id);
     this.db.query("UPDATE gateways SET deleted_at = ? WHERE id = ?").run(Date.now(), id);
-    for (const f of TOKEN_FIELDS[r.kind]) this.vault.delete(`gateway.${id}.${f}`);
+    for (const f of TOKEN_FIELDS[r.kind]) this.vault.delete(tokenName(r.id, f));
     this.broadcast("gateway.deleted", { id });
   }
 
