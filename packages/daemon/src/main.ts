@@ -69,6 +69,12 @@ function log(...args: unknown[]) {
   console.error("[upbotd]", ...args);
 }
 
+const LOGGED_ERROR_TYPES = new Set(["Error", "TypeError", "SyntaxError", "RangeError", "RpcError"]);
+function errorType(e: unknown): string {
+  const name = e instanceof Error ? e.name : "";
+  return LOGGED_ERROR_TYPES.has(name) ? name : "Error";
+}
+
 /** Emits at most one line per key per minute so rejected-auth loops can't spam stderr. */
 const LOG_LIMIT_MS = 60_000;
 const logLimitedLast = new Map<string, number>();
@@ -302,7 +308,10 @@ async function main() {
             (r) => Response.json(r),
             (e) => {
               const message = (e as Error).message;
-              logLimited("bridge.error", `/bridge:error:${agentId}`, { agentId, message });
+              logLimited("bridge.error", `/bridge:error:${agentId}`, {
+                agentId,
+                errorType: errorType(e),
+              });
               return new Response(message, { status: 400 });
             },
           );
