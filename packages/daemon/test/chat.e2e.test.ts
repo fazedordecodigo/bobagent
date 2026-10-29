@@ -54,6 +54,30 @@ describe("chat e2e (fake acp agent)", () => {
     return (await c.request("chat.history", { agentId })) as never;
   }
 
+  function expectSeqPrefix(text: string): number {
+    expect(text).toMatch(/^(\d+\|)*$/);
+    const tokens = text === "" ? [] : text.slice(0, -1).split("|");
+    expect(tokens).toEqual(tokens.map((_, i) => String(i)));
+    return tokens.length;
+  }
+
+  function emittedAgentMessage(agentId: string, itemId: string): string {
+    return c.events
+      .filter((e) => {
+        if (e.event === "item.created") {
+          const item = e.data as ChatItem;
+          return item.id === itemId && item.agentId === agentId && item.kind === "agent_message";
+        }
+        if (e.event === "item.delta") {
+          const delta = e.data as { agentId: string; itemId: string };
+          return delta.agentId === agentId && delta.itemId === itemId;
+        }
+        return false;
+      })
+      .map((e) => (e.data as { text: string }).text)
+      .join("");
+  }
+
   beforeAll(async () => {
     dataDir = tmp("oa2-data-");
     agentsRoot = tmp("oa2-agents-");
@@ -118,6 +142,92 @@ describe("chat e2e (fake acp agent)", () => {
     };
     expect(envDump.keys.some((k) => k.startsWith("UPBOT_"))).toBe(false);
     expect(JSON.stringify(envDump.env)).not.toContain(TOKEN);
+  });
+
+  test("slow stream: timed flush persists chunks; mid-stream history is complete", async () => {
+    const agent = await newAgent("StreamFlush", "devin");
+    await send(agent.id, "slowseq");
+    const created = (await c.waitForEventWhere("item.created", (d) => {
+      const item = d as ChatItem;
+      return item.agentId === agent.id && item.kind === "agent_message";
+    })) as ChatItem;
+    await c.waitForEventWhere("item.delta", (d) => {
+      const delta = d as { agentId: string; itemId: string };
+      return delta.agentId === agent.id && delta.itemId === created.id;
+    });
+    await Bun.sleep(350); // > TEXT_FLUSH_MS: the timed flush must have persisted emitted chunks
+
+    // the background timer persisted without any RPC
+    const ro = new Database(join(dataDir, "upbot.db"), { readonly: true });
+    const row = ro
+      .query("SELECT data_json FROM items WHERE agent_id = ? AND kind = 'agent_message'")
+      .get(agent.id) as { data_json: string };
+    ro.close();
+    const persisted = (JSON.parse(row.data_json) as { text: string }).text;
+    expect(persisted.length).toBeGreaterThan(0);
+    expectSeqPrefix(persisted);
+    const emitted = emittedAgentMessage(agent.id, created.id);
+    expectSeqPrefix(emitted);
+    // ws delivery and the db write race; both are prefixes of the true stream
+    expect(persisted.startsWith(emitted) || emitted.startsWith(persisted)).toBe(true);
+
+    // chat.history mid-stream returns every emitted chunk (the read flushes pending text)
+    const emittedBeforeHistory = emittedAgentMessage(agent.id, created.id);
+    const mid = await history(agent.id);
+    const msg = mid.items.find((i) => i.id === created.id) as { text: string };
+    expectSeqPrefix(msg.text);
+    expect(msg.text.startsWith(emittedBeforeHistory)).toBe(true);
+    const emittedAfterHistory = emittedAgentMessage(agent.id, created.id);
+    expectSeqPrefix(emittedAfterHistory);
+    expect(
+      msg.text.startsWith(emittedAfterHistory) || emittedAfterHistory.startsWith(msg.text),
+    ).toBe(true);
+
+    await c.request("chat.cancel", { agentId: agent.id });
+    const t = await waitTurnEnd(agent.id);
+    expect(t.status).toBe("cancelled");
+
+    // the close flush persisted every chunk emitted before the turn ended
+    const h2 = await history(agent.id);
+    const msg2 = h2.items.find((i) => i.id === created.id) as { text: string };
+    const emittedAtEnd = emittedAgentMessage(agent.id, created.id);
+    expectSeqPrefix(emittedAtEnd);
+    expectSeqPrefix(msg2.text);
+    expect(msg2.text).toBe(emittedAtEnd);
+  });
+
+  test("history beforeSeq excludes an open stream item without hiding it from full history", async () => {
+    const agent = await newAgent("HistoryStream", "devin");
+    await send(agent.id, "slowseq");
+    const created = (await c.waitForEventWhere("item.created", (d) => {
+      const item = d as ChatItem;
+      return item.agentId === agent.id && item.kind === "agent_message";
+    })) as ChatItem;
+    await c.waitForEventWhere("item.delta", (d) => {
+      const delta = d as { agentId: string; itemId: string; text: string };
+      return delta.agentId === agent.id && delta.itemId === created.id && delta.text === "2|";
+    });
+
+    const older = (await c.request("chat.history", {
+      agentId: agent.id,
+      beforeSeq: created.seq,
+    })) as { items: ChatItem[] };
+    expect(older.items.every((item) => item.seq < created.seq)).toBe(true);
+    expect(older.items.some((item) => item.id === created.id)).toBe(false);
+
+    const emittedBeforeHistory = emittedAgentMessage(agent.id, created.id);
+    const full = await history(agent.id);
+    const message = full.items.find((item) => item.id === created.id) as { text: string };
+    expectSeqPrefix(message.text);
+    expect(message.text.startsWith(emittedBeforeHistory)).toBe(true);
+    const emittedAfterHistory = emittedAgentMessage(agent.id, created.id);
+    expectSeqPrefix(emittedAfterHistory);
+    expect(
+      message.text.startsWith(emittedAfterHistory) || emittedAfterHistory.startsWith(message.text),
+    ).toBe(true);
+
+    await c.request("chat.cancel", { agentId: agent.id });
+    expect((await waitTurnEnd(agent.id)).status).toBe("cancelled");
   });
 
   test("instructions prefix on first prompt of a new session only", async () => {
@@ -192,6 +302,42 @@ describe("chat e2e (fake acp agent)", () => {
     await expect(
       c.request("permissions.respond", { requestId: pending.requestId, optionId: "allow_once" }),
     ).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  test("tools: multiple tool calls in one turn update their own items; orphan update ignored", async () => {
+    const agent = await newAgent("Tools", "devin");
+    const base = c.events.length;
+    await send(agent.id, "tools");
+    const turn = await waitTurnEnd(agent.id);
+    expect(turn.status).toBe("completed");
+
+    const h = await history(agent.id);
+    const calls = h.items.filter(
+      (i): i is Extract<ChatItem, { kind: "tool_call" }> => i.kind === "tool_call",
+    );
+    expect(calls.length).toBe(2);
+    expect(calls.find((i) => i.toolCallId === "tc-a")).toMatchObject({
+      title: "Tool A renamed",
+      status: "completed",
+    });
+    expect(calls.find((i) => i.toolCallId === "tc-b")).toMatchObject({
+      title: "Tool B",
+      status: "completed",
+    });
+    expect(calls.some((i) => i.toolCallId === "tc-orphan")).toBe(false);
+    expect(h.items[h.items.length - 1]).toMatchObject({
+      kind: "agent_message",
+      text: "tools:done",
+    });
+
+    // broadcasts stayed routed per toolCallId and nothing was emitted for the orphan
+    const updates = c.events
+      .slice(base)
+      .filter((e) => e.event === "item.updated")
+      .map((e) => (e.data as { toolCallId?: string }).toolCallId);
+    expect(updates.filter((id) => id === "tc-a").length).toBe(2);
+    expect(updates.filter((id) => id === "tc-b").length).toBe(1);
+    expect(updates).not.toContain("tc-orphan");
   });
 
   test("cancel: during slow, during permission, ignorecancel kills after grace", async () => {
@@ -316,6 +462,12 @@ describe("chat e2e (fake acp agent)", () => {
     await send(agent.id, "slow");
     await c.waitForEventWhere("turn.started", (d) => (d as Turn).agentId === agent.id);
     const qx = await send(agent.id, "echo:x");
+    const slowPrompts = () =>
+      readLog(stateDir)
+        .filter((l) => l.method === "session/prompt")
+        .map((l) => (l.params as { prompt: { text: string }[] }).prompt[0]?.text ?? "")
+        .filter((p) => p.endsWith("slow")).length;
+    const slowBefore = slowPrompts();
     daemon.proc.kill("SIGKILL");
     await daemon.proc.exited;
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
@@ -338,8 +490,8 @@ describe("chat e2e (fake acp agent)", () => {
     const prompts = readLog(stateDir)
       .filter((l) => l.method === "session/prompt")
       .map((l) => (l.params as { prompt: { text: string }[] }).prompt[0]?.text ?? "");
-    // slow's started queue item must not re-run; echo:x drains (possibly prefixed)
-    expect(prompts.filter((p) => p.endsWith("slow")).length).toBeLessThanOrEqual(1);
+    // slow's started queue item must not re-run after the restart; echo:x drains (possibly prefixed)
+    expect(slowPrompts()).toBe(slowBefore);
     expect(prompts.some((p) => p.endsWith("echo:x"))).toBe(true);
   });
 
@@ -361,6 +513,27 @@ describe("chat e2e (fake acp agent)", () => {
     expect(r.configOptions.find((o) => o.id === "model")?.currentValue).toBe("m2");
     const list = (await c.request("agents.list", {})) as Agent[];
     expect(list.find((a) => a.id === agent.id)?.config.model).toBe("m2");
+    const beforeClear = readLog(stateDir);
+    const newSessionsBeforeClear = beforeClear.filter((l) => l.method === "session/new").length;
+    const sessionLoadsBeforeClear = beforeClear.filter((l) => l.method === "session/load").length;
+    await c.request("agents.setConfig", {
+      agentId: agent.id,
+      configId: "model",
+      value: null,
+    });
+    expect(
+      ((await c.request("agents.list", {})) as Agent[]).find((a) => a.id === agent.id)?.config
+        .model,
+    ).toBeUndefined();
+    await send(agent.id, "echo:after model reset");
+    await waitTurnEnd(agent.id);
+    const afterClear = readLog(stateDir);
+    expect(afterClear.filter((l) => l.method === "session/new").length).toBeGreaterThan(
+      newSessionsBeforeClear,
+    );
+    expect(afterClear.filter((l) => l.method === "session/load").length).toBe(
+      sessionLoadsBeforeClear,
+    );
     await expect(
       c.request("agents.setConfig", { agentId: agent.id, configId: "model", value: "zzz" }),
     ).rejects.toMatchObject({ code: "bad_request" });
@@ -393,6 +566,21 @@ describe("chat e2e (fake acp agent)", () => {
     await send(agent.id, "switchmodel");
     await waitTurnEnd(agent.id);
     await cfgP;
+  });
+
+  test("changing providers clears persisted provider-specific config", async () => {
+    const agent = await newAgent("Provider switch", "devin");
+    await c.request("agents.setConfig", {
+      agentId: agent.id,
+      configId: "model",
+      value: "m2",
+    });
+    const updated = (await c.request("agents.update", {
+      id: agent.id,
+      provider: "claude",
+    })) as Agent;
+    expect(updated.provider).toBe("claude");
+    expect(updated.config).toEqual({});
   });
 
   test("queue: send while session is starting outside a turn still drains", async () => {
@@ -535,7 +723,7 @@ describe("chat e2e (fake acp agent)", () => {
     const db2 = new Database(join(dir, "upbot.db"), { readonly: true });
     expect(
       (db2.query("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number }).n,
-    ).toBe(19);
+    ).toBe(20);
     db2.close();
     rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
@@ -614,8 +802,14 @@ describe("chat e2e (fake acp agent)", () => {
 
   test("kill -9 during a turn: turn becomes interrupted after restart, orphan exits on stdin EOF", async () => {
     const agent = await newAgent("Killed", "devin");
-    await send(agent.id, "slow");
-    await c.waitForEventWhere("item.delta", (d) => (d as { agentId: string }).agentId === agent.id);
+    await send(agent.id, "slowseq");
+    const delta = (await c.waitForEventWhere("item.delta", (d) => {
+      const item = d as { agentId: string; itemId: string; text: string };
+      return item.agentId === agent.id && item.text === "2|";
+    })) as { itemId: string };
+    const emitted = emittedAgentMessage(agent.id, delta.itemId);
+    expectSeqPrefix(emitted);
+    expect(emitted.startsWith("0|")).toBe(true);
     const orphanPid = readPids(stateDir)[readPids(stateDir).length - 1]!;
 
     daemon.proc.kill("SIGKILL");
@@ -635,6 +829,14 @@ describe("chat e2e (fake acp agent)", () => {
     const h = await history(agent.id);
     const interrupted = h.turns.find((t) => t.status === "interrupted");
     expect(interrupted).toBeTruthy();
+
+    // whatever the last flush persisted is an intact prefix of the emitted
+    // stream — a kill loses only the unflushed tail, never corrupts chunks
+    const msg = h.items.find((i) => i.kind === "agent_message") as { text: string };
+    expect(msg.text.length).toBeGreaterThan(0);
+    expectSeqPrefix(msg.text);
+    expect(msg.text.startsWith("0|")).toBe(true);
+    expect(emitted.startsWith(msg.text) || msg.text.startsWith(emitted)).toBe(true);
   });
 
   test("provider_unavailable: openai-compatible unsupported, missing CLI binary", async () => {
@@ -713,7 +915,7 @@ describe("chat e2e (fake acp agent)", () => {
 
     const db2 = new Database(join(dir, "upbot.db"), { readonly: true });
     const n = (db2.query("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number }).n;
-    expect(n).toBe(19);
+    expect(n).toBe(20);
     db2.close();
     rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
