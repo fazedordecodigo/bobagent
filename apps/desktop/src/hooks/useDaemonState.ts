@@ -4,7 +4,8 @@ import type { DaemonClient } from "../lib/daemon";
 
 const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-// Connects to the daemon and keeps agents, statuses and channels in sync.
+// Connects to the daemon and keeps agents, statuses and channels in sync. Ready
+// means the first refresh succeeded, including after reconnecting.
 // Reconnect policy is caller-owned: subscribe `client.onReconnect` and call
 // `refresh()` with the error handling that fits the window (App stays silent,
 // MenuBar surfaces the error). `onRefresh` runs inside every `refresh()` so
@@ -25,6 +26,7 @@ export function useDaemonState(
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const generation = useRef(0);
+  const connectionError = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     const version = ++generation.current;
@@ -40,6 +42,13 @@ export function useDaemonState(
     setStatuses(nextStatuses);
     if (nextChannels) setChannels(nextChannels);
     await onRefresh?.();
+    if (version !== generation.current) return;
+    setReady(true);
+    const failed = connectionError.current;
+    if (failed !== null) {
+      connectionError.current = null;
+      setError((prev) => (prev === failed ? null : prev));
+    }
   }, [client, includeChannels, onRefresh]);
 
   useEffect(() => {
@@ -47,11 +56,11 @@ export function useDaemonState(
     void client
       .connect()
       .then(refresh)
-      .then(() => {
-        if (alive) setReady(true);
-      })
       .catch((e: unknown) => {
-        if (alive) setError(errorMessage(e));
+        if (!alive) return;
+        const message = errorMessage(e);
+        connectionError.current = message;
+        setError(message);
       });
     const offs = [
       client.on("agent.created", (agent) =>
