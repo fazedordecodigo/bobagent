@@ -1,6 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { DaemonEventMap, MethodName, MethodParams, MethodResult } from "@upbot/protocol";
-import { errorFields, logInfo, logWarn } from "./log";
+import {
+  DAEMON_NOT_CONNECTED,
+  DAEMON_SOCKET_CLOSED,
+  DAEMON_SOCKET_ERROR,
+  errorFields,
+  logInfo,
+  logWarn,
+} from "./log";
 
 type DaemonConnection = { port: number; token: string };
 
@@ -74,7 +81,7 @@ export class DaemonClient {
         resolve();
       };
       ws.onerror = () => {
-        reject(new Error("daemon socket error"));
+        reject(new Error(DAEMON_SOCKET_ERROR));
       };
       ws.onmessage = (ev) => {
         const msg = JSON.parse(String(ev.data));
@@ -95,7 +102,7 @@ export class DaemonClient {
       };
       ws.onclose = (ev) => {
         this.ws = null;
-        for (const [, p] of this.pending) p.reject(new Error("daemon socket closed"));
+        for (const [, p] of this.pending) p.reject(new Error(DAEMON_SOCKET_CLOSED));
         this.pending.clear();
         if (!this.closed) {
           const attempt = ++this.reconnectAttempt;
@@ -103,7 +110,6 @@ export class DaemonClient {
           this.disconnectedAt ??= Date.now();
           logWarn("daemon.socket_closed", {
             code: ev.code,
-            reason: ev.reason || undefined,
             wasClean: ev.wasClean,
             attempt,
             nextDelayMs,
@@ -123,7 +129,7 @@ export class DaemonClient {
   request<M extends MethodName>(method: M, params: MethodParams<M>): Promise<MethodResult<M>> {
     const ws = this.ws;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      return Promise.reject(new Error("daemon not connected"));
+      return Promise.reject(new Error(DAEMON_NOT_CONNECTED));
     }
     const id = String(this.nextId++);
     return new Promise((resolve, reject) => {

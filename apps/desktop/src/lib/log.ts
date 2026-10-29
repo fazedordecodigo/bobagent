@@ -2,6 +2,10 @@ import { error as logError_, info as logInfo_, warn as logWarn_ } from "@tauri-a
 
 export type LogFields = Record<string, unknown>;
 
+export const DAEMON_NOT_CONNECTED = "daemon not connected";
+export const DAEMON_SOCKET_CLOSED = "daemon socket closed";
+export const DAEMON_SOCKET_ERROR = "daemon socket error";
+
 function inTauri() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
@@ -42,11 +46,20 @@ export function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** `{ error, code? }` fields for an RPC failure; never includes params or payloads. */
+/** Returns safe error fields without including untrusted error messages. */
 export function errorFields(error: unknown): LogFields {
-  const fields: LogFields = { error: errorMessage(error) };
-  const code =
-    error instanceof Error && "code" in error ? (error as { code?: unknown }).code : undefined;
-  if (code !== undefined) fields.code = String(code);
-  return fields;
+  if (error !== null && typeof error === "object" && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    return {
+      code: typeof code === "string" && /^[a-z][a-z0-9_.-]{0,63}$/.test(code) ? code : "invalid",
+    };
+  }
+  const message = errorMessage(error);
+  if (
+    message === DAEMON_NOT_CONNECTED ||
+    message === DAEMON_SOCKET_CLOSED ||
+    message === DAEMON_SOCKET_ERROR
+  )
+    return { error: message };
+  return { errorType: error instanceof Error ? error.name : typeof error };
 }
