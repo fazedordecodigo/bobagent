@@ -201,6 +201,14 @@ export function spawnProvider(
   };
 }
 
+/** Ends stdin and kills the process; `kill()` already marks it closed by us. */
+export function closeProviderProcess(proc: ProviderProcess): void {
+  try {
+    proc.child.stdin?.end();
+  } catch {}
+  proc.kill();
+}
+
 /** Calls `onLine` with each parsed JSON object read from a newline-delimited stream. */
 export function readJsonLines(
   stream: NodeJS.ReadableStream,
@@ -247,4 +255,8 @@ export function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise
 
 export function truncate(s: string, n = 2000): string {
   return s.length > n ? `${s.slice(0, n)}…` : s;
+}
+
+export function str(v: unknown): string | null {
+  return typeof v === "string" && v ? v : null;
 }
