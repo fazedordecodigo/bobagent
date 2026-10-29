@@ -95,10 +95,14 @@ let shuttingDown = false;
 let dbRef: { close(): void } | null = null;
 let serverRef: { stop(): void } | null = null;
 let runtimesRef: { closeAll(): Promise<void> } | null = null;
+let gatewaysRef: { stopAll(): void } | null = null;
 
 function shutdown(code: number) {
   if (shuttingDown) return;
   shuttingDown = true;
+  try {
+    gatewaysRef?.stopAll();
+  } catch {}
   const done = () => {
     try {
       serverRef?.stop();
@@ -207,6 +211,7 @@ async function main() {
   const mobile = new MobileServer(db);
   const team = new TeamClient(db, store, chat, () => runtimes, vault, broadcast);
   const gateways = new GatewayService(db, store, chat, () => runtimes, vault, broadcast);
+  gatewaysRef = gateways;
   const rpc = new Rpc(
     store,
     chat,

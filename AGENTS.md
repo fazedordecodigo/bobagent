@@ -356,9 +356,10 @@ from `vault.list`, never shared with agents). Only `allowedUsers` reach the agen
 their id back); `@AgentName text` routes to another agent; in Slack/Discord channels only
 mentions count, DMs always. Prompt is wrapped in `<external_message>`; the queue
 `meta_json.gateway` drives the reply on `turn.ended`. RPC `gateways.list/create/update/delete`,
-events `gateway.updated/deleted`; UI `GatewaysView`. Test base URLs:
+events `gateway.updated/deleted`; UI `GatewaysView`. Daemon shutdown (SIGTERM/SIGINT/stdin EOF)
+calls `GatewayService.stopAll()` before closing runtimes. Test base URLs:
 `UPBOT_TELEGRAM_API`, `UPBOT_SLACK_API`, `UPBOT_DISCORD_API`.
-Tests: `test/gateways.e2e.test.ts`.
+Tests: `test/gateways.e2e.test.ts`, `test/gateways-shutdown.e2e.test.ts`.
 
 ## Marketplace (Phase 12b)
 
