@@ -2,6 +2,7 @@ import type { ConfigOption, PermissionOption } from "@upbot/protocol";
 import {
   AUTH_RE,
   authMessage,
+  classifyStartupError,
   isVmCredentialRejection,
   type ProviderProcess,
   providerCommand,
@@ -306,7 +307,12 @@ class ClaudeSession implements ProviderSession {
           ),
         );
       } else if (active.assistantError === "authentication_failed" || AUTH_RE.test(detail)) {
-        active.reject(new ProviderError("auth_required", authMessage("claude", detail)));
+        active.reject(
+          new ProviderError(
+            "auth_required",
+            authMessage("claude", redactCredential(detail, this.vmCredential)),
+          ),
+        );
       } else {
         active.reject(
           new Error(
@@ -506,18 +512,14 @@ export class ClaudeDriver implements ProviderDriver {
       );
     } catch (e) {
       proc.kill();
-      const tail = proc.stderrTail();
-      const detail = tail || (e as Error).message;
-      if (vmCredential && isVmCredentialRejection(detail))
-        throw new ProviderError(
-          "auth_required",
-          vmCredentialRejectedMessage("claude", detail, vmCredential),
-        );
-      if (AUTH_RE.test(tail)) throw new ProviderError("auth_required", authMessage("claude", tail));
-      const safeTail = redactCredential(tail, vmCredential);
-      const safeError = redactCredential((e as Error).message, vmCredential);
-      const msg = `claude failed to start${safeTail ? `: ${safeTail}` : `: ${safeError}`}`;
-      throw new ProviderError(resumeSessionId ? "internal" : "provider_unavailable", msg);
+      if (e instanceof ProviderError) throw e;
+      throw classifyStartupError(
+        "claude",
+        (e as Error).message,
+        proc.stderrTail(),
+        vmCredential,
+        resumeSessionId ? "internal" : "provider_unavailable",
+      );
     }
     const mode = str(init.current_permission_mode) ?? "default";
     const options: ConfigOption[] = [

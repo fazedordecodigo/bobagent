@@ -66,6 +66,60 @@ export function vmCredentialRejectedMessage(
   return `${provider}: the saved microVM credential was rejected${safeDetail ? ` (${safeDetail})` : ""}. Update it in Settings → Hosts.`;
 }
 
+/** Lines of the stderr tail kept in a startup failure message. */
+const STARTUP_ERROR_TAIL_LINES = 5;
+
+/** Maps one startup evidence source (the error detail or the stderr tail) to an
+ * auth ProviderError, or null when it shows neither a rejected microVM
+ * credential nor a sign-in hint. */
+export function startupAuthError(
+  provider: ProviderId,
+  detail: string,
+  credential: string | null,
+): ProviderError | null {
+  if (credential && isVmCredentialRejection(detail)) {
+    return new ProviderError(
+      "auth_required",
+      vmCredentialRejectedMessage(provider, detail, credential),
+    );
+  }
+  if (AUTH_RE.test(detail)) {
+    return new ProviderError(
+      "auth_required",
+      authMessage(provider, redactCredential(detail, credential)),
+    );
+  }
+  return null;
+}
+
+/** Translates a provider startup failure into a ProviderError the same way for
+ * every driver: a rejected microVM credential or a sign-in hint in the detail
+ * or the stderr tail becomes `auth_required`; anything else becomes
+ * `fallbackCode` with the detail plus a truncated tail, always redacted. */
+export function classifyStartupError(
+  provider: ProviderId,
+  detail: string,
+  tail: string,
+  credential: string | null,
+  fallbackCode: "provider_unavailable" | "internal" = "provider_unavailable",
+): ProviderError {
+  const auth =
+    startupAuthError(provider, detail, credential) ?? startupAuthError(provider, tail, credential);
+  if (auth) return auth;
+  const safeDetail = redactCredential(detail, credential).trim();
+  const safeTail = redactCredential(tail, credential)
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0)
+    .slice(-STARTUP_ERROR_TAIL_LINES)
+    .join("\n");
+  const reason = [safeDetail, safeTail].filter(Boolean).join("\n");
+  return new ProviderError(
+    fallbackCode,
+    `${provider} failed to start${reason ? `: ${reason}` : ""}`,
+  );
+}
+
 function envOverride(name: string): string[] | null {
   const raw = process.env[name];
   if (!raw) return null;

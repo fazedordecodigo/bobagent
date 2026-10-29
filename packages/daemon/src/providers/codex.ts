@@ -2,6 +2,7 @@ import type { ConfigOption, PermissionOption, ToolCallStatus } from "@upbot/prot
 import {
   AUTH_RE,
   authMessage,
+  classifyStartupError,
   isVmCredentialRejection,
   type ProviderProcess,
   providerCommand,
@@ -316,7 +317,10 @@ class CodexSession implements ProviderSession {
       else
         active.reject(
           AUTH_RE.test(detail)
-            ? new ProviderError("auth_required", authMessage("codex", detail))
+            ? new ProviderError(
+                "auth_required",
+                authMessage("codex", redactCredential(detail, this.vmCredential)),
+              )
             : new Error(redactCredential(detail, this.vmCredential)),
         );
       return;
@@ -422,7 +426,10 @@ class CodexSession implements ProviderSession {
       if (this.active === active) this.active = null;
       const message = (e as Error).message;
       if (AUTH_RE.test(message))
-        throw new ProviderError("auth_required", authMessage("codex", message));
+        throw new ProviderError(
+          "auth_required",
+          authMessage("codex", redactCredential(message, this.vmCredential)),
+        );
       throw e;
     }
     return done;
@@ -582,24 +589,7 @@ export class CodexDriver implements ProviderDriver {
     } catch (e) {
       proc.kill();
       if (e instanceof ProviderError) throw e;
-      const tail = proc.stderrTail();
-      const message = (e as Error).message;
-      if (vmKey && isVmCredentialRejection(message))
-        throw new ProviderError(
-          "auth_required",
-          vmCredentialRejectedMessage("codex", message, vmKey),
-        );
-      if (AUTH_RE.test(message))
-        throw new ProviderError(
-          "auth_required",
-          authMessage("codex", redactCredential(message, vmKey)),
-        );
-      const safeTail = redactCredential(tail, vmKey);
-      const safeMessage = redactCredential(message, vmKey);
-      throw new ProviderError(
-        "provider_unavailable",
-        `codex failed to start: ${safeMessage}${safeTail ? `\n${safeTail.split("\n").slice(-5).join("\n")}` : ""}`,
-      );
+      throw classifyStartupError("codex", (e as Error).message, proc.stderrTail(), vmKey);
     }
   }
 }
