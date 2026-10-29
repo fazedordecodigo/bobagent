@@ -1,6 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readReadyPort } from "../src/ready";
 
 export const ROOT = join(import.meta.dir, "../../..");
 export const DAEMON = join(ROOT, "packages/daemon/src/main.ts");
@@ -156,37 +157,7 @@ export async function startDaemon(
     ? new Response(proc.stderr as ReadableStream<Uint8Array>).text()
     : undefined;
   // token is delivered on the first stdin line, never via env
-  const sink = proc.stdin as { write: (s: string) => void; flush: () => void };
-  sink.write(`${token}\n`);
-  sink.flush();
-  const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  const port = await new Promise<number>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("daemon did not print READY")), 15000);
-    const pump = async () => {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) {
-          reject(new Error("daemon stdout closed before READY"));
-          return;
-        }
-        buf += decoder.decode(value);
-        const idx = buf.indexOf("\n");
-        if (idx >= 0) {
-          const line = buf.slice(0, idx);
-          buf = buf.slice(idx + 1);
-          if (line.startsWith("UPBOT_READY ")) {
-            clearTimeout(timer);
-            resolve(JSON.parse(line.slice("UPBOT_READY ".length)).port);
-            return;
-          }
-        }
-      }
-    };
-    pump().catch(reject);
-  });
-  reader.releaseLock();
+  const port = await readReadyPort(proc, token, 15000);
   return stderrText ? { proc, port, stderrText } : { proc, port };
 }
 

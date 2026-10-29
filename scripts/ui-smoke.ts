@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { readReadyPort } from "../packages/daemon/src/ready";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DAEMON = join(ROOT, "packages/daemon/src/main.ts");
@@ -54,26 +55,7 @@ async function main() {
     stderr: "inherit",
     cwd: ROOT,
   });
-  const sink = daemon.stdin as { write: (s: string) => void; flush: () => void };
-  sink.write(`${TOKEN}\n`);
-  sink.flush();
-
-  const reader = (daemon.stdout as ReadableStream<Uint8Array>).getReader();
-  let buf = "";
-  let port = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) throw new Error("daemon exited");
-    buf += new TextDecoder().decode(value);
-    const i = buf.indexOf("\n");
-    if (i < 0) continue;
-    const line = buf.slice(0, i);
-    if (line.startsWith("UPBOT_READY ")) {
-      port = JSON.parse(line.slice("UPBOT_READY ".length)).port;
-      break;
-    }
-  }
-  reader.releaseLock();
+  const port = await readReadyPort(daemon, TOKEN, 15000);
 
   let vite: ReturnType<typeof Bun.spawn> | undefined;
   try {

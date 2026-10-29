@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Agent, ChatItem, PendingPermission, Turn } from "@upbot/protocol";
+import { readReadyPort } from "../packages/daemon/src/ready";
 import { daemonTarget } from "../packages/daemon/src/target";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -120,33 +121,7 @@ async function startDaemon(
     stdout: "pipe",
     stderr: "pipe",
   });
-  const sink = proc.stdin as { write: (s: string) => void; flush: () => void };
-  sink.write(`${TOKEN}\n`);
-  sink.flush();
-  const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
-  let buf = "";
-  const port = await new Promise<number>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error("no READY")), 20000);
-    const pump = async () => {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) return reject(new Error("stdout closed"));
-        buf += new TextDecoder().decode(value);
-        const i = buf.indexOf("\n");
-        if (i >= 0) {
-          const line = buf.slice(0, i);
-          buf = buf.slice(i + 1);
-          if (line.startsWith("UPBOT_READY ")) {
-            clearTimeout(t);
-            resolve(JSON.parse(line.slice(16)).port);
-            return;
-          }
-        }
-      }
-    };
-    pump().catch(reject);
-  });
-  reader.releaseLock();
+  const port = await readReadyPort(proc, TOKEN, 20000);
   return { proc, port };
 }
 
