@@ -5,7 +5,7 @@ import type { ChatStore } from "../chat-store";
 import type { Broadcast } from "../rpc";
 import { RpcError } from "../runtime/agent-runtime";
 import type { RuntimeManager } from "../runtime/runtime-manager";
-import type { Vault } from "../vault";
+import { GATEWAY_PREFIX, type Vault } from "../vault";
 import type { Inbound, Transport, TransportHooks } from "./common";
 import { DiscordTransport } from "./discord";
 import { SlackTransport } from "./slack";
@@ -21,6 +21,8 @@ export const TOKEN_FIELDS: Record<GatewayKind, string[]> = {
   discord: ["botToken"],
 };
 const MAX_REPLY = 20_000;
+
+const tokenName = (id: string, field: string) => `${GATEWAY_PREFIX}${id}.${field}`;
 
 type Row = {
   id: string;
@@ -89,7 +91,7 @@ export class GatewayService {
   ) {
     for (const f of TOKEN_FIELDS[kind]) {
       const v = tokens[f]?.trim();
-      if (v) this.vault.set(`gateway.${id}.${f}`, v, []);
+      if (v) this.vault.set(tokenName(id, f), v, []);
       else if (required)
         throw new RpcError("bad_request", `${kind} needs ${TOKEN_FIELDS[kind].join(" and ")}`);
     }
@@ -97,7 +99,7 @@ export class GatewayService {
 
   private tokens(id: string, kind: GatewayKind): Record<string, string> {
     const out: Record<string, string> = {};
-    for (const f of TOKEN_FIELDS[kind]) out[f] = this.vault.revealInternal(`gateway.${id}.${f}`);
+    for (const f of TOKEN_FIELDS[kind]) out[f] = this.vault.revealInternal(tokenName(id, f));
     return out;
   }
 
@@ -106,8 +108,8 @@ export class GatewayService {
     name: string;
     agentId: string;
     tokens: Record<string, string>;
-    allowedUsers?: string[];
-    enabled?: boolean;
+    allowedUsers?: string[] | undefined;
+    enabled?: boolean | undefined;
   }): Gateway {
     if (!this.agents.get(p.agentId)) throw new RpcError("not_found", "agent not found");
     const id = crypto.randomUUID().slice(0, 12);
@@ -133,11 +135,11 @@ export class GatewayService {
 
   update(p: {
     id: string;
-    name?: string;
-    agentId?: string;
-    tokens?: Record<string, string>;
-    allowedUsers?: string[];
-    enabled?: boolean;
+    name?: string | undefined;
+    agentId?: string | undefined;
+    tokens?: Record<string, string> | undefined;
+    allowedUsers?: string[] | undefined;
+    enabled?: boolean | undefined;
   }): Gateway {
     const r = this.row(p.id);
     if (!r) throw new RpcError("not_found", "gateway not found");
@@ -165,7 +167,7 @@ export class GatewayService {
     if (!r) throw new RpcError("not_found", "gateway not found");
     this.stopTransport(id);
     this.db.query("UPDATE gateways SET deleted_at = ? WHERE id = ?").run(Date.now(), id);
-    for (const f of TOKEN_FIELDS[r.kind]) this.vault.delete(`gateway.${id}.${f}`);
+    for (const f of TOKEN_FIELDS[r.kind]) this.vault.delete(tokenName(r.id, f));
     this.broadcast("gateway.deleted", { id });
   }
 
@@ -268,20 +270,7 @@ export class GatewayService {
     if (!meta.gateway) return;
     const t = this.transports.get(meta.gateway.id);
     if (!t) return;
-    let reply: string;
-    if (turn.status === "completed") {
-      reply = this.chat
-        .itemsForTurn(turn.id)
-        .filter((i) => i.kind === "agent_message")
-        .map((i) => ("text" in i ? i.text : ""))
-        .join("\n\n")
-        .trim();
-      if (!reply) reply = "(no reply)";
-    } else if (turn.status === "failed") {
-      reply = `The agent failed: ${turn.error ?? "unknown error"}`;
-    } else {
-      reply = "The agent stopped before replying.";
-    }
+    const reply = this.chat.turnReplyText(turn);
     void t
       .send(meta.gateway.chatId, reply.slice(0, MAX_REPLY), meta.gateway.replyTo)
       .catch(() => {});

@@ -1,4 +1,10 @@
-import { splitText, type Transport, type TransportHooks } from "./common";
+import {
+  INITIAL_BACKOFF_MS,
+  nextBackoff,
+  splitText,
+  type Transport,
+  type TransportHooks,
+} from "./common";
 
 type Update = {
   update_id: number;
@@ -47,7 +53,7 @@ export class TelegramTransport implements Transport {
   }
 
   private async loop() {
-    let backoff = 1000;
+    let backoff = INITIAL_BACKOFF_MS;
     let first = true;
     while (this.running) {
       try {
@@ -63,7 +69,7 @@ export class TelegramTransport implements Transport {
           { offset: this.offset, timeout, allowed_updates: ["message"] },
           this.abort.signal,
         );
-        backoff = 1000;
+        backoff = INITIAL_BACKOFF_MS;
         for (const u of updates) {
           this.offset = u.update_id + 1;
           const m = u.message;
@@ -81,7 +87,7 @@ export class TelegramTransport implements Transport {
         first = true;
         this.hooks.onStatus("error", (e as Error).message);
         await Bun.sleep(backoff);
-        backoff = Math.min(backoff * 2, 30_000);
+        backoff = nextBackoff(backoff);
       }
     }
   }

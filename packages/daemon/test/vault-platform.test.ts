@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   chmodSync,
   existsSync,
@@ -178,3 +178,34 @@ test.skipIf(process.platform !== "win32")(
   },
   15_000,
 );
+
+test("logs the DPAPI failure cause and falls back to a plaintext key", () => {
+  const directory = testRoot();
+  const dataDir = join(directory, "data");
+  mkdirSync(join(dataDir, "vault.key.dpapi.tmp"), { recursive: true });
+  setEnv("UPBOT_VAULT_KEY", undefined);
+  if (process.platform !== "win32") {
+    mkdirSync(join(directory, "empty-bin"));
+    setEnv("PATH", join(directory, "empty-bin"));
+  }
+  const error = spyOn(console, "error").mockImplementation(() => {});
+
+  try {
+    const key = loadVaultKey(dataDir, "win32");
+    const keyHex = key.toString("hex");
+    const file = join(dataDir, "vault.key");
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error.mock.calls[0]?.[0]).toMatch(
+      /^UpBot could not use Windows DPAPI \(.+\); storing the vault key in a plaintext file\.$/,
+    );
+    expect(JSON.stringify(error.mock.calls)).not.toContain(keyHex);
+    expect(readFileSync(file, "utf8")).toBe(keyHex);
+    if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(existsSync(join(dataDir, "vault.key.dpapi"))).toBe(false);
+
+    expect(loadVaultKey(dataDir, "win32").equals(key)).toBe(true);
+    expect(error).toHaveBeenCalledTimes(1);
+  } finally {
+    error.mockRestore();
+  }
+}, 15_000);

@@ -20,6 +20,17 @@ const MAX_BYTES = 1024 * 1024;
 
 const sourcesSchema = z.array(z.string()).nullable();
 
+export class MarketplaceFetchError extends Error {
+  constructor(
+    readonly code: "unsupported_url" | "http_status" | "too_large" | "invalid_index",
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+    this.name = "MarketplaceFetchError";
+  }
+}
+
 type IndexItem = Omit<MarketplaceItem, "source" | "installed">;
 type Template = {
   name: string;
@@ -32,11 +43,14 @@ type Template = {
 async function fetchBytes(url: string): Promise<Buffer> {
   const u = new URL(url);
   if (u.protocol === "file:") return readFileSync(fileURLToPath(u));
-  if (u.protocol !== "https:" && u.protocol !== "http:") throw new Error(`unsupported URL ${url}`);
+  if (u.protocol !== "https:" && u.protocol !== "http:")
+    throw new MarketplaceFetchError("unsupported_url", `unsupported URL ${url}`);
   const res = await fetch(u, { signal: AbortSignal.timeout(15_000) });
-  if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+  if (!res.ok)
+    throw new MarketplaceFetchError("http_status", `${url}: HTTP ${res.status}`, res.status);
   const buf = Buffer.from(await res.arrayBuffer());
-  if (buf.length > MAX_BYTES) throw new Error(`${url} is larger than 1 MB`);
+  if (buf.length > MAX_BYTES)
+    throw new MarketplaceFetchError("too_large", `${url} is larger than 1 MB`);
   return buf;
 }
 
@@ -48,10 +62,10 @@ export class Marketplace {
   ) {}
 
   sources(): string[] {
-    const urls = getSetting(this.db, "marketplace_sources", sourcesSchema, null);
+    const saved = getSetting(this.db, "marketplace_sources", sourcesSchema, null);
+    if (!saved) return [process.env.UPBOT_MARKETPLACE_URL ?? DEFAULT_REGISTRY];
     // sources saved before the repo moved to fazedordecodigo/upbot
-    if (urls) return urls.map((u) => (u === LEGACY_REGISTRY ? DEFAULT_REGISTRY : u));
-    return [process.env.UPBOT_MARKETPLACE_URL ?? DEFAULT_REGISTRY];
+    return saved.map((u) => (u === LEGACY_REGISTRY ? DEFAULT_REGISTRY : u));
   }
 
   setSources(urls: string[]): void {
@@ -70,7 +84,8 @@ export class Marketplace {
 
   private async index(source: string): Promise<IndexItem[]> {
     const raw = JSON.parse((await fetchBytes(source)).toString("utf8")) as { items?: IndexItem[] };
-    if (!Array.isArray(raw.items)) throw new Error(`${source} is not a marketplace index`);
+    if (!Array.isArray(raw.items))
+      throw new MarketplaceFetchError("invalid_index", `${source} is not a marketplace index`);
     return raw.items.filter(
       (i) =>
         typeof i.id === "string" &&

@@ -1,5 +1,5 @@
 import type { Agent, ChatItem } from "@upbot/protocol";
-import { type ReactNode, useEffect, useRef } from "react";
+import { memo, type ReactNode, useEffect, useRef } from "react";
 import { MonoAv, role, type UiStatus } from "../lib/ui";
 import { CopyButton } from "./CopyButton";
 import { Icon } from "./icons";
@@ -75,6 +75,170 @@ function PermissionCard({
     </div>
   );
 }
+
+const MessageItem = memo(function MessageItem({
+  item,
+  separator,
+  isLast,
+  canRetry,
+  retryHasAttachments,
+  onPermissionRespond,
+  onSpeak,
+  onRetry,
+}: {
+  item: ChatItem;
+  separator: boolean;
+  isLast: boolean;
+  canRetry: boolean;
+  retryHasAttachments: boolean;
+  onPermissionRespond: (requestId: string, optionId: string | null) => void;
+  onSpeak?: ((text: string) => void) | undefined;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="thread-message">
+      {separator && <p className="meta day">{messageDay(item.createdAt)}</p>}
+      {item.kind === "user_message" ? (
+        <div className="msg-user">
+          {item.from && <div className="meta">De {item.from.name}</div>}
+          {item.gateway && (
+            <div className="meta">
+              via {item.gateway.kind} · {item.gateway.userName}
+            </div>
+          )}
+          {item.routine && <div className="meta">Rotina {item.routine.name}</div>}
+          <p style={{ whiteSpace: "pre-wrap" }}>{item.text}</p>
+          {item.attachments?.map((attachment) => (
+            <div className="file" key={attachment.path}>
+              <span className="fi">
+                <Icon name="doc" />
+              </span>
+              <div>
+                <strong>{attachment.name}</strong>
+                <span className="meta">{Math.max(1, Math.round(attachment.size / 1024))} KB</span>
+              </div>
+            </div>
+          ))}
+          <time className="message-time meta num" dateTime={new Date(item.createdAt).toISOString()}>
+            {new Date(item.createdAt).toLocaleTimeString("pt-BR", {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </time>
+        </div>
+      ) : item.kind === "agent_message" ? (
+        <div className="msg-agent">
+          <div className="body">
+            <Markdown text={item.text} />
+            <time
+              className="message-time meta num"
+              dateTime={new Date(item.createdAt).toISOString()}
+            >
+              {new Date(item.createdAt).toLocaleTimeString("pt-BR", {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </time>
+            <div className="msg-actions">
+              <CopyButton text={item.text} />
+              {onSpeak && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => onSpeak(item.text)}
+                >
+                  Ouvir
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : item.kind === "agent_thought" ? (
+        <div className="msg-agent">
+          <div className="body">
+            <details className="thought">
+              <summary className="meta">Pensando</summary>
+              <Markdown text={item.text} />
+            </details>
+          </div>
+        </div>
+      ) : item.kind === "tool_call" ? (
+        <div className="msg-agent">
+          <div className="body">
+            <div className="tool">
+              <b>{item.title}</b>
+              {item.toolKind ? ` · ${item.toolKind}` : ""} → {TOOL_LABEL[item.status]}
+              {item.detail && (
+                <details>
+                  <summary>Detalhes</summary>
+                  <pre>{item.detail}</pre>
+                </details>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : item.kind === "permission" ? (
+        <div className="msg-agent">
+          <div className="body">
+            <PermissionCard item={item} onRespond={onPermissionRespond} />
+          </div>
+        </div>
+      ) : item.kind === "error" ? (
+        <div className="msg-agent">
+          <div className="body">
+            <div className="approval is-err" data-od-id="error-card">
+              <div className="approval-head">
+                <span className="status err">
+                  <i className="dot s-err" />
+                  Com erro
+                </span>
+              </div>
+              <div style={{ padding: "0 16px" }}>
+                <h3>Algo deu errado</h3>
+              </div>
+              <div className="errlog">{item.message}</div>
+              {isLast &&
+                (retryHasAttachments ? (
+                  <p className="meta" style={{ padding: "0 16px 12px" }}>
+                    Reenvie a mensagem manualmente para incluir os anexos.
+                  </p>
+                ) : (
+                  canRetry && (
+                    <div className="approval-actions">
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        data-od-id="error-retry"
+                        onClick={onRetry}
+                      >
+                        Tentar de novo
+                      </button>
+                    </div>
+                  )
+                ))}
+            </div>
+          </div>
+        </div>
+      ) : item.kind === "compaction" ? (
+        <div>
+          <p className="meta day">
+            {item.status === "running"
+              ? "Compactando contexto…"
+              : item.status === "failed"
+                ? `Falha ao compactar: ${item.error ?? "erro desconhecido"}`
+                : "Contexto compactado"}
+          </p>
+          {item.status === "completed" && (
+            <details className="meta">
+              <summary>Resumo</summary>
+              <p>{item.summary}</p>
+            </details>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+});
 
 export function MessageList({
   agent,
@@ -169,152 +333,17 @@ export function MessageList({
             !previous ||
             new Date(previous.createdAt).toDateString() !== new Date(item.createdAt).toDateString();
           return (
-            <div key={item.id} className="thread-message">
-              {separator && <p className="meta day">{messageDay(item.createdAt)}</p>}
-              {item.kind === "user_message" ? (
-                <div className="msg-user">
-                  {item.from && <div className="meta">De {item.from.name}</div>}
-                  {item.gateway && (
-                    <div className="meta">
-                      via {item.gateway.kind} · {item.gateway.userName}
-                    </div>
-                  )}
-                  {item.routine && <div className="meta">Rotina {item.routine.name}</div>}
-                  <p style={{ whiteSpace: "pre-wrap" }}>{item.text}</p>
-                  {item.attachments?.map((attachment) => (
-                    <div className="file" key={attachment.path}>
-                      <span className="fi">
-                        <Icon name="doc" />
-                      </span>
-                      <div>
-                        <strong>{attachment.name}</strong>
-                        <span className="meta">
-                          {Math.max(1, Math.round(attachment.size / 1024))} KB
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                  <time
-                    className="message-time meta num"
-                    dateTime={new Date(item.createdAt).toISOString()}
-                  >
-                    {new Date(item.createdAt).toLocaleTimeString("pt-BR", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </time>
-                </div>
-              ) : item.kind === "agent_message" ? (
-                <div className="msg-agent">
-                  <div className="body">
-                    <Markdown text={item.text} />
-                    <time
-                      className="message-time meta num"
-                      dateTime={new Date(item.createdAt).toISOString()}
-                    >
-                      {new Date(item.createdAt).toLocaleTimeString("pt-BR", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </time>
-                    <div className="msg-actions">
-                      <CopyButton text={item.text} />
-                      {onSpeak && (
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => onSpeak(item.text)}
-                        >
-                          Ouvir
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ) : item.kind === "agent_thought" ? (
-                <div className="msg-agent">
-                  <div className="body">
-                    <details className="thought">
-                      <summary className="meta">Pensando</summary>
-                      <Markdown text={item.text} />
-                    </details>
-                  </div>
-                </div>
-              ) : item.kind === "tool_call" ? (
-                <div className="msg-agent">
-                  <div className="body">
-                    <div className="tool">
-                      <b>{item.title}</b>
-                      {item.toolKind ? ` · ${item.toolKind}` : ""} → {TOOL_LABEL[item.status]}
-                      {item.detail && (
-                        <details>
-                          <summary>Detalhes</summary>
-                          <pre>{item.detail}</pre>
-                        </details>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ) : item.kind === "permission" ? (
-                <div className="msg-agent">
-                  <div className="body">
-                    <PermissionCard item={item} onRespond={onPermissionRespond} />
-                  </div>
-                </div>
-              ) : item.kind === "error" ? (
-                <div className="msg-agent">
-                  <div className="body">
-                    <div className="approval is-err" data-od-id="error-card">
-                      <div className="approval-head">
-                        <span className="status err">
-                          <i className="dot s-err" />
-                          Com erro
-                        </span>
-                      </div>
-                      <div style={{ padding: "0 16px" }}>
-                        <h3>Algo deu errado</h3>
-                      </div>
-                      <div className="errlog">{item.message}</div>
-                      {index === items.length - 1 &&
-                        (retryHasAttachments ? (
-                          <p className="meta" style={{ padding: "0 16px 12px" }}>
-                            Reenvie a mensagem manualmente para incluir os anexos.
-                          </p>
-                        ) : (
-                          canRetry && (
-                            <div className="approval-actions">
-                              <button
-                                type="button"
-                                className="btn btn-primary"
-                                data-od-id="error-retry"
-                                onClick={onRetry}
-                              >
-                                Tentar de novo
-                              </button>
-                            </div>
-                          )
-                        ))}
-                    </div>
-                  </div>
-                </div>
-              ) : item.kind === "compaction" ? (
-                <div>
-                  <p className="meta day">
-                    {item.status === "running"
-                      ? "Compactando contexto…"
-                      : item.status === "failed"
-                        ? `Falha ao compactar: ${item.error ?? "erro desconhecido"}`
-                        : "Contexto compactado"}
-                  </p>
-                  {item.status === "completed" && (
-                    <details className="meta">
-                      <summary>Resumo</summary>
-                      <p>{item.summary}</p>
-                    </details>
-                  )}
-                </div>
-              ) : null}
-            </div>
+            <MessageItem
+              key={item.id}
+              item={item}
+              separator={separator}
+              isLast={index === items.length - 1}
+              canRetry={canRetry}
+              retryHasAttachments={retryHasAttachments}
+              onPermissionRespond={onPermissionRespond}
+              onSpeak={onSpeak}
+              onRetry={onRetry}
+            />
           );
         })}
         {running && last?.kind === "user_message" && (
