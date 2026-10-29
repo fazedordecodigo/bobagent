@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { networkInterfaces } from "node:os";
 import type { MobileDevice, MobileStatus } from "@upbot/protocol";
+import { getSetting, setSetting } from "./db";
 import { MOBILE_HTML } from "./mobile-app";
 import { RpcError } from "./runtime/agent-runtime";
 
@@ -59,12 +60,7 @@ export class MobileServer {
   constructor(private db: Database) {}
 
   private setting(): { enabled: boolean; port: number } {
-    const r = this.db.query("SELECT value FROM settings WHERE key = 'mobile'").get() as {
-      value: string;
-    } | null;
-    return r
-      ? (JSON.parse(r.value) as { enabled: boolean; port: number })
-      : { enabled: false, port: 0 };
+    return getSetting(this.db, "mobile", { enabled: false, port: 0 });
   }
 
   private devices(): DeviceRow[] {
@@ -105,9 +101,7 @@ export class MobileServer {
     const s = this.setting();
     if (enabled) this.listen();
     else this.close();
-    this.db
-      .query("INSERT OR REPLACE INTO settings (key, value) VALUES ('mobile', ?)")
-      .run(JSON.stringify({ enabled, port: this.server?.port ?? s.port }));
+    setSetting(this.db, "mobile", { enabled, port: this.server?.port ?? s.port });
     return this.status();
   }
 

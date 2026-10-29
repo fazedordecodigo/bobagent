@@ -1,6 +1,7 @@
 import type { Agent, Channel, ChannelMessage } from "@upbot/protocol";
 import { useEffect, useRef, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 import { btnCls, inputCls } from "./AgentSettings";
 import { CopyButton } from "./CopyButton";
 import { Icon } from "./icons";
@@ -32,7 +33,7 @@ export function ChannelView({
       .then((r) => {
         if (alive) setMessages(r.messages);
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(errorMessage(e)));
     const off = client.on("channel.message", (m) => {
       if (m.channelId !== channel.id) return;
       setMessages((prev) => (prev.some((p) => p.id === m.id) ? prev : [...prev, m]));
@@ -53,7 +54,7 @@ export function ChannelView({
     try {
       await fn();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   };
 
@@ -369,7 +370,7 @@ export function ChannelCreateForm({
         e.preventDefault();
         setError(null);
         onSubmit({ name: name.trim(), memberIds: members, ownerId: owner }).catch((err) =>
-          setError(err instanceof Error ? err.message : String(err)),
+          setError(errorMessage(err)),
         );
       }}
     >

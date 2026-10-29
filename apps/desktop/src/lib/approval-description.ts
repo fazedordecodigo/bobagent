@@ -1,4 +1,10 @@
-import { type AppPermissionKind, type Approval, isSensitivePermission } from "@upbot/protocol";
+import {
+  type AppPermissionKind,
+  type Approval,
+  classifyToolVerb,
+  isSensitivePermission,
+  toolOperationTokens,
+} from "@upbot/protocol";
 
 export function requiresFullReview(approval: Approval) {
   return (
@@ -27,29 +33,31 @@ const consequences: Record<AppPermissionKind, string> = {
   book: "reservar",
   del: "apagar conteúdo",
 };
-const verbs: Record<string, [AppPermissionKind, string]> = {
-  get: ["read", "ler"],
-  read: ["read", "ler"],
-  list: ["read", "listar"],
-  search: ["read", "buscar"],
-  fetch: ["read", "ler"],
-  create: ["write", "criar"],
-  add: ["write", "criar"],
-  update: ["write", "alterar"],
-  edit: ["write", "alterar"],
-  write: ["write", "alterar"],
-  send: ["send", "enviar"],
-  dispatch: ["send", "enviar"],
-  deliver: ["send", "enviar"],
-  publish: ["send", "publicar"],
-  post: ["send", "publicar"],
-  share: ["send", "compartilhar"],
-  pay: ["pay", "pagar"],
-  book: ["book", "reservar"],
-  reserve: ["book", "reservar"],
-  delete: ["del", "apagar"],
-  remove: ["del", "apagar"],
-  trash: ["del", "apagar"],
+// pt-BR labels for the operation verbs of the shared taxonomy (classifyToolVerb).
+const verbLabels: Record<string, string> = {
+  get: "ler",
+  read: "ler",
+  list: "listar",
+  search: "buscar",
+  fetch: "ler",
+  create: "criar",
+  add: "criar",
+  update: "alterar",
+  edit: "alterar",
+  write: "alterar",
+  send: "enviar",
+  dispatch: "enviar",
+  deliver: "enviar",
+  publish: "publicar",
+  post: "publicar",
+  share: "compartilhar",
+  reply: "responder",
+  pay: "pagar",
+  book: "reservar",
+  reserve: "reservar",
+  delete: "apagar",
+  remove: "apagar",
+  trash: "apagar",
 };
 const objects: Record<string, string> = {
   note: "uma nota",
@@ -130,19 +138,15 @@ export function approvalArguments(detail: string | null): string | null {
 
 export function describeApproval(approval: Approval, botName = "O bot") {
   const { tool, permission, appName } = approval;
-  const operation = (tool ?? "")
-    .slice((tool ?? "").indexOf("-") + 1)
-    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
-    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-    .toLowerCase()
-    .split(/[_-]+/);
+  const operation = toolOperationTokens(tool ?? "");
   const verbKey = operation[0] ?? "";
   const objectKey = operation[1] ?? "";
-  const verb = Object.hasOwn(verbs, verbKey) ? verbs[verbKey] : undefined;
+  const kind = classifyToolVerb(verbKey);
+  const verb = Object.hasOwn(verbLabels, verbKey) ? verbLabels[verbKey] : undefined;
   const object = Object.hasOwn(objects, objectKey) ? objects[objectKey] : undefined;
   const consequence =
-    operation.length === 2 && verb && object && (!permission || verb[0] === permission)
-      ? `${verb[1]} ${object}`
+    operation.length === 2 && kind && verb && object && (!permission || kind === permission)
+      ? `${verb} ${object}`
       : permission
         ? consequences[permission]
         : "executar uma ação";

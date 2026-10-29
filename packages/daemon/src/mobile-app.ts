@@ -32,7 +32,7 @@ export const MOBILE_HTML = `<!doctype html>
 </style>
 </head>
 <body>
-<header><button id="back" hidden>‹ Agents</button><strong id="title">UpBot</strong></header>
+<header><button id="back" hidden>‹ Bots</button><strong id="title">UpBot</strong></header>
 <main id="main"></main>
 <form id="composer" hidden><textarea id="text" placeholder="Message"></textarea><button>Send</button></form>
 <script>
@@ -41,6 +41,18 @@ const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 let token = localStorage.getItem("upbot.token");
 let agents = [], statuses = {}, current = null, items = [], perms = [], events = null;
+const itemEls = new Map();
+let scrollQueued = false;
+
+function queueScroll() {
+  if (scrollQueued) return;
+  scrollQueued = true;
+  requestAnimationFrame(() => {
+    scrollQueued = false;
+    const main = $("main");
+    main.scrollTop = main.scrollHeight;
+  });
+}
 
 async function rpc(method, params) {
   const r = await fetch("/api/rpc", { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify({ method, params }) });
@@ -83,7 +95,25 @@ function onEvent({ event, data }) {
     renderChat();
   } else if (event === "item.delta" && data.agentId === current.id) {
     const it = items.find((x) => x.id === data.itemId);
-    if (it) { it.text = (it.text || "") + data.text; renderChat(); }
+    if (it) {
+      it.text = (it.text || "") + data.text;
+      const node = itemEls.get(data.itemId);
+      if (node && (it.kind === "user_message" || it.kind === "agent_message")) {
+        const last = node.lastChild;
+        if (last && last.nodeType === 3) last.appendData(data.text);
+        else node.appendChild(document.createTextNode(data.text));
+        queueScroll();
+      } else if (node) {
+        const fresh = itemNode(it);
+        itemEls.set(data.itemId, fresh);
+        node.replaceWith(fresh);
+        queueScroll();
+      } else if (it.kind === "agent_thought") {
+        queueScroll();
+      } else {
+        renderChat();
+      }
+    }
   } else if (event.startsWith("permission.")) {
     loadPerms();
   }
@@ -97,22 +127,27 @@ async function loadAgents() {
 }
 
 function renderAgents() {
-  $("back").hidden = true; $("composer").hidden = true; $("title").textContent = "Agents";
+  $("back").hidden = true; $("composer").hidden = true; $("title").textContent = "Bots";
   const list = agents.map((a) => {
     const row = el("div", "agent");
-    const av = el("span", "avatar", a.avatar ? a.avatar.emoji : a.name.slice(0, 1));
-    if (a.avatar) av.style.background = a.avatar.color;
+    const av = el(
+      "span",
+      "avatar",
+      a.avatar && "emoji" in a.avatar ? a.avatar.emoji : a.name.slice(0, 1),
+    );
+    if (a.avatar && "color" in a.avatar) av.style.background = a.avatar.color;
     const name = el("div"); name.append(el("div", null, a.name), el("div", "meta", a.provider));
     row.append(av, name, el("span", "dot " + (statuses[a.id] || "idle")));
     row.onclick = () => openAgent(a);
     return row;
   });
-  $("main").replaceChildren(...(list.length ? list : [el("p", "meta", "No agents yet.")]));
+  $("main").replaceChildren(...(list.length ? list : [el("p", "meta", "No bots yet.")]));
 }
 
 async function openAgent(a) {
   current = a; $("back").hidden = false; $("composer").hidden = false; $("title").textContent = a.name;
   items = (await rpc("chat.history", { agentId: a.id, limit: 100 })).items;
+  itemEls.clear();
   await loadPerms();
 }
 
@@ -122,14 +157,21 @@ async function loadPerms() {
   renderChat();
 }
 
+function itemNode(it) {
+  if (it.kind === "user_message") return el("div", "msg user", it.text);
+  if (it.kind === "agent_message") return el("div", "msg agentmsg", it.text);
+  if (it.kind === "tool_call") return el("div", "meta", "⚙ " + it.title + " · " + it.status);
+  if (it.kind === "error") return el("div", "meta error", it.message);
+  if (it.kind === "compaction") return el("div", "meta", "Context compacted");
+  return null;
+}
+
 function renderChat() {
   const out = [];
+  itemEls.clear();
   for (const it of items) {
-    if (it.kind === "user_message") out.push(el("div", "msg user", it.text));
-    else if (it.kind === "agent_message") out.push(el("div", "msg agentmsg", it.text));
-    else if (it.kind === "tool_call") out.push(el("div", "meta", "⚙ " + it.title + " · " + it.status));
-    else if (it.kind === "error") out.push(el("div", "meta error", it.message));
-    else if (it.kind === "compaction") out.push(el("div", "meta", "Context compacted"));
+    const node = itemNode(it);
+    if (node) { itemEls.set(it.id, node); out.push(node); }
   }
   for (const p of perms) {
     const box = el("div", "perm"); box.append(el("div", null, p.title || "Permission requested"));
