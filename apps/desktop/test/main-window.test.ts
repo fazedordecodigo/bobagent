@@ -1079,6 +1079,57 @@ test("earlier-history failure is shown", async () => {
   }
 }, 15000);
 
+test("run panel shows its hook errors", async () => {
+  const agent = await createChatErrorBot(`Erro no painel ${crypto.randomUUID().slice(0, 8)}`);
+  const target = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  target.setDefaultTimeout(5000);
+  await target.addInitScript((id) => {
+    localStorage.setItem("upbot.agent", id);
+    localStorage.setItem("upbot.view", "chat");
+  }, agent.id);
+  await target.routeWebSocket(/\/ws\?/, (socket) => {
+    const server = socket.connectToServer();
+    let bootstrapStatuses = 2;
+    socket.onMessage((message) => {
+      const request = JSON.parse(String(message));
+      if (request.method === "agents.statuses") {
+        if (bootstrapStatuses > 0) {
+          bootstrapStatuses -= 1;
+          server.send(message);
+          return;
+        }
+        socket.send(
+          JSON.stringify({
+            id: request.id,
+            error: { code: "internal", message: "Falha de teste" },
+          }),
+        );
+      } else {
+        server.send(message);
+      }
+    });
+    server.onMessage((message) => socket.send(message));
+  });
+  try {
+    await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+    await target
+      .locator('[data-od-id="chat-view"] .main-head')
+      .getByRole("heading", { name: agent.name, exact: true })
+      .waitFor();
+    const panel = target.locator('[data-od-id="run-panel"]');
+    if (!(await panel.isVisible())) {
+      await target.getByRole("button", { name: "Alternar painel de execução" }).click();
+    }
+    await panel.waitFor({ state: "visible" });
+    await panel
+      .getByRole("alert")
+      .filter({ hasText: "Não foi possível carregar o status: Falha de teste" })
+      .waitFor();
+  } finally {
+    await target.close();
+  }
+}, 15000);
+
 test("capture matching prototype states when visual verification is requested", async () => {
   if (!out || !process.env.PHASE2_PROTOTYPE) return;
   const prototype = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
