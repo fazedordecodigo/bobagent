@@ -1,5 +1,13 @@
 import type { AgentStatusInfo, ChatItem, QueueState, Turn } from "@upbot/protocol";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import type { DaemonClient } from "../lib/daemon";
 
 export type ChatState = {
@@ -175,3 +183,26 @@ export function useChat(client: DaemonClient, agentId: string | null) {
 }
 
 export type ChatApi = ReturnType<typeof useChat>;
+
+// Keeps the per-token setState inside this component: its children prop is a
+// stable element tree, so a delta re-renders only the context consumers.
+export function ChatProvider({
+  client,
+  agentId,
+  children,
+}: {
+  client: DaemonClient;
+  agentId: string | null;
+  children: ReactNode;
+}) {
+  const chat = useChat(client, agentId);
+  return <ChatContext.Provider value={chat}>{children}</ChatContext.Provider>;
+}
+
+const ChatContext = createContext<ChatApi | null>(null);
+
+export function useChatApi(): ChatApi {
+  const chat = useContext(ChatContext);
+  if (!chat) throw new Error("useChatApi must be used inside ChatProvider");
+  return chat;
+}

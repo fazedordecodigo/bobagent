@@ -1,6 +1,6 @@
 import type { Agent } from "@upbot/protocol";
 import { useCallback, useEffect, useState } from "react";
-import type { ChatApi } from "../hooks/useChat";
+import { useChatApi } from "../hooks/useChat";
 import type { AgentOverview } from "../hooks/useOverview";
 import type { DaemonClient } from "../lib/daemon";
 import { moveControlFocus } from "../lib/keyboard";
@@ -16,7 +16,6 @@ export function ChatView({
   client,
   agent,
   overview,
-  chat,
   onOpenSettings,
   notice,
   onNoticeDismiss,
@@ -25,7 +24,6 @@ export function ChatView({
   client: DaemonClient;
   agent: Agent;
   overview: AgentOverview | undefined;
-  chat: ChatApi;
   onOpenSettings: () => void;
   notice: string | null;
   onNoticeDismiss: () => void;
@@ -41,7 +39,7 @@ export function ChatView({
     queuePause,
     queueResume,
     queueRemove,
-  } = chat;
+  } = useChatApi();
   const [sendBusy, setSendBusy] = useState(false);
   const [voice, setVoice] = useState({ tts: false, stt: false });
   const [composerText, setComposerText] = useState("");
