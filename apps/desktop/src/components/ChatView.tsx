@@ -185,7 +185,7 @@ export function ChatView({
         loaded={loaded}
         emptyNotice={<PermissionNotice provider={agent.provider} />}
         running={runningTurn !== null || displayStatus === "run"}
-        onLoadEarlier={() => void loadEarlier().catch(() => {})}
+        onLoadEarlier={() => void loadEarlier()}
         onPermissionRespond={(requestId, optionId) => {
           void client.request("permissions.respond", { requestId, optionId }).catch((e) => {
             setSendError(e instanceof Error ? e.message : String(e));

@@ -172,19 +172,27 @@ export function useChat(client: DaemonClient, agentId: string | null) {
   }, [client, agentId, load, refreshStatus]);
 
   const loadEarlier = useCallback(async () => {
-    if (!agentId || seqCursor.current === null) return;
-    const res = await client.request("chat.history", {
-      agentId,
-      beforeSeq: seqCursor.current,
-    });
-    if (res.items.length > 0) seqCursor.current = res.items[0]?.seq ?? null;
-    setState((s) => ({
-      ...s,
-      items: [...res.items, ...s.items],
-      turns: new Map([...res.turns, ...s.turns.values()].map((t) => [t.id, t])),
-      hasMore: res.hasMore,
-    }));
-  }, [client, agentId]);
+    const forAgent = agentId;
+    if (!forAgent || seqCursor.current === null) return;
+    try {
+      const res = await client.request("chat.history", {
+        agentId: forAgent,
+        beforeSeq: seqCursor.current,
+      });
+      if (activeAgent.current !== forAgent) return;
+      if (res.items.length > 0) seqCursor.current = res.items[0]?.seq ?? null;
+      setState((s) => ({
+        ...s,
+        items: [...res.items, ...s.items],
+        turns: new Map([...res.turns, ...s.turns.values()].map((t) => [t.id, t])),
+        hasMore: res.hasMore,
+      }));
+      setError("earlier", null);
+    } catch (e) {
+      if (activeAgent.current !== forAgent) return;
+      setError("earlier", `Não foi possível carregar mensagens anteriores: ${describe(e)}`);
+    }
+  }, [client, agentId, setError]);
 
   const queuePause = useCallback(async () => {
     const forAgent = agentId;

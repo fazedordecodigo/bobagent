@@ -1030,6 +1030,55 @@ test("status failure survives chat loading", async () => {
   }
 }, 15000);
 
+test("earlier-history failure is shown", async () => {
+  const agent = await createChatErrorBot(`Erro de histórico ${crypto.randomUUID().slice(0, 8)}`);
+  const echo = `Resposta anterior ${crypto.randomUUID().slice(0, 8)}`;
+  await seedEchoHistory(agent.id, echo);
+  const target = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  target.setDefaultTimeout(5000);
+  await target.addInitScript((id) => {
+    localStorage.setItem("upbot.agent", id);
+    localStorage.setItem("upbot.view", "chat");
+  }, agent.id);
+  await target.routeWebSocket(/\/ws\?/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      const request = JSON.parse(String(message));
+      if (request.method === "chat.history" && request.params?.beforeSeq !== undefined) {
+        socket.send(
+          JSON.stringify({
+            id: request.id,
+            error: { code: "internal", message: "Falha de teste" },
+          }),
+        );
+        return;
+      }
+      server.send(message);
+    });
+    server.onMessage((message) => {
+      const response = JSON.parse(String(message));
+      if (response.result && response.result.items && response.result.hasMore !== undefined) {
+        response.result.hasMore = true;
+        socket.send(JSON.stringify(response));
+      } else {
+        socket.send(message);
+      }
+    });
+  });
+  try {
+    await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+    const chat = target.locator('[data-od-id="chat-view"]');
+    await chat.getByText(echo, { exact: true }).waitFor();
+    await chat.getByRole("button", { name: "Carregar anteriores", exact: true }).click();
+    await chat
+      .getByRole("alert")
+      .filter({ hasText: "Não foi possível carregar mensagens anteriores: Falha de teste" })
+      .waitFor();
+  } finally {
+    await target.close();
+  }
+}, 15000);
+
 test("capture matching prototype states when visual verification is requested", async () => {
   if (!out || !process.env.PHASE2_PROTOTYPE) return;
   const prototype = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
