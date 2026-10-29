@@ -101,6 +101,7 @@ describe("mobile companion e2e", () => {
 
   test("pairing: wrong codes count toward a limit, the right code yields a device token once", async () => {
     expect((await api("/api/pair", { code: "000000" }, "")).status).toBe(401);
+    await waitForLog('mobile.pair_failed {"reason":"inactive","attempts":0');
     const { code } = (await c.request("mobile.pair", {})) as { code: string };
     expect(code).toMatch(/^\d{6}$/);
     const wrong = code === "123456" ? "654321" : "123456";
@@ -112,6 +113,8 @@ describe("mobile companion e2e", () => {
     device = ((await ok.json()) as { token: string }).token;
     expect(device).toMatch(/^[0-9a-f]{64}$/);
     expect((await api("/api/pair", { code, name: "again" }, "")).status).toBe(401);
+    await waitForLog('mobile.pair_failed {"reason":"inactive","attempts":0');
+    expect(stderrBuf).not.toContain('"reason":"expired"');
     const { code: c2 } = (await c.request("mobile.pair", {})) as { code: string };
     for (let i = 0; i < 5; i++)
       await api("/api/pair", { code: c2 === "111111" ? "222222" : "111111" }, "");

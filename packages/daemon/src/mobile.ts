@@ -235,7 +235,7 @@ export class MobileServer {
       const p = this.pairing;
       if (!p || Date.now() > p.expiresAt || p.attempts >= PAIR_ATTEMPTS) {
         emit("mobile.pair_failed", {
-          reason: p && p.attempts >= PAIR_ATTEMPTS ? "exhausted" : "expired",
+          reason: !p ? "inactive" : p.attempts >= PAIR_ATTEMPTS ? "exhausted" : "expired",
           attempts: p?.attempts ?? 0,
           ip,
         });
