@@ -14,6 +14,16 @@ use tokio::sync::Notify;
 
 const READY_PREFIX: &str = "UPBOT_READY ";
 
+fn parse_ready_port(json: &str) -> Result<u16, &'static str> {
+    let value = serde_json::from_str::<serde_json::Value>(json)
+        .map_err(|_| "upbotd READY line is not valid JSON")?;
+    value["port"]
+        .as_u64()
+        .and_then(|port| u16::try_from(port).ok())
+        .filter(|port| *port != 0)
+        .ok_or("upbotd READY has no valid port")
+}
+
 #[derive(Serialize, Clone)]
 struct DaemonConnection {
     port: u16,
@@ -88,31 +98,20 @@ fn spawn_daemon(app: &tauri::App) -> Result<(), String> {
                         let line = stdout_buf[..idx].trim_end().to_string();
                         stdout_buf = stdout_buf[idx + 1..].to_string();
                         if let Some(json) = line.strip_prefix(READY_PREFIX) {
-                            match serde_json::from_str::<serde_json::Value>(json) {
-                                Ok(v) => {
-                                    let port = v["port"]
-                                        .as_u64()
-                                        .and_then(|p| u16::try_from(p).ok())
-                                        .filter(|p| *p != 0);
-                                    match port {
-                                        Some(port) => {
-                                            let mut inner = state.inner.lock().unwrap();
-                                            inner.conn = Some(DaemonConnection {
-                                                port,
-                                                token: token.clone(),
-                                            });
-                                        }
-                                        None => {
-                                            let msg =
-                                                format!("upbotd READY has no valid port: {json}");
-                                            log::error!("{msg}");
-                                            state.inner.lock().unwrap().error = Some(msg);
-                                        }
-                                    }
-                                    state.ready.notify_waiters();
+                            match parse_ready_port(json) {
+                                Ok(port) => {
+                                    let mut inner = state.inner.lock().unwrap();
+                                    inner.conn = Some(DaemonConnection {
+                                        port,
+                                        token: token.clone(),
+                                    });
                                 }
-                                Err(e) => log::error!("bad READY line from upbotd: {e}"),
+                                Err(msg) => {
+                                    log::error!("{msg}");
+                                    state.inner.lock().unwrap().error = Some(msg.to_string());
+                                }
                             }
+                            state.ready.notify_waiters();
                         }
                     }
                 }
@@ -212,4 +211,48 @@ fn main() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_ready_port;
+
+    #[test]
+    fn parses_valid_ready_port() {
+        assert_eq!(parse_ready_port(r#"{"port":4321}"#), Ok(4321));
+    }
+
+    #[test]
+    fn rejects_invalid_ready_ports() {
+        for json in [
+            r#"{"port":0}"#,
+            r#"{"port":70000}"#,
+            "{}",
+            r#"{"port":"1"}"#,
+        ] {
+            assert_eq!(
+                parse_ready_port(json),
+                Err("upbotd READY has no valid port")
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_ready_json() {
+        assert_eq!(
+            parse_ready_port("not json"),
+            Err("upbotd READY line is not valid JSON")
+        );
+    }
+
+    #[test]
+    fn does_not_leak_ready_payloads_in_errors() {
+        for json in [
+            r#"{"port":0,"token":"sk-live-SECRET"}"#,
+            "sk-live-SECRET not json",
+        ] {
+            let error = parse_ready_port(json).unwrap_err();
+            assert!(!error.contains("SECRET"));
+        }
+    }
 }
