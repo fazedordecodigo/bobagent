@@ -697,8 +697,8 @@ export class AgentRuntime {
           status: u.status ?? item.status,
           detail: u.detail === undefined ? item.detail : u.detail,
         };
-        this.store.writeItemData(item.id, data);
-        const updated = { ...item, ...data, updatedAt: Date.now() } as ChatItem;
+        const updatedAt = this.store.writeItemData(item.id, data);
+        const updated = { ...item, ...data, updatedAt } as ChatItem;
         this.toolCallItems.set(u.toolCallId, updated);
         this.broadcast("item.updated", updated);
         break;
