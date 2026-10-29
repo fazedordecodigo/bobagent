@@ -54,6 +54,30 @@ describe("chat e2e (fake acp agent)", () => {
     return (await c.request("chat.history", { agentId })) as never;
   }
 
+  function expectSeqPrefix(text: string): number {
+    expect(text).toMatch(/^(\d+\|)*$/);
+    const tokens = text === "" ? [] : text.slice(0, -1).split("|");
+    expect(tokens).toEqual(tokens.map((_, i) => String(i)));
+    return tokens.length;
+  }
+
+  function emittedAgentMessage(agentId: string, itemId: string): string {
+    return c.events
+      .filter((e) => {
+        if (e.event === "item.created") {
+          const item = e.data as ChatItem;
+          return item.id === itemId && item.agentId === agentId && item.kind === "agent_message";
+        }
+        if (e.event === "item.delta") {
+          const delta = e.data as { agentId: string; itemId: string };
+          return delta.agentId === agentId && delta.itemId === itemId;
+        }
+        return false;
+      })
+      .map((e) => (e.data as { text: string }).text)
+      .join("");
+  }
+
   beforeAll(async () => {
     dataDir = tmp("oa2-data-");
     agentsRoot = tmp("oa2-agents-");
@@ -122,8 +146,21 @@ describe("chat e2e (fake acp agent)", () => {
 
   test("slow stream: timed flush persists chunks; mid-stream history is complete", async () => {
     const agent = await newAgent("StreamFlush", "devin");
-    await send(agent.id, "slow");
-    await c.waitForEventWhere("item.delta", (d) => (d as { agentId: string }).agentId === agent.id);
+    await send(agent.id, "slowseq");
+    const created = (await c.waitForEventWhere(
+      "item.created",
+      (d) => {
+        const item = d as ChatItem;
+        return item.agentId === agent.id && item.kind === "agent_message";
+      },
+    )) as ChatItem;
+    await c.waitForEventWhere(
+      "item.delta",
+      (d) => {
+        const delta = d as { agentId: string; itemId: string };
+        return delta.agentId === agent.id && delta.itemId === created.id;
+      },
+    );
     await Bun.sleep(350); // > TEXT_FLUSH_MS: the timed flush must have persisted emitted chunks
 
     // the background timer persisted without any RPC
@@ -134,31 +171,23 @@ describe("chat e2e (fake acp agent)", () => {
     ro.close();
     const persisted = (JSON.parse(row.data_json) as { text: string }).text;
     expect(persisted.length).toBeGreaterThan(0);
-
-    const deltasSoFar = () =>
-      c.events
-        .filter(
-          (e) => e.event === "item.delta" && (e.data as { agentId: string }).agentId === agent.id,
-        )
-        .map((e) => (e.data as { text: string }).text)
-        .join("");
-    const emitted = deltasSoFar();
+    expectSeqPrefix(persisted);
+    const emitted = emittedAgentMessage(agent.id, created.id);
+    expectSeqPrefix(emitted);
     // ws delivery and the db write race; both are prefixes of the true stream
     expect(persisted.startsWith(emitted) || emitted.startsWith(persisted)).toBe(true);
 
     // chat.history mid-stream returns every emitted chunk (the read flushes pending text)
-    const created = c.events
-      .filter(
-        (e) =>
-          e.event === "item.created" &&
-          (e.data as ChatItem).agentId === agent.id &&
-          (e.data as ChatItem).kind === "agent_message",
-      )
-      .map((e) => (e.data as { text: string }).text)
-      .join("");
+    const emittedBeforeHistory = emittedAgentMessage(agent.id, created.id);
     const mid = await history(agent.id);
-    const msg = mid.items.find((i) => i.kind === "agent_message") as { text: string };
-    expect(msg.text.startsWith(created + emitted)).toBe(true);
+    const msg = mid.items.find((i) => i.id === created.id) as { text: string };
+    expectSeqPrefix(msg.text);
+    expect(msg.text.startsWith(emittedBeforeHistory)).toBe(true);
+    const emittedAfterHistory = emittedAgentMessage(agent.id, created.id);
+    expectSeqPrefix(emittedAfterHistory);
+    expect(
+      msg.text.startsWith(emittedAfterHistory) || emittedAfterHistory.startsWith(msg.text),
+    ).toBe(true);
 
     await c.request("chat.cancel", { agentId: agent.id });
     const t = await waitTurnEnd(agent.id);
@@ -166,8 +195,11 @@ describe("chat e2e (fake acp agent)", () => {
 
     // the close flush persisted every chunk emitted before the turn ended
     const h2 = await history(agent.id);
-    const msg2 = h2.items.find((i) => i.kind === "agent_message") as { text: string };
-    expect(msg2.text).toBe(created + deltasSoFar());
+    const msg2 = h2.items.find((i) => i.id === created.id) as { text: string };
+    const emittedAtEnd = emittedAgentMessage(agent.id, created.id);
+    expectSeqPrefix(emittedAtEnd);
+    expectSeqPrefix(msg2.text);
+    expect(msg2.text).toBe(emittedAtEnd);
   });
 
   test("instructions prefix on first prompt of a new session only", async () => {
@@ -670,14 +702,14 @@ describe("chat e2e (fake acp agent)", () => {
 
   test("kill -9 during a turn: turn becomes interrupted after restart, orphan exits on stdin EOF", async () => {
     const agent = await newAgent("Killed", "devin");
-    await send(agent.id, "slow");
-    await c.waitForEventWhere("item.delta", (d) => (d as { agentId: string }).agentId === agent.id);
-    const emitted = c.events
-      .filter(
-        (e) => e.event === "item.delta" && (e.data as { agentId: string }).agentId === agent.id,
-      )
-      .map((e) => (e.data as { text: string }).text)
-      .join("");
+    await send(agent.id, "slowseq");
+    const delta = (await c.waitForEventWhere("item.delta", (d) => {
+      const item = d as { agentId: string; itemId: string; text: string };
+      return item.agentId === agent.id && item.text === "2|";
+    })) as { itemId: string };
+    const emitted = emittedAgentMessage(agent.id, delta.itemId);
+    expectSeqPrefix(emitted);
+    expect(emitted.startsWith("0|")).toBe(true);
     const orphanPid = readPids(stateDir)[readPids(stateDir).length - 1]!;
 
     daemon.proc.kill("SIGKILL");
@@ -702,6 +734,8 @@ describe("chat e2e (fake acp agent)", () => {
     // stream — a kill loses only the unflushed tail, never corrupts chunks
     const msg = h.items.find((i) => i.kind === "agent_message") as { text: string };
     expect(msg.text.length).toBeGreaterThan(0);
+    expectSeqPrefix(msg.text);
+    expect(msg.text.startsWith("0|")).toBe(true);
     expect(emitted.startsWith(msg.text) || msg.text.startsWith(emitted)).toBe(true);
   });
 
