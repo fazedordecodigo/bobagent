@@ -184,9 +184,7 @@ export class EmailService {
   deleteAccount(id: string): void {
     this.account(id);
     this.db.query("DELETE FROM email_accounts WHERE id = ?").run(id);
-    try {
-      this.vault.delete(this.passwordName(id));
-    } catch {}
+    this.vault.delete(this.passwordName(id));
     this.broadcast("email.accounts.changed", {});
   }
 
