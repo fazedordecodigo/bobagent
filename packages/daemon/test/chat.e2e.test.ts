@@ -495,8 +495,7 @@ describe("chat e2e (fake acp agent)", () => {
       value: null,
     });
     expect(
-      ((await c.request("agents.list", {})) as Agent[]).find((a) => a.id === agent.id)?.config
-        .model,
+      (await c.request("agents.list", {})).find((a) => a.id === agent.id)?.config.model,
     ).toBeUndefined();
     await send(agent.id, "echo:after model reset");
     await waitTurnEnd(agent.id);

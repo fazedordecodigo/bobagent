@@ -2,7 +2,8 @@ import type { Database } from "bun:sqlite";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Agent } from "@upbot/protocol";
-import { getSetting, setSetting } from "./db";
+import { z } from "zod";
+import { getSetting, setSetting } from "./db/settings";
 
 // Computer Use (macOS): screenshots via `screencapture`, mouse via CoreGraphics (JXA),
 // keyboard via System Events. Off for every agent until the user allows it; macOS also asks
@@ -43,11 +44,13 @@ const KEY_CODES: Record<string, number> = {
 };
 const MODIFIERS = new Set(["command", "control", "option", "shift"]);
 
+const accessSchema = z.array(z.string());
+
 export class ComputerUse {
   constructor(private db: Database) {}
 
   access(): string[] {
-    return getSetting<string[]>(this.db, "computer_use_agents", []);
+    return getSetting(this.db, "computer_use_agents", accessSchema, []);
   }
 
   setAccess(agentIds: string[]): void {

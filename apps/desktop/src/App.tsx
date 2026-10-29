@@ -23,6 +23,7 @@ import { useLayerFocus, useMediaQuery } from "./hooks/useLayerFocus";
 import { useOverview } from "./hooks/useOverview";
 import { DaemonClient } from "./lib/daemon";
 import { errorMessage } from "./lib/errors";
+import { errorFields, logWarn } from "./lib/log";
 import { nativeCommand } from "./lib/native";
 import { useNativeNotifications } from "./lib/native-notifications";
 import { mod } from "./lib/platform";
@@ -100,7 +101,9 @@ export default function App() {
         setSelectedId((selected) => (selected === id ? null : selected));
       }),
       client.onReconnect(() => {
-        void refresh().catch(() => {});
+        void refresh().catch((e: unknown) =>
+          logWarn("app.refresh_after_reconnect_failed", errorFields(e)),
+        );
       }),
       client.onFailure((e) => {
         setError(e.message);
@@ -348,7 +351,7 @@ export default function App() {
           })),
         ]);
       })
-      .catch(() => {});
+      .catch((e: unknown) => logWarn("app.pages_list_failed", errorFields(e)));
     return () => {
       active = false;
     };

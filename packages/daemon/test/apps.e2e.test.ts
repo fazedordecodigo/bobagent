@@ -141,7 +141,7 @@ describe("connected apps (MCP) e2e", () => {
     })) as ConnectedApp;
     let failed: ConnectedApp | undefined;
     for (let i = 0; i < 100; i++) {
-      const list = (await c.request("apps.list", {})) as ConnectedApp[];
+      const list = await c.request("apps.list", {});
       failed = list.find((x) => x.id === bad.id);
       if (failed?.status === "error") break;
       await Bun.sleep(100);
@@ -187,7 +187,7 @@ process.stdin.on("data", (chunk) => {
     try {
       let failed: ConnectedApp | undefined;
       for (let i = 0; i < 100; i++) {
-        const list = (await c.request("apps.list", {})) as ConnectedApp[];
+        const list = await c.request("apps.list", {});
         failed = list.find((x) => x.id === bad.id);
         if (failed?.status === "error") break;
         await Bun.sleep(100);
@@ -219,12 +219,12 @@ process.stdin.on("data", (chunk) => {
     try {
       let failed: ConnectedApp | undefined;
       for (let i = 0; i < 100; i++) {
-        const list = (await c.request("apps.list", {})) as ConnectedApp[];
+        const list = await c.request("apps.list", {});
         failed = list.find((x) => x.id === bad.id);
         if (failed?.status === "error") break;
         await Bun.sleep(100);
       }
-      const list = (await c.request("apps.list", {})) as ConnectedApp[];
+      const list = await c.request("apps.list", {});
       expect(failed?.status).toBe("error");
       expect(failed?.error).toContain("stderr output suppressed");
       expect(JSON.stringify(list)).not.toContain(firstHalf);
@@ -263,7 +263,7 @@ process.stdin.on("data", (chunk) => {
         if (failedStarts >= 2) break;
         await Bun.sleep(100);
       }
-      const list = (await c.request("apps.list", {})) as ConnectedApp[];
+      const list = await c.request("apps.list", {});
       expect(failedStarts).toBeGreaterThanOrEqual(2);
       expect(daemonStderr).not.toContain(oldToken);
       expect(daemonStderr).not.toContain(newToken);
@@ -311,7 +311,7 @@ process.stdin.on("data", (chunk) => {
       })) as ConnectedApp;
       let failed: ConnectedApp | undefined;
       for (let i = 0; i < 100; i++) {
-        const list = (await timeoutClient.request("apps.list", {})) as ConnectedApp[];
+        const list = await timeoutClient.request("apps.list", {});
         failed = list.find((x) => x.id === bad!.id);
         if (failed?.status === "error") break;
         await Bun.sleep(100);
@@ -319,7 +319,7 @@ process.stdin.on("data", (chunk) => {
       for (let i = 0; i < 20 && !timeoutStderr.includes("app start failed"); i++)
         await Bun.sleep(50);
       hungPid = Number(readFileSync(pidFile, "utf8").trim());
-      const list = (await timeoutClient.request("apps.list", {})) as ConnectedApp[];
+      const list = await timeoutClient.request("apps.list", {});
       expect(failed?.status).toBe("error");
       expect(timeoutStderr).toContain("app start failed");
       expect(failed?.error).toContain("app MCP startup timed out (transport initialization)");

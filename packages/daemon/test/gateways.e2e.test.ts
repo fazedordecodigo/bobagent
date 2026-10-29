@@ -377,7 +377,7 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
     let gatewayId: string | undefined;
     const waitGateway = (predicate: (gateway: Gateway) => boolean) =>
       waitFor(async () => {
-        const current = ((await c.request("gateways.list", {})) as Gateway[]).find(
+        const current = (await c.request("gateways.list", {})).find(
           (gateway) => gateway.id === gatewayId,
         );
         return current && predicate(current) ? current : undefined;
@@ -490,7 +490,7 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
     })) as Gateway;
     let gw: Gateway | undefined;
     for (let i = 0; i < 100 && gw?.status !== "error"; i++) {
-      gw = ((await c.request("gateways.list", {})) as Gateway[]).find((x) => x.id === g.id);
+      gw = (await c.request("gateways.list", {})).find((x) => x.id === g.id);
       await Bun.sleep(50);
     }
     expect(gw?.status).toBe("error");
@@ -519,7 +519,7 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
     await waitFor(() => (slackFlapOpens.length >= 4 ? true : undefined), 20000);
     await c.request("gateways.delete", { id: g.id });
     expectBackoffGaps(slackFlapOpens);
-    const gw = ((await c.request("gateways.list", {})) as Gateway[]).find((x) => x.id === g.id);
+    const gw = (await c.request("gateways.list", {})).find((x) => x.id === g.id);
     expect(gw).toBeUndefined();
   });
 
@@ -531,7 +531,7 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
       tokens: { botToken: "DC-FLAP" },
     })) as Gateway;
     await waitFor(() => (discordFlapIdentifies.length >= 2 ? true : undefined), 20000);
-    const gw = ((await c.request("gateways.list", {})) as Gateway[]).find((x) => x.id === g.id);
+    const gw = (await c.request("gateways.list", {})).find((x) => x.id === g.id);
     expect(gw?.status).not.toBe("error");
     await waitFor(() => (discordFlapIdentifies.length >= 4 ? true : undefined), 20000);
     await c.request("gateways.delete", { id: g.id });

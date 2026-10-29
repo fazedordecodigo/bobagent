@@ -9,6 +9,7 @@ import type {
 } from "@upbot/protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
+import { errorFields, logWarn } from "../lib/log";
 import { fmtTime, status, type UiStatus } from "../lib/ui";
 import { useDaemonQuery } from "./useDaemonQuery";
 
@@ -50,7 +51,11 @@ export function useOverview(
     client,
     "approvals.list",
     {},
-    { events: { "approvals.rulesChanged": true }, enabled },
+    {
+      events: { "approvals.rulesChanged": true },
+      enabled,
+      onError: (e) => logWarn("overview.approvals_failed", errorFields(e)),
+    },
   );
   const approvals = approvalsData ?? [];
   const { data: appsData } = useDaemonQuery(
@@ -60,6 +65,7 @@ export function useOverview(
     {
       events: { "apps.changed": true },
       enabled,
+      onError: (e) => logWarn("overview.apps_failed", errorFields(e)),
     },
   );
   const apps = appsData ?? [];
@@ -70,6 +76,7 @@ export function useOverview(
     {
       events: { "email.accounts.changed": true },
       enabled,
+      onError: (e) => logWarn("overview.email_failed", errorFields(e)),
     },
   );
   const emailAccounts = emailAccountsData ?? [];
@@ -78,8 +85,14 @@ export function useOverview(
   const loadAgent = useCallback(
     async (agentId: string) => {
       const [history, queue] = await Promise.all([
-        client.request("chat.history", { agentId, limit: 50 }).catch(() => null),
-        client.request("queue.get", { agentId }).catch(() => null),
+        client.request("chat.history", { agentId, limit: 50 }).catch((e: unknown) => {
+          logWarn("overview.history_failed", { agentId, ...errorFields(e) });
+          return null;
+        }),
+        client.request("queue.get", { agentId }).catch((e: unknown) => {
+          logWarn("overview.queue_failed", { agentId, ...errorFields(e) });
+          return null;
+        }),
       ]);
       if (history) {
         const latestTurn = [...history.turns].sort((a, b) => b.startedAt - a.startedAt)[0] ?? null;

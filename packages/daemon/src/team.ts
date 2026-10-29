@@ -7,9 +7,10 @@ import {
   type TeamStatus,
   type Turn,
 } from "@upbot/protocol";
+import { z } from "zod";
 import type { AgentStore } from "./agents";
 import { type ChatStore, parseQueueMeta } from "./chat-store";
-import { deleteSetting, getSetting, setSetting } from "./db";
+import { deleteSetting, getSetting, InvalidSettingError, setSetting } from "./db/settings";
 import type { Broadcast } from "./rpc";
 import { RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
@@ -20,6 +21,10 @@ import { TEAM_PREFIX, type Vault } from "./vault";
 // answer for that turn. The member token lives in the vault as team.token.
 
 type Config = { url: string; sharedAgentIds: string[] };
+
+const configSchema = z
+  .looseObject({ url: z.string(), sharedAgentIds: z.array(z.string()) })
+  .nullable();
 
 const TOKEN_NAME = `${TEAM_PREFIX}token`;
 
@@ -82,7 +87,7 @@ export class TeamClient {
   ) {}
 
   private config(): Config | null {
-    return getSetting<Config | null>(this.db, "team", null);
+    return getSetting(this.db, "team", configSchema, null);
   }
 
   private setConfig(c: Config | null) {
@@ -114,7 +119,12 @@ export class TeamClient {
       Math.max(100, Math.min(REPLY_TTL_MS / 2, 60_000)),
     );
     this.expiry.unref?.();
-    if (this.config()) this.open(1000);
+    try {
+      if (this.config()) this.open(1000);
+    } catch (e) {
+      if (!(e instanceof InvalidSettingError)) throw e;
+      console.error("[upbotd] team relay not started:", e.message);
+    }
   }
 
   private expirePending() {
@@ -143,9 +153,16 @@ export class TeamClient {
     if (!["http:", "https:", "ws:", "wss:"].includes(u.protocol))
       throw new RpcError("bad_request", "invalid relay URL");
     this.vault.set(TOKEN_NAME, token.trim(), []);
+    let sharedAgentIds: string[];
+    try {
+      sharedAgentIds = this.config()?.sharedAgentIds ?? [];
+    } catch (e) {
+      if (!(e instanceof InvalidSettingError)) throw e;
+      sharedAgentIds = [];
+    }
     this.setConfig({
       url: u.href.replace(/\/$/, ""),
-      sharedAgentIds: this.config()?.sharedAgentIds ?? [],
+      sharedAgentIds,
     });
     this.close();
     this.open(1000);

@@ -17,16 +17,18 @@ import {
 import { nextApprovalRules } from "../lib/approval-rules";
 import type { DaemonClient } from "../lib/daemon";
 import { errorMessage } from "../lib/errors";
+import { errorFields, logWarn } from "../lib/log";
 import { btnCls, inputCls } from "./AgentSettings";
 import { useApprovalFeedback } from "./ApprovalFeedback";
 import s from "./Approvals.module.css";
 import { Button, Field, StatusPill } from "./ds/controls";
 
 function useApprovals(client: DaemonClient, agentId?: string) {
-  const { data } = useDaemonQuery(client, "approvals.list", agentId ? { agentId } : {}, {
+  const { data, error } = useDaemonQuery(client, "approvals.list", agentId ? { agentId } : {}, {
     events: { "approval.updated": (a) => !agentId || a.agentId === agentId },
+    onError: (e) => logWarn("approvals.list_failed", { agentId, ...errorFields(e) }),
   });
-  return data ?? [];
+  return { items: data ?? [], error: error ? "Não foi possível carregar aprovações" : null };
 }
 
 function Countdown({ until }: { until: number }) {
@@ -224,10 +226,18 @@ export function ApprovalCards({
   agentId: string;
   botName: string;
 }) {
-  const pending = useApprovals(client, agentId).filter((a) => a.status === "pending");
+  const { items, error } = useApprovals(client, agentId);
+  const pending = items.filter((a) => a.status === "pending");
+  if (error && !pending.length)
+    return (
+      <div className={s.cards}>
+        <p className="px-4 py-1 text-xs text-red-400">{error}</p>
+      </div>
+    );
   if (!pending.length) return null;
   return (
     <div className={s.cards}>
+      {error && <p className="px-4 py-1 text-xs text-red-400">{error}</p>}
       {pending.map((a, index) => (
         <ApprovalCard
           key={a.id}
@@ -250,12 +260,20 @@ export function AppApprovalCards({
   agents: Agent[];
   primary?: boolean;
 }) {
-  const pending = useApprovals(client).filter(
+  const { items, error } = useApprovals(client);
+  const pending = items.filter(
     (a) => a.status === "pending" && a.kind === "tool" && Boolean(a.appId),
   );
+  if (error && !pending.length)
+    return (
+      <section aria-label="Pedidos de apps conectados" className={s.cards}>
+        <p className="px-4 py-1 text-xs text-red-400">{error}</p>
+      </section>
+    );
   if (!pending.length) return null;
   return (
     <section aria-label="Pedidos de apps conectados" className={s.cards}>
+      {error && <p className="px-4 py-1 text-xs text-red-400">{error}</p>}
       <h3>Pedidos pendentes</h3>
       {pending.map((a, index) => (
         <ApprovalCard
@@ -271,7 +289,7 @@ export function AppApprovalCards({
 }
 
 export function ApprovalsView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
-  const items = useApprovals(client);
+  const { items, error: listError } = useApprovals(client);
   const {
     data: rules = [],
     error: rulesLoadError,
@@ -283,6 +301,7 @@ export function ApprovalsView({ client, agents }: { client: DaemonClient; agents
     {},
     {
       events: { "approvals.rulesChanged": true },
+      onError: (e) => logWarn("approvals.rules_failed", errorFields(e)),
     },
   );
   // Mutations write the whole list via approvals.setRules, so they stay closed
@@ -294,9 +313,10 @@ export function ApprovalsView({ client, agents }: { client: DaemonClient; agents
   const [error, setError] = useState<string | null>(null);
   const save = (next: ApprovalRule[] | null) => {
     if (next === null) return Promise.resolve();
-    return client
-      .request("approvals.setRules", { rules: next })
-      .catch((e) => setError(errorMessage(e)));
+    return client.request("approvals.setRules", { rules: next }).catch((e) => {
+      logWarn("approvals.setRules_failed", errorFields(e));
+      setError(errorMessage(e));
+    });
   };
   const nameOf = (id: string | null) =>
     id ? (agents.find((a) => a.id === id)?.name ?? "Bot removido") : "Todos os bots";
@@ -404,6 +424,7 @@ export function ApprovalsView({ client, agents }: { client: DaemonClient; agents
       )}
       {error && <div className="text-xs text-red-400">{error}</div>}
       <h3 className="text-sm font-semibold text-zinc-300">Pedidos</h3>
+      {listError && <p className="text-xs text-red-400">{listError}</p>}
       <div className="space-y-2">
         {items.map((a) => (
           <ApprovalCard

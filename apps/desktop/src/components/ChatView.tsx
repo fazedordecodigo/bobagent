@@ -5,6 +5,7 @@ import type { AgentOverview } from "../hooks/useOverview";
 import type { DaemonClient } from "../lib/daemon";
 import { errorMessage } from "../lib/errors";
 import { moveControlFocus } from "../lib/keyboard";
+import { errorFields, logWarn } from "../lib/log";
 import { MonoAv, Pill, role } from "../lib/ui";
 import { PermissionNotice } from "./AgentSettings";
 import { ApprovalCards } from "./ApprovalsView";
@@ -52,7 +53,7 @@ export function ChatView({
     client
       .request("voice.status", {})
       .then(setVoice)
-      .catch(() => {});
+      .catch((e: unknown) => logWarn("voice.status_failed", errorFields(e)));
   }, [client]);
 
   const isClaude = agent.provider === "claude";
@@ -121,12 +122,15 @@ export function ChatView({
   );
 
   const speak = useCallback(
-    (text: string) => void client.request("voice.speak", { text }).catch(() => {}),
+    (text: string) =>
+      void client
+        .request("voice.speak", { text })
+        .catch((e: unknown) => logWarn("voice.speak_failed", errorFields(e))),
     [client],
   );
 
   const loadEarlierItems = useCallback(() => {
-    void loadEarlier().catch(() => {});
+    void loadEarlier();
   }, [loadEarlier]);
   const displayStatus = overview?.status ?? "idle";
   const isAsking = supportsModes && safeMode;
@@ -221,8 +225,9 @@ export function ChatView({
         hintError={sendError}
         onSend={send}
         onStop={() =>
-          void client.request("chat.cancel", { agentId: agent.id }).catch((e) => {
-            setSendError(errorMessage(e));
+          void client.request("chat.cancel", { agentId: agent.id }).catch((e: unknown) => {
+            logWarn("chat.cancel_failed", { agentId: agent.id, ...errorFields(e) });
+            setSendError(`Não foi possível parar: ${errorMessage(e)}`);
           })
         }
         onTranscribe={

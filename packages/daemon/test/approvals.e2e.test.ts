@@ -625,7 +625,7 @@ describe("approvals e2e", () => {
         await expect(
           c.request("approvals.respond", { id: ap.id, decision: "approve", value: "replacement" }),
         ).rejects.toMatchObject({ code: "internal", message: "internal error" });
-        const approvals = (await c.request("approvals.list", {})) as Approval[];
+        const approvals = await c.request("approvals.list", {});
         expect(approvals.find((entry) => entry.id === ap.id)?.status).toBe("denied");
       });
       expect(r.text).toContain(`did not provide ${name} (denied)`);

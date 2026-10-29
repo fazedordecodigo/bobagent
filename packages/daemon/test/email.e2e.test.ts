@@ -239,7 +239,7 @@ describe("email connector e2e", () => {
       await expect(c.request("email.accounts.delete", { id: doomed.id })).rejects.toMatchObject({
         code: "internal",
       });
-      expect((await c.request("email.accounts.list", {})) as EmailAccount[]).toContainEqual(
+      expect(await c.request("email.accounts.list", {})).toContainEqual(
         expect.objectContaining({ id: doomed.id, hasPassword: true }),
       );
       expect(
@@ -259,7 +259,7 @@ describe("email connector e2e", () => {
       await c.request("email.accounts.delete", { id: doomed.id });
       await changed;
 
-      expect((await c.request("email.accounts.list", {})) as EmailAccount[]).not.toContainEqual(
+      expect(await c.request("email.accounts.list", {})).not.toContainEqual(
         expect.objectContaining({ id: doomed.id }),
       );
       const row = db

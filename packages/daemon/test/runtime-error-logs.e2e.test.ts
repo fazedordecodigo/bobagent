@@ -126,7 +126,7 @@ describe("runtime failure logs e2e", () => {
     expect((await compaction).status).toBe("failed");
     await waitForStderr(
       new RegExp(
-        `\\[upbotd\\] auto-compaction failed: agent=${agent.id} errorType=RpcError code=internal`,
+        `\\[upbotd\\] auto-compaction failed: agent=${agent.id} provider=devin turn=\\S+ errorType=RpcError code=internal`,
       ),
       5000,
     );

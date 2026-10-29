@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import type { DaemonClient } from "../lib/daemon";
+import { errorFields, logWarn } from "../lib/log";
 
 export type ChatErrorSource = "history" | "queue" | "status" | "earlier" | "action";
 
@@ -61,6 +62,7 @@ export function useChat(client: DaemonClient, agentId: string | null) {
       const running = res.turns.find((t) => t.status === "running") ?? null;
       let queueError: string | null = null;
       const queue = await client.request("queue.get", { agentId: forAgent }).catch((e: unknown) => {
+        logWarn("queue.get_failed", { agentId: forAgent, ...errorFields(e) });
         queueError = `Não foi possível carregar a fila: ${describe(e)}`;
         return null;
       });
@@ -77,6 +79,7 @@ export function useChat(client: DaemonClient, agentId: string | null) {
       }));
     } catch (e) {
       if (activeAgent.current !== forAgent) return;
+      logWarn("chat.history_failed", { agentId: forAgent, ...errorFields(e) });
       setState((s) => ({ ...s, loaded: true }));
       setError("history", `Não foi possível carregar o histórico: ${describe(e)}`);
     }
@@ -95,6 +98,7 @@ export function useChat(client: DaemonClient, agentId: string | null) {
       })
       .catch((e: unknown) => {
         if (activeAgent.current !== forAgent) return;
+        logWarn("agents.statuses_failed", { agentId: forAgent, ...errorFields(e) });
         setError("status", `Não foi possível carregar o status: ${describe(e)}`);
       });
   }, [client, agentId, setError]);
@@ -208,6 +212,7 @@ export function useChat(client: DaemonClient, agentId: string | null) {
       setError("earlier", null);
     } catch (e) {
       if (activeAgent.current !== forAgent) return;
+      logWarn("chat.history_earlier_failed", { agentId: forAgent, ...errorFields(e) });
       setError("earlier", `Não foi possível carregar mensagens anteriores: ${describe(e)}`);
     }
   }, [client, agentId, setError]);
@@ -221,6 +226,7 @@ export function useChat(client: DaemonClient, agentId: string | null) {
       setError("action", null);
     } catch (e) {
       if (activeAgent.current !== forAgent) return;
+      logWarn("queue.pause_failed", { agentId: forAgent, ...errorFields(e) });
       setError("action", `Não foi possível pausar a fila: ${describe(e)}`);
     }
   }, [client, agentId, setError]);
@@ -233,6 +239,7 @@ export function useChat(client: DaemonClient, agentId: string | null) {
       setError("action", null);
     } catch (e) {
       if (activeAgent.current !== forAgent) return;
+      logWarn("queue.resume_failed", { agentId: forAgent, ...errorFields(e) });
       setError("action", `Não foi possível retomar a fila: ${describe(e)}`);
     }
   }, [client, agentId, setError]);
@@ -246,6 +253,7 @@ export function useChat(client: DaemonClient, agentId: string | null) {
         setError("action", null);
       } catch (e) {
         if (activeAgent.current !== forAgent) return;
+        logWarn("queue.remove_failed", { queueId, ...errorFields(e) });
         setError("action", `Não foi possível remover da fila: ${describe(e)}`);
       }
     },

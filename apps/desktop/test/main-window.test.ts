@@ -8,9 +8,10 @@ import type {
   ApprovalRule,
   ChannelMessage,
   ConnectedApp,
+  EmailDraft,
   Routine,
 } from "@upbot/protocol";
-import { type Browser, chromium, type Page } from "playwright-core";
+import { type Browser, chromium, type Page, type WebSocketRoute } from "playwright-core";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -974,6 +975,159 @@ test("scheduled routines show recoverable RPC errors", async () => {
   }
 }, 15000);
 
+test("cached approval and draft cards remain visible when refreshes fail", async () => {
+  const target = await browser.newPage();
+  target.setDefaultTimeout(5000);
+  const consoleText: string[] = [];
+  target.on("console", (message) => consoleText.push(message.text()));
+  let fail = false;
+  let routedSocket: WebSocketRoute | undefined;
+  const approval: Approval = {
+    id: "refresh-error-approval",
+    agentId: bot.id,
+    turnId: "refresh-error-turn",
+    kind: "tool",
+    title: "Read a project file",
+    detail: "{}",
+    tool: "read_file",
+    secretName: null,
+    background: false,
+    status: "pending",
+    createdAt: Date.now(),
+    expiresAt: Date.now() + 60_000,
+  };
+  const draft: EmailDraft = {
+    id: "refresh-error-draft",
+    agentId: bot.id,
+    accountId: "test-account",
+    to: ["review@example.com"],
+    cc: [],
+    subject: "Draft remains visible",
+    body: "Draft body",
+    inReplyTo: null,
+    status: "pending",
+    error: null,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  const failMethods = new Set([
+    "chat.history",
+    "queue.get",
+    "approvals.list",
+    "apps.list",
+    "email.accounts.list",
+    "email.drafts.list",
+  ]);
+  await target.addInitScript(
+    ({ id }) => {
+      localStorage.setItem("upbot.agent", id);
+      localStorage.setItem("upbot.view", "chat");
+    },
+    { id: bot.id },
+  );
+  await target.routeWebSocket(/\/ws\?/, (socket) => {
+    routedSocket = socket;
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      const request = JSON.parse(String(message));
+      if (request.method === "approvals.list") {
+        socket.send(
+          JSON.stringify(
+            fail
+              ? {
+                  id: request.id,
+                  error: { code: "internal", message: "Falha token=sk-secret-xyz" },
+                }
+              : { id: request.id, result: [approval] },
+          ),
+        );
+      } else if (request.method === "email.drafts.list") {
+        socket.send(
+          JSON.stringify(
+            fail
+              ? {
+                  id: request.id,
+                  error: { code: "internal", message: "Falha token=sk-secret-xyz" },
+                }
+              : { id: request.id, result: [draft] },
+          ),
+        );
+      } else if (fail && failMethods.has(request.method)) {
+        socket.send(
+          JSON.stringify({
+            id: request.id,
+            error: { code: "internal", message: "Falha token=sk-secret-xyz" },
+          }),
+        );
+      } else {
+        server.send(message);
+      }
+    });
+    server.onMessage((message) => socket.send(message));
+    socket.onClose(() => server.close());
+  });
+  try {
+    await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+    await target
+      .locator(".main-head")
+      .getByRole("heading", { name: bot.name, exact: true })
+      .waitFor();
+    await target.getByTestId("approval").waitFor();
+    await target.getByTestId("email-draft").waitFor();
+
+    fail = true;
+    const socket = routedSocket;
+    if (!socket) throw new Error("Routed websocket was not created");
+    const approvalLog = target.waitForEvent("console", {
+      predicate: (message) => message.text().includes("[desktop] approvals.list_failed"),
+    });
+    const overviewLogs = Promise.all(
+      ["history", "queue", "approvals", "apps", "email"].map((name) =>
+        target.waitForEvent("console", {
+          predicate: (message) => message.text().includes(`[desktop] overview.${name}_failed`),
+        }),
+      ),
+    );
+    socket.send(JSON.stringify({ event: "approval.updated", data: approval }));
+    socket.send(JSON.stringify({ event: "email.draft.updated", data: draft }));
+    socket.send(
+      JSON.stringify({
+        event: "turn.started",
+        data: {
+          id: "refresh-error-turn",
+          agentId: bot.id,
+          queueId: null,
+          status: "running",
+          stopReason: null,
+          error: null,
+          startedAt: Date.now(),
+          endedAt: null,
+        },
+      }),
+    );
+    socket.send(JSON.stringify({ event: "apps.changed", data: {} }));
+    socket.send(JSON.stringify({ event: "email.accounts.changed", data: {} }));
+    socket.send(JSON.stringify({ event: "approvals.rulesChanged", data: {} }));
+    await target.getByText("Não foi possível carregar aprovações", { exact: true }).waitFor();
+    await target.getByText("Falha token=sk-secret-xyz", { exact: true }).waitFor();
+    await target.getByTestId("approval").waitFor();
+    await target.getByTestId("email-draft").waitFor();
+    const approvalMessage = await approvalLog;
+    expect(approvalMessage.text()).toContain('"code":"internal"');
+    await overviewLogs;
+
+    const closedMessage = target.waitForEvent("console", {
+      predicate: (message) => message.text().includes("[desktop] daemon.socket_closed"),
+    });
+    socket.close({ code: 4001, reason: "reason-secret-abc" });
+    expect((await closedMessage).text()).toContain('"code":4001');
+    expect(consoleText.join("\n")).not.toContain("sk-secret-xyz");
+    expect(consoleText.join("\n")).not.toContain("reason-secret-abc");
+  } finally {
+    await target.close();
+  }
+}, 20000);
+
 test("status failure survives chat loading", async () => {
   const agent = await createChatErrorBot(`Erro de status ${crypto.randomUUID().slice(0, 8)}`);
   const echo = `Resposta de status ${crypto.randomUUID().slice(0, 8)}`;
@@ -1034,6 +1188,8 @@ test("earlier-history failure is shown", async () => {
   await seedEchoHistory(agent.id, echo);
   const target = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   target.setDefaultTimeout(5000);
+  const consoleText: string[] = [];
+  target.on("console", (message) => consoleText.push(message.text()));
   await target.addInitScript((id) => {
     localStorage.setItem("upbot.agent", id);
     localStorage.setItem("upbot.view", "chat");
@@ -1067,11 +1223,20 @@ test("earlier-history failure is shown", async () => {
     await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
     const chat = target.locator('[data-od-id="chat-view"]');
     await chat.getByText(echo, { exact: true }).waitFor();
+    const earlierLog = target.waitForEvent("console", {
+      predicate: (message) => message.text().includes("[desktop] chat.history_earlier_failed"),
+    });
     await chat.getByRole("button", { name: "Carregar anteriores", exact: true }).click();
     await chat
       .getByRole("alert")
       .filter({ hasText: "Não foi possível carregar mensagens anteriores: Falha de teste" })
       .waitFor();
+    const logLine = (await earlierLog).text();
+    expect(logLine).toContain(agent.id);
+    expect(logLine).toContain('"code":"internal"');
+    const logs = consoleText.filter((line) => line.includes("[desktop]")).join("\n");
+    expect(logs).not.toContain("Falha de teste");
+    expect(logs).not.toContain(echo);
   } finally {
     await target.close();
   }
@@ -1128,8 +1293,84 @@ test("run panel shows its hook errors", async () => {
   }
 }, 15000);
 
+test("draft send logs update and send failures under their own scopes", async () => {
+  const target = await browser.newPage();
+  target.setDefaultTimeout(5000);
+  const consoleText: string[] = [];
+  target.on("console", (message) => consoleText.push(message.text()));
+  const draft: EmailDraft = {
+    id: "send-scope-draft",
+    agentId: bot.id,
+    accountId: "test-account",
+    to: ["review@example.com"],
+    cc: [],
+    subject: "Scope check",
+    body: "Draft body",
+    inReplyTo: null,
+    status: "pending",
+    error: null,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  let failUpdate = true;
+  const methods: string[] = [];
+  await target.addInitScript(
+    ({ id }) => {
+      localStorage.setItem("upbot.agent", id);
+      localStorage.setItem("upbot.view", "chat");
+    },
+    { id: bot.id },
+  );
+  await target.routeWebSocket(/\/ws\?/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      const request = JSON.parse(String(message));
+      methods.push(request.method);
+      const reply = (body: object) => socket.send(JSON.stringify({ id: request.id, ...body }));
+      if (request.method === "email.drafts.list") reply({ result: [draft] });
+      else if (request.method === "email.drafts.update")
+        reply(
+          failUpdate
+            ? { error: { code: "internal", message: "update failed" } }
+            : { result: draft },
+        );
+      else if (request.method === "email.drafts.send")
+        reply({ error: { code: "internal", message: "send failed" } });
+      else server.send(message);
+    });
+    server.onMessage((message) => socket.send(message));
+    socket.onClose(() => server.close());
+  });
+  try {
+    await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+    const card = target.getByTestId("email-draft");
+    await card.waitFor();
+    const updateLog = target.waitForEvent("console", {
+      predicate: (message) => message.text().includes("[desktop] email.drafts.update_failed"),
+    });
+    await card.getByRole("button", { name: "Send", exact: true }).click();
+    await updateLog;
+    await card.getByText("update failed", { exact: true }).waitFor();
+    expect(methods).not.toContain("email.drafts.send");
+    expect(consoleText.join("\n")).not.toContain("email.drafts.send_failed");
+
+    failUpdate = false;
+    const sendLog = target.waitForEvent("console", {
+      predicate: (message) => message.text().includes("[desktop] email.drafts.send_failed"),
+    });
+    await card.getByRole("button", { name: "Send", exact: true }).click();
+    await sendLog;
+    await card.getByText("send failed", { exact: true }).waitFor();
+    expect(methods).toContain("email.drafts.send");
+  } finally {
+    await target.close();
+  }
+}, 15000);
+
 test("skill save errors clear on cancel and when creating another skill", async () => {
   const target = await browser.newPage();
+  const consoleText: string[] = [];
+  target.on("console", (message) => consoleText.push(message.text()));
   await target.routeWebSocket(/\/ws\?/, (socket) => {
     const server = socket.connectToServer();
     socket.onMessage((message) => {
@@ -1159,6 +1400,8 @@ test("skill save errors clear on cancel and when creating another skill", async 
     await target.getByRole("button", { name: "Save", exact: true }).click();
     const error = target.getByText("Falha de teste", { exact: true });
     await error.waitFor();
+    expect(consoleText.join("\n")).toContain("[desktop] skills.save_failed");
+    expect(consoleText.join("\n")).not.toContain("test-skill");
     await target.getByRole("button", { name: "Cancel", exact: true }).click();
     expect(await error.count()).toBe(0);
     await target.getByRole("button", { name: "New skill", exact: true }).click();
