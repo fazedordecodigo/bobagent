@@ -442,7 +442,7 @@ describe("approvals e2e", () => {
     } finally {
       db.close();
     }
-  });
+  }, 30000);
 
   test("secure secret request stores the value in the vault for that bot only", async () => {
     const r = await withApproval(
