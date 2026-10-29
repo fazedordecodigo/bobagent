@@ -117,7 +117,7 @@ type McpSpec = {
 };
 const sessionMcp = new Map<string, McpSpec[]>();
 
-/** Minimal MCP stdio client: initialize + one tools/call, returns the text content. */
+/** Minimal MCP stdio client: initialize + one tools/call (or tools/list), returns the text content. */
 async function callMcp(spec: McpSpec, tool: string, args: unknown): Promise<string> {
   const env = { ...process.env };
   for (const e of spec.env) env[e.name] = e.value;
@@ -148,6 +148,11 @@ async function callMcp(spec: McpSpec, tool: string, args: unknown): Promise<stri
     child.stdin.write(
       `${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`,
     );
+    if (tool === "tools/list") {
+      const l = await req(2, "tools/list", {});
+      if (l.error) return `mcp-error:${l.error.message}`;
+      return `tools:${(l.result as { tools: { name: string }[] }).tools.map((t) => t.name).join(",")}`;
+    }
     const r = await req(2, "tools/call", { name: tool, arguments: args });
     if (r.error) return `mcp-error:${r.error.message}`;
     const res = r.result as { content: { text: string }[]; isError?: boolean };
@@ -245,6 +250,11 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
     if (!spec) throw new Error("no-upbot-mcp");
     for (const call of calls)
       await say("agent_message_chunk", await callMcp(spec, call.tool, call.args));
+    return { stopReason: "end_turn" };
+  }
+  if (text === "mcp-list") {
+    const spec = sessionMcp.get(sessionId)?.find((x) => x.name === "upbot");
+    await say("agent_message_chunk", spec ? await callMcp(spec, "tools/list", {}) : "no-upbot-mcp");
     return { stopReason: "end_turn" };
   }
   if (text.startsWith("mcp:")) {
