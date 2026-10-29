@@ -145,7 +145,16 @@ test("gateway notices stay bound to their source transport and send errors stay 
 
     const turn = { id: "turn", status: "completed" } as Turn;
     const queueRow = {
-      meta_json: JSON.stringify({ gateway: { id: gateway.id, chatId: "chat" } }),
+      meta_json: JSON.stringify({
+        gateway: {
+          id: gateway.id,
+          kind: "telegram",
+          name: "Relay",
+          chatId: "chat",
+          userId: "1",
+          userName: "unknown",
+        },
+      }),
     };
     const from = broadcasts.length;
     second.hooks.onStatus("error", "connect failed for bot-secret-2");
