@@ -1,7 +1,6 @@
 import {
   closeDetail,
-  INITIAL_BACKOFF_MS,
-  nextBackoff,
+  ReconnectBackoff,
   splitText,
   type Transport,
   type TransportHooks,
@@ -28,7 +27,7 @@ const api = () => process.env.UPBOT_DISCORD_API ?? "https://discord.com/api/v10"
 export class DiscordTransport implements Transport {
   private ws: WebSocket | null = null;
   private running = false;
-  private backoff = INITIAL_BACKOFF_MS;
+  private backoff = new ReconnectBackoff();
   private seq: number | null = null;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private selfId = "";
@@ -78,9 +77,7 @@ export class DiscordTransport implements Transport {
   }
 
   private scheduleReconnect() {
-    const delay = this.backoff;
-    this.backoff = nextBackoff(this.backoff);
-    setTimeout(() => void this.connect(), delay);
+    setTimeout(() => void this.connect(), this.backoff.next());
   }
 
   private onClose(ws: WebSocket, ev: CloseEvent) {
@@ -122,7 +119,7 @@ export class DiscordTransport implements Transport {
     if (f.op !== 0) return;
     if (f.t === "READY") {
       this.selfId = (f.d as { user: { id: string } }).user.id;
-      this.backoff = INITIAL_BACKOFF_MS;
+      this.backoff.markHealthy();
       this.hooks.onStatus("connected");
       return;
     }

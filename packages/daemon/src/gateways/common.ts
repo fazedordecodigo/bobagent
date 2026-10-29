@@ -20,6 +20,30 @@ export type TransportHooks = {
 export const INITIAL_BACKOFF_MS = 1_000;
 export const MAX_BACKOFF_MS = 30_000;
 export const nextBackoff = (ms: number) => Math.min(ms * 2, MAX_BACKOFF_MS);
+export const STABLE_CONNECTION_MS = 30_000;
+
+// Reconnect delays for socket transports. Opening a socket (or a handshake) does not reset the
+// delay: only a connection that stayed healthy for STABLE_CONNECTION_MS does, so a server that
+// accepts and promptly closes keeps backing off instead of being retried every second.
+export class ReconnectBackoff {
+  private delay = INITIAL_BACKOFF_MS;
+  private healthySince: number | null = null;
+
+  constructor(private now: () => number = Date.now) {}
+
+  markHealthy() {
+    this.healthySince = this.now();
+  }
+
+  next(): number {
+    if (this.healthySince !== null && this.now() - this.healthySince >= STABLE_CONNECTION_MS)
+      this.delay = INITIAL_BACKOFF_MS;
+    this.healthySince = null;
+    const delay = this.delay;
+    this.delay = nextBackoff(delay);
+    return delay;
+  }
+}
 export const closeDetail = (ev: { code: number; reason: string }) =>
   `closed ${ev.code}${ev.reason ? ` ${ev.reason}` : ""}`;
 

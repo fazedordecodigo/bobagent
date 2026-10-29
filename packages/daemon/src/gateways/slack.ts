@@ -1,7 +1,6 @@
 import {
   closeDetail,
-  INITIAL_BACKOFF_MS,
-  nextBackoff,
+  ReconnectBackoff,
   splitText,
   type Transport,
   type TransportHooks,
@@ -30,7 +29,7 @@ const api = () => process.env.UPBOT_SLACK_API ?? "https://slack.com/api";
 export class SlackTransport implements Transport {
   private ws: WebSocket | null = null;
   private running = false;
-  private backoff = INITIAL_BACKOFF_MS;
+  private backoff = new ReconnectBackoff();
   private botUserId = "";
 
   constructor(
@@ -76,7 +75,7 @@ export class SlackTransport implements Transport {
       const ws = new WebSocket(url);
       this.ws = ws;
       ws.onopen = () => {
-        this.backoff = INITIAL_BACKOFF_MS;
+        this.backoff.markHealthy();
         this.hooks.onStatus("connected");
       };
       ws.onmessage = (ev) => this.onFrame(ws, String(ev.data));
@@ -88,9 +87,7 @@ export class SlackTransport implements Transport {
   }
 
   private scheduleReconnect() {
-    const delay = this.backoff;
-    this.backoff = nextBackoff(this.backoff);
-    setTimeout(() => void this.connect(), delay);
+    setTimeout(() => void this.connect(), this.backoff.next());
   }
 
   private onClose(ws: WebSocket, ev: CloseEvent) {
