@@ -17,6 +17,12 @@ export type TransportHooks = {
   onStatus: (status: GatewayStatus, error?: string | null) => void;
 };
 
+export const INITIAL_BACKOFF_MS = 1_000;
+export const MAX_BACKOFF_MS = 30_000;
+export const nextBackoff = (ms: number) => Math.min(ms * 2, MAX_BACKOFF_MS);
+export const closeDetail = (ev: { code: number; reason: string }) =>
+  `closed ${ev.code}${ev.reason ? ` ${ev.reason}` : ""}`;
+
 export function splitText(text: string, max: number): string[] {
   const out: string[] = [];
   let rest = text;

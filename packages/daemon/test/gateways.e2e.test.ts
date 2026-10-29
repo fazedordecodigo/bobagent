@@ -49,6 +49,7 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
   const slackEnvelopes: Json[] = [];
   const discordSent: { channel: string; body: Json }[] = [];
   let discordIdentify: Json | null = null;
+  let badIdentifies = 0;
   let updateId = 1;
 
   beforeAll(async () => {
@@ -121,7 +122,13 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
             return;
           }
           if (msg.op !== 2) return;
-          discordIdentify = msg.d as Json;
+          const d = msg.d as Json;
+          if (d.token === "DC-BAD") {
+            badIdentifies++;
+            ws.close(4004, "Authentication failed");
+            return;
+          }
+          discordIdentify = d;
           const dispatch = (s: number, t: string, d: Json) =>
             ws.send(JSON.stringify({ op: 0, s, t, d }));
           dispatch(1, "READY", { user: { id: "BOTID" } });
@@ -314,5 +321,24 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
       "telegram",
       "slack",
     ]);
+  });
+
+  test("discord: a fatal close code reports error and stops reconnecting", async () => {
+    const g = (await c.request("gateways.create", {
+      kind: "discord",
+      name: "DiscordBad",
+      agentId: a.id,
+      tokens: { botToken: "DC-BAD" },
+    })) as Gateway;
+    let gw: Gateway | undefined;
+    for (let i = 0; i < 100 && gw?.status !== "error"; i++) {
+      gw = ((await c.request("gateways.list", {})) as Gateway[]).find((x) => x.id === g.id);
+      await Bun.sleep(50);
+    }
+    expect(gw?.status).toBe("error");
+    expect(gw?.error).toContain("4004");
+    await Bun.sleep(1500);
+    expect(badIdentifies).toBe(1);
+    await c.request("gateways.delete", { id: g.id });
   });
 });

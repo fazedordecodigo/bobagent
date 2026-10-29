@@ -1,7 +1,17 @@
-import { splitText, type Transport, type TransportHooks } from "./common";
+import {
+  closeDetail,
+  INITIAL_BACKOFF_MS,
+  nextBackoff,
+  splitText,
+  type Transport,
+  type TransportHooks,
+} from "./common";
 
 // Discord Gateway v10: Hello -> Identify (+heartbeats) -> READY -> MESSAGE_CREATE.
 const INTENTS = (1 << 0) | (1 << 9) | (1 << 12) | (1 << 15); // GUILDS, GUILD_MESSAGES, DIRECT_MESSAGES, MESSAGE_CONTENT
+// Close codes that reject the bot itself (bad token, sharding/intent misconfig):
+// reconnecting with the same settings would loop forever.
+const FATAL_CLOSE_CODES = new Set([4004, 4010, 4011, 4012, 4013, 4014]);
 
 type Frame = { op: number; t?: string | null; s?: number | null; d?: unknown };
 type Message = {
@@ -18,6 +28,7 @@ const api = () => process.env.UPBOT_DISCORD_API ?? "https://discord.com/api/v10"
 export class DiscordTransport implements Transport {
   private ws: WebSocket | null = null;
   private running = false;
+  private backoff = INITIAL_BACKOFF_MS;
   private seq: number | null = null;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private selfId = "";
@@ -43,7 +54,7 @@ export class DiscordTransport implements Transport {
 
   start() {
     this.running = true;
-    void this.connect(1000);
+    void this.connect();
   }
 
   stop() {
@@ -52,23 +63,35 @@ export class DiscordTransport implements Transport {
     this.ws?.close();
   }
 
-  private async connect(backoff: number) {
+  private async connect() {
     if (!this.running) return;
     try {
       const { url } = await this.rest<{ url: string }>("GET", "/gateway/bot");
       const ws = new WebSocket(`${url}?v=10&encoding=json`);
       this.ws = ws;
       ws.onmessage = (ev) => this.onFrame(ws, JSON.parse(String(ev.data)) as Frame);
-      ws.onclose = () => {
-        if (this.heartbeat) clearInterval(this.heartbeat);
-        if (this.ws !== ws || !this.running) return;
-        this.hooks.onStatus("connecting");
-        setTimeout(() => void this.connect(1000), 1000);
-      };
+      ws.onclose = (ev) => this.onClose(ws, ev);
     } catch (e) {
       this.hooks.onStatus("error", (e as Error).message);
-      setTimeout(() => void this.connect(Math.min(backoff * 2, 30_000)), backoff);
+      this.scheduleReconnect();
     }
+  }
+
+  private scheduleReconnect() {
+    const delay = this.backoff;
+    this.backoff = nextBackoff(this.backoff);
+    setTimeout(() => void this.connect(), delay);
+  }
+
+  private onClose(ws: WebSocket, ev: CloseEvent) {
+    if (this.heartbeat) clearInterval(this.heartbeat);
+    if (this.ws !== ws || !this.running) return;
+    if (FATAL_CLOSE_CODES.has(ev.code)) {
+      this.hooks.onStatus("error", closeDetail(ev));
+      return;
+    }
+    this.hooks.onStatus("connecting", closeDetail(ev));
+    this.scheduleReconnect();
   }
 
   private onFrame(ws: WebSocket, f: Frame) {
@@ -99,6 +122,7 @@ export class DiscordTransport implements Transport {
     if (f.op !== 0) return;
     if (f.t === "READY") {
       this.selfId = (f.d as { user: { id: string } }).user.id;
+      this.backoff = INITIAL_BACKOFF_MS;
       this.hooks.onStatus("connected");
       return;
     }
