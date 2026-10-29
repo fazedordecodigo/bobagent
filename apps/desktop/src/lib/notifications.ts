@@ -2,6 +2,7 @@ import type { Approval, ApprovalDecision } from "@upbot/protocol";
 import { type ApprovalResult, decideApproval } from "./approval-decisions";
 import { describeApproval } from "./approval-description";
 import type { DaemonClient } from "./daemon";
+import { errorMessage } from "./errors";
 
 export type NotificationAction = "approve" | "deny" | "task" | "review" | "undo";
 export type DecisionNotification = {
@@ -185,7 +186,7 @@ export class ApprovalNotifications {
   }
 
   private fail(error: unknown) {
-    if (!this.stopped) this.error(error instanceof Error ? error.message : String(error));
+    if (!this.stopped) this.error(errorMessage(error));
   }
 
   async start() {

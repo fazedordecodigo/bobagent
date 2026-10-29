@@ -16,6 +16,7 @@ import type {
 } from "@upbot/protocol";
 import { useCallback, useEffect, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 import { btnCls, inputCls, PROVIDERS } from "./AgentSettings";
 import { Markdown } from "./Markdown";
 
@@ -181,7 +182,7 @@ export function SkillsView({ client }: { client: DaemonClient }) {
           client
             .request("skills.save", edit)
             .then(() => setEdit(null))
-            .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+            .catch((err) => setError(errorMessage(err)));
         }}
       >
         <h2 className="text-lg font-semibold">Skill</h2>
@@ -286,7 +287,7 @@ export function RoutinesPanel({ client, agentId }: { client: DaemonClient; agent
       offD();
     };
   }, [client, agentId, load]);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   return (
     <section className="mx-auto max-w-lg space-y-2 px-6 pb-6">
       <h3 className="text-sm font-semibold text-zinc-300">Routines</h3>
@@ -485,7 +486,7 @@ export function VaultView({ client, agents }: { client: DaemonClient; agents: Ag
   }, [client, load]);
   const toggle = (ids: string[], id: string) =>
     ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id];
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   return (
     <div className="mx-auto max-w-2xl space-y-4 p-6">
       <h2 className="text-lg font-semibold">Vault</h2>
@@ -678,7 +679,7 @@ export function GatewaysView({ client, agents }: { client: DaemonClient; agents:
       b();
     };
   }, [client, load]);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   const users = (s: string) =>
     s
       .split(/[\s,]+/)
@@ -855,7 +856,7 @@ export function MarketplaceView({ client }: { client: DaemonClient }) {
         setData(d);
         setSources(d.sources.join("\n"));
       })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e) => setError(errorMessage(e)));
   }, [client]);
   useEffect(() => {
     load();
@@ -870,7 +871,7 @@ export function MarketplaceView({ client }: { client: DaemonClient }) {
         ...(i.kind === "agent" ? { provider } : {}),
       })
       .then(load)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setError(errorMessage(e)))
       .finally(() => setBusy(null));
   };
   return (
@@ -942,7 +943,7 @@ export function MarketplaceView({ client }: { client: DaemonClient }) {
                 .filter(Boolean),
             })
             .then(load)
-            .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+            .catch((err) => setError(errorMessage(err)));
         }}
       >
         <h3 className="text-sm font-semibold text-zinc-300">Registries</h3>
@@ -977,7 +978,7 @@ export function MobileView({ client }: { client: DaemonClient }) {
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
   }, [load]);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   if (!st) return null;
   return (
     <div className="mx-auto max-w-lg space-y-4 p-6">
@@ -1081,7 +1082,7 @@ export function TeamView({ client, agents }: { client: DaemonClient; agents: Age
       b();
     };
   }, [client]);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   if (!st) return null;
   if (!st.configured) {
     return (
