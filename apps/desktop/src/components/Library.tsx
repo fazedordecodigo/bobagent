@@ -16,6 +16,7 @@ import type {
 } from "@upbot/protocol";
 import { useCallback, useEffect, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 import { btnCls, inputCls, PROVIDERS } from "./AgentSettings";
 import { Markdown } from "./Markdown";
 
@@ -26,7 +27,10 @@ export function AvatarBadge({
   agent: Pick<Agent, "name" | "avatar">;
   size?: number;
 }) {
-  const emoji = agent.avatar?.emoji ?? agent.name.slice(0, 1).toUpperCase();
+  const emoji =
+    agent.avatar && "emoji" in agent.avatar
+      ? agent.avatar.emoji
+      : agent.name.slice(0, 1).toUpperCase();
   return (
     <span
       className="inline-flex shrink-0 items-center justify-center rounded-full"
@@ -34,7 +38,7 @@ export function AvatarBadge({
         width: size,
         height: size,
         fontSize: size * 0.6,
-        background: agent.avatar?.color ?? "var(--fg-soft)",
+        background: agent.avatar && "color" in agent.avatar ? agent.avatar.color : "var(--fg-soft)",
       }}
     >
       {emoji}
@@ -49,9 +53,11 @@ export function AvatarEditor({
   agent: Agent;
   onSave: (avatar: AgentAvatar | null) => Promise<void>;
 }) {
-  const [emoji, setEmoji] = useState(agent.avatar?.emoji ?? agent.name.slice(0, 1));
+  const [emoji, setEmoji] = useState(
+    agent.avatar && "emoji" in agent.avatar ? agent.avatar.emoji : agent.name.slice(0, 1),
+  );
   const [color, setColor] = useState(() => {
-    if (agent.avatar?.color) return agent.avatar.color;
+    if (agent.avatar && "color" in agent.avatar) return agent.avatar.color;
     const probe = document.createElement("span");
     probe.style.color = "var(--fg)";
     document.body.append(probe);
@@ -94,7 +100,7 @@ export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agent
   const [items, setItems] = useState<Memory[]>([]);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   const load = useCallback(() => {
     client
       .request("memories.list", { agentId })
@@ -162,7 +168,7 @@ export function SkillsView({ client }: { client: DaemonClient }) {
     null,
   );
   const [error, setError] = useState<string | null>(null);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   const load = useCallback(() => {
     client
       .request("skills.list", {})
@@ -302,7 +308,7 @@ export function RoutinesPanel({ client, agentId }: { client: DaemonClient; agent
       offD();
     };
   }, [client, agentId, load]);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   return (
     <section className="mx-auto max-w-lg space-y-2 px-6 pb-6">
       <h3 className="text-sm font-semibold text-zinc-300">Routines</h3>
@@ -418,7 +424,7 @@ export function RoutinesPanel({ client, agentId }: { client: DaemonClient; agent
 export function BrowserView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
   const [state, setState] = useState<BrowserState | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   const load = useCallback(() => {
     client
       .request("browser.status", {})
@@ -508,7 +514,7 @@ export function VaultView({ client, agents }: { client: DaemonClient; agents: Ag
   }, [client, load]);
   const toggle = (ids: string[], id: string) =>
     ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id];
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   return (
     <div className="mx-auto max-w-2xl space-y-4 p-6">
       <h2 className="text-lg font-semibold">Vault</h2>
@@ -621,7 +627,7 @@ export function VaultView({ client, agents }: { client: DaemonClient; agents: Ag
 export function ComputerUsePanel({ client, agentId }: { client: DaemonClient; agentId: string }) {
   const [state, setState] = useState<{ available: boolean; agentIds: string[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   const load = useCallback(() => {
     client
       .request("computer.access", {})
@@ -705,7 +711,7 @@ export function GatewaysView({ client, agents }: { client: DaemonClient; agents:
       b();
     };
   }, [client, load]);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   const users = (s: string) =>
     s
       .split(/[\s,]+/)
@@ -882,7 +888,7 @@ export function MarketplaceView({ client }: { client: DaemonClient }) {
         setData(d);
         setSources(d.sources.join("\n"));
       })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e) => setError(errorMessage(e)));
   }, [client]);
   useEffect(() => {
     load();
@@ -897,7 +903,7 @@ export function MarketplaceView({ client }: { client: DaemonClient }) {
         ...(i.kind === "agent" ? { provider } : {}),
       })
       .then(load)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setError(errorMessage(e)))
       .finally(() => setBusy(null));
   };
   return (
@@ -969,7 +975,7 @@ export function MarketplaceView({ client }: { client: DaemonClient }) {
                 .filter(Boolean),
             })
             .then(load)
-            .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+            .catch((err) => setError(errorMessage(err)));
         }}
       >
         <h3 className="text-sm font-semibold text-zinc-300">Registries</h3>
@@ -1004,7 +1010,7 @@ export function MobileView({ client }: { client: DaemonClient }) {
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
   }, [load]);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   if (!st) return null;
   return (
     <div className="mx-auto max-w-lg space-y-4 p-6">
@@ -1108,7 +1114,7 @@ export function TeamView({ client, agents }: { client: DaemonClient; agents: Age
       b();
     };
   }, [client]);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
   if (!st) return null;
   if (!st.configured) {
     return (

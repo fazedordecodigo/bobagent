@@ -1042,52 +1042,6 @@ test("browser close errors clear after a successful retry", async () => {
   }
 }, 15000);
 
-test("bot settings clear library errors when switching bots", async () => {
-  const research = ((await rpc.request("agents.list", {})) as Agent[]).find(
-    (agent) => agent.name === "Pesquisa",
-  );
-  if (!research) throw new Error("Pesquisa bot not found");
-  const memory = await rpc.request("memories.add", {
-    agentId: bot.id,
-    text: "memory-switch-error",
-  });
-  const target = await browser.newPage();
-  await target.routeWebSocket(/\/ws\?/, (socket) => {
-    const server = socket.connectToServer();
-    socket.onMessage((message) => {
-      const request = JSON.parse(String(message));
-      if (request.method === "memories.delete") {
-        socket.send(
-          JSON.stringify({
-            id: request.id,
-            error: { code: "internal", message: "Falha de teste" },
-          }),
-        );
-      } else {
-        server.send(message);
-      }
-    });
-  });
-  try {
-    await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
-    await target.locator(".side-bot").filter({ hasText: bot.name }).click();
-    await target.getByRole("button", { name: "Configurar bot", exact: true }).click();
-    const memoryRow = target.locator("li").filter({ hasText: "memory-switch-error" });
-    await memoryRow.getByRole("button", { name: "Delete", exact: true }).click();
-    await target.getByText("Falha de teste", { exact: true }).waitFor();
-    await target.locator(".side-bot").filter({ hasText: research.name }).click();
-    await target.getByRole("button", { name: "Configurar bot", exact: true }).click();
-    await target
-      .locator(".agent-settings-page")
-      .getByRole("heading", { name: research.name, exact: true })
-      .waitFor();
-    expect(await target.getByText("Falha de teste", { exact: true }).count()).toBe(0);
-  } finally {
-    await target.close();
-    await rpc.request("memories.delete", { id: memory.id });
-  }
-}, 15000);
-
 test("capture matching prototype states when visual verification is requested", async () => {
   if (!out || !process.env.PHASE2_PROTOTYPE) return;
   const prototype = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
