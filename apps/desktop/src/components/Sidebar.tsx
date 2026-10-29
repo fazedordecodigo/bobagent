@@ -1,5 +1,6 @@
-import type { Agent, AgentStatusInfo, Approval, Channel } from "@upbot/protocol";
-import { type RefObject, useEffect, useState } from "react";
+import type { Agent, AgentStatusInfo, Channel } from "@upbot/protocol";
+import type { RefObject } from "react";
+import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { AgentOverview } from "../hooks/useOverview";
 import type { DaemonClient } from "../lib/daemon";
 import { moveControlFocus } from "../lib/keyboard";
@@ -65,27 +66,16 @@ export function Sidebar({
   onAgent: (id: string) => void;
   onChannel: (id: string) => void;
 }) {
-  const [approvals, setApprovals] = useState<Approval[]>([]);
+  const { data: approvals = [] } = useDaemonQuery(
+    client,
+    "approvals.list",
+    {},
+    {
+      enabled: ready,
+      events: { "approval.updated": true },
+    },
+  );
   const [theme, setTheme] = useThemePref();
-  useEffect(() => {
-    if (!ready) return;
-    let alive = true;
-    const refresh = () =>
-      void client
-        .request("approvals.list", {})
-        .then((items) => {
-          if (alive) setApprovals(items);
-        })
-        .catch(() => {});
-    refresh();
-    const off = client.on("approval.updated", refresh);
-    const reconnect = client.onReconnect(refresh);
-    return () => {
-      alive = false;
-      off();
-      reconnect();
-    };
-  }, [client, ready]);
   const pending = approvals.filter((item) => item.status === "pending" && item.appId).length;
   const dark =
     theme === "auto" ? document.documentElement.dataset.theme === "dark" : theme === "dark";

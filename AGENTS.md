@@ -43,7 +43,8 @@ The bridge appends app tools to `tools/list` as `<slug>-<tool>` and routes calls
 Migration 19 adds `permissions_json`: `read | write | send | pay | book | del` map to
 `off | ask | allow`. New and migrated apps default to read=allow and all others=ask.
 Sensitive kinds (send/pay/book/del) reject allow in both protocol schemas and AppsService.
-`apps.connect/update` accept partial permissions. `src/app-permissions.ts` classifies the
+`apps.connect/update` accept partial permissions. `classifyAppTool` in `@upbot/protocol`
+(shared with the desktop UI) classifies the
 operation after `<slug>-` on underscores, hyphens and camelCase. The leading verb determines
 the kind; verbs after and/or/then can escalate it (del > pay > book > send > write > read).
 Read-object nouns do not escalate. An unknown leading token falls back to known verbs
@@ -120,6 +121,8 @@ old versions in `.history/v<n>.html`. Served at `GET /pages/<id>?token=<viewToke
 per daemon start, CSP `default-src 'none'`, no network); UI `PagesView` (sidebar "Pages")
 shows them in `<iframe sandbox="allow-scripts">` (Tauri CSP `frame-src http://127.0.0.1:*`).
 RPC `pages.list/delete`, event `pages.changed`. Tests: `test/pages.e2e.test.ts`.
+Titles are capped at 200 and descriptions at 1000 UTF-16 units on create and update
+(including legacy values), without splitting a surrogate pair.
 
 ## Group chat + navigation (UpBot)
 
@@ -298,7 +301,7 @@ null; `agents.avatar_json`, migration 8). `agents.restore {id}` restores a soft-
 and emits `agent.created` so clients add it back to their lists. `agents.draft
 {prompt}` (`src/draft.ts`, deterministic) proposes name/instructions/avatar for the create
 form. Memories: `memories` table, `MemoryStore` (`src/memories.ts`), RPC
-`memories.list/add/delete`, event `memories.changed`. Skills library:
+`memories.list/add/update/delete`, event `memories.changed`. Skills library:
 `<shared>/Skills/<name>/SKILL.md` with name/description/author frontmatter, previous versions
 in `.history/` (`src/skills.ts`), RPC `skills.list/get/save/delete`, event `skills.changed`.
 Bridge tools: `remember`, `forget`, `list_memories`, `list_skills`, `read_skill`,
@@ -404,11 +407,20 @@ RPC `mobile.status/enable/pair/revoke`; UI `MobileView`. Tests: `test/mobile.e2e
 self-hostable Bun relay: admin token (`RELAY_ADMIN_TOKEN` or `<data>/admin-token`) manages
 members (`POST/GET /members`, `DELETE /members/:id`, tokens stored hashed in `team.json`);
 members connect to `/ws?token=` and exchange `share` / `send` / `incoming` / `reply` frames.
+Share entries are validated (string id/name/provider; avatar via protocol `AgentAvatar`, otherwise null).
 No chat content is stored on the relay. Daemon side `src/team.ts` (`settings.team`, token in
 the vault as `team.token`, hidden from `vault.list`, migration 13 `team_messages`): shares
 selected agents, runs incoming messages as `<team_message>` turns and replies on `turn.ended`.
+An incoming row is `completed` once the reply is handed to an open relay socket; if the socket
+is down it is `failed` and logged (`team reply not delivered`). The relay has no delivery ack
+and drops replies to offline members, so a sender's `out` row still `pending` after
+`UPBOT_TEAM_REPLY_TTL_MS` (default 30 min; checked at start and periodically) becomes `failed`;
+a late reply still overwrites it. No relay protocol change, nothing stored on the relay.
 RPC `team.status/connect/disconnect/share/send/messages`, events `team.updated/message`;
-UI `TeamView`. Tests: `test/team.e2e.test.ts` (spawns the relay).
+UI `TeamView`. Tests: `test/team.e2e.test.ts` (spawns the relay). Relay audit logs are JSON
+lines on stderr and never include member-supplied identifiers (only relay-known member IDs,
+fixed route labels, and socket IP); limits are 20 lines per actor per window across event types,
+with periodic `relay.audit_suppressed` summaries (`RELAY_AUDIT_WINDOW_MS`).
 
 ## CI, releases, updates, branding
 

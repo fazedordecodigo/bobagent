@@ -273,13 +273,15 @@ test("approval.rules_changed records added and removed rule ids", async () => {
 test("secret approval logs and audits a vault read failure without the secret value", async () => {
   await withApprovals(async ({ approvals, vault, db }) => {
     const stderr = spyOn(console, "error").mockImplementation(() => {});
-    spyOn(vault, "list").mockImplementationOnce(() => {
+    spyOn(vault, "get").mockImplementationOnce(() => {
       throw new Error("decrypt failed sk_leak_marker_1");
     });
     const secret = approvals.requestSecret("bot", "stripe.key", "Stripe", "check invoices");
     const pending = approvals.list()[0]!;
-    await approvals.respond({ id: pending.id, decision: "approve", value: "sk_live_9" });
-    await secret;
+    await expect(
+      approvals.respond({ id: pending.id, decision: "approve", value: "sk_live_9" }),
+    ).rejects.toThrow("decrypt failed");
+    expect(await secret).toContain("did not provide stripe.key (denied)");
 
     const logged = stderr.mock.calls.find(
       (c) => c[0] === "[upbotd] approval.secret_allowlist_read_failed",
@@ -305,7 +307,7 @@ test("secret approval logs and audits a vault read failure without the secret va
       failure: "Error",
     });
     expect(failed[0]!.data_json).not.toContain("decrypt failed");
-    expect(vault.list().find((v) => v.name === "stripe.key")?.agentIds).toEqual(["bot"]);
+    expect(vault.list().find((v) => v.name === "stripe.key")).toBeUndefined();
 
     const dump = JSON.stringify(
       db.query("SELECT data_json FROM approval_audit").all() as AuditRow[],
@@ -315,6 +317,13 @@ test("secret approval logs and audits a vault read failure without the secret va
       rows(db, "approval.decided")
         .map(json)
         .find((r) => r.approvalId === pending.id),
-    ).toMatchObject({ kind: "secret", secretName: "stripe.key", status: "approved" });
+    ).toMatchObject({
+      kind: "secret",
+      secretName: "stripe.key",
+      status: "denied",
+      requestedDecision: "approve",
+      reason: "respond_failed",
+      failure: "Error",
+    });
   });
 });

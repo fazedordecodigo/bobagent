@@ -473,7 +473,7 @@ describe("approvals e2e", () => {
       ).run("audit.corrupt", "00", "AA==", marker, now, now);
 
       const stderrStart = daemonStderr.length;
-      await withApproval(
+      const r = await withApproval(
         "request_secret",
         {
           name: "audit.corrupt",
@@ -481,12 +481,16 @@ describe("approvals e2e", () => {
           reason: "test audit logging",
         },
         (ap) =>
-          c.request("approvals.respond", {
-            id: ap.id,
-            decision: "approve",
-            value: secretValue,
-          }),
+          expect(
+            c.request("approvals.respond", {
+              id: ap.id,
+              decision: "approve",
+              value: secretValue,
+            }),
+          ).rejects.toMatchObject({ code: "internal" }),
       );
+      expect(r.text).toContain("did not provide audit.corrupt (denied)");
+      expect(r.text).not.toContain(secretValue);
 
       const entries = db
         .query("SELECT event, data_json FROM approval_audit WHERE seq > ? ORDER BY seq")
@@ -505,7 +509,12 @@ describe("approvals e2e", () => {
             entry.data.kind === "secret" &&
             entry.data.secretName === "audit.corrupt",
         )?.data,
-      ).toMatchObject({ status: "approved" });
+      ).toMatchObject({
+        status: "denied",
+        requestedDecision: "approve",
+        reason: "respond_failed",
+        failure: "SyntaxError",
+      });
 
       const auditJson = (
         db.query("SELECT data_json FROM approval_audit").all() as { data_json: string }[]
@@ -524,6 +533,7 @@ describe("approvals e2e", () => {
       expect(stderr).not.toContain(marker);
       expect(stderr).not.toContain(secretValue);
     } finally {
+      db.query("DELETE FROM vault WHERE name = ?").run("audit.corrupt");
       db.close();
     }
   }, 30000);
@@ -546,6 +556,122 @@ describe("approvals e2e", () => {
     expect(v.find((e) => e.name === "stripe.key")?.agentIds).toEqual([a.id]);
     expect(await tool(a, "vault_get", { name: "stripe.key" })).toBe("tool-ok:sk_test_42");
   }, 30000);
+
+  test("secret approvals preserve existing readers despite an unrelated corrupt vault row", async () => {
+    const reader = (await c.request("agents.create", {
+      name: "Existing reader",
+      provider: "devin",
+      instructions: "",
+    })) as Agent;
+    const name = "shared.key";
+    await c.request("vault.set", { name, value: "original", agentIds: [reader.id] });
+    await c.request("vault.set", { name: "unrelated.key", value: "unused", agentIds: [] });
+    const db = new Database(join(dataDir, "upbot.db"));
+    try {
+      db.query("UPDATE vault SET agent_ids = ? WHERE name = ?").run("[", "unrelated.key");
+      for (const value of ["updated", "rotated"]) {
+        const r = await withApproval("request_secret", { name, reason: "need access" }, (ap) =>
+          c.request("approvals.respond", { id: ap.id, decision: "approve", value }),
+        );
+        expect(r.text).toContain("gave you access");
+        expect(r.text).not.toContain(value);
+        const row = db.query("SELECT agent_ids FROM vault WHERE name = ?").get(name) as {
+          agent_ids: string;
+        };
+        expect(JSON.parse(row.agent_ids).sort()).toEqual([reader.id, a.id].sort());
+        expect(await tool(reader, "vault_get", { name })).toBe(`tool-ok:${value}`);
+        expect(await tool(a, "vault_get", { name })).toBe(`tool-ok:${value}`);
+      }
+    } finally {
+      db.query("DELETE FROM vault WHERE name = ?").run("unrelated.key");
+      db.close();
+    }
+    const entries = (await c.request("vault.list", {})) as VaultEntry[];
+    expect(entries.find((e) => e.name === name)?.agentIds.sort()).toEqual([reader.id, a.id].sort());
+  });
+
+  test("secret approvals notify vault subscribers once per save without exposing values", async () => {
+    const subscriber = await DaemonClient.connect(daemon.port, TOKEN);
+    const name = "notifications.key";
+    try {
+      for (const value of ["first-private-value", "second-private-value"]) {
+        const start = subscriber.events.length;
+        await withApproval("request_secret", { name, reason: "need access" }, (ap) =>
+          c.request("approvals.respond", { id: ap.id, decision: "approve", value }),
+        );
+        const entries = (await subscriber.request("vault.list", {})) as VaultEntry[];
+        const events = subscriber.events.slice(start);
+        expect(events.filter((event) => event.event === "vault.changed")).toEqual([
+          { event: "vault.changed", data: {} },
+        ]);
+        expect(entries.find((entry) => entry.name === name)?.agentIds).toEqual([a.id]);
+        expect(JSON.stringify({ events, entries })).not.toContain(value);
+      }
+    } finally {
+      subscriber.close();
+    }
+  });
+
+  for (const failure of ["deny", "write-failure"] as const) {
+    test(`secret approvals do not notify vault subscribers or change storage on ${failure}`, async () => {
+      const name = "unchanged.key";
+      await c.request("vault.set", { name, value: "original", agentIds: [a.id] });
+      const db = new Database(join(dataDir, "upbot.db"));
+      try {
+        if (failure === "write-failure") {
+          db.exec(`CREATE TRIGGER reject_secret_update BEFORE UPDATE ON vault
+            WHEN NEW.name = 'unchanged.key'
+            BEGIN SELECT RAISE(ABORT, 'test vault write failure'); END`);
+        }
+        const before = db.query("SELECT * FROM vault WHERE name = ?").get(name);
+        const start = c.events.length;
+        const r = await withApproval("request_secret", { name, reason: "rotate" }, async (ap) => {
+          const response = c.request("approvals.respond", {
+            id: ap.id,
+            decision: failure === "deny" ? "deny" : "approve",
+            value: "replacement",
+          });
+          if (failure === "deny") expect(await response).toMatchObject({ status: "denied" });
+          else await expect(response).rejects.toMatchObject({ code: "internal" });
+        });
+        expect(r.text).toContain(`did not provide ${name} (denied)`);
+        expect(db.query("SELECT * FROM vault WHERE name = ?").get(name)).toEqual(before);
+        expect(c.events.slice(start).filter((event) => event.event === "vault.changed")).toEqual(
+          [],
+        );
+      } finally {
+        db.exec("DROP TRIGGER IF EXISTS reject_secret_update");
+        db.close();
+      }
+      expect(await tool(a, "vault_get", { name })).toBe("tool-ok:original");
+    });
+  }
+
+  test("a secret vault read failure rejects the RPC, denies the bridge request and preserves storage", async () => {
+    const name = "unreadable.key";
+    await c.request("vault.set", { name, value: "original", agentIds: [a.id] });
+    const db = new Database(join(dataDir, "upbot.db"));
+    try {
+      db.query("UPDATE vault SET agent_ids = ? WHERE name = ?").run("[", name);
+      const before = db.query("SELECT * FROM vault WHERE name = ?").get(name);
+      const start = c.events.length;
+      const r = await withApproval("request_secret", { name, reason: "rotate" }, async (ap) => {
+        await expect(
+          c.request("approvals.respond", { id: ap.id, decision: "approve", value: "replacement" }),
+        ).rejects.toMatchObject({ code: "internal", message: "internal error" });
+        const approvals = (await c.request("approvals.list", {})) as Approval[];
+        expect(approvals.find((entry) => entry.id === ap.id)?.status).toBe("denied");
+      });
+      expect(r.text).toContain(`did not provide ${name} (denied)`);
+      expect(r.text).not.toContain("replacement");
+      expect(db.query("SELECT * FROM vault WHERE name = ?").get(name)).toEqual(before);
+      expect(c.events.slice(start).filter((event) => event.event === "vault.changed")).toEqual([]);
+    } finally {
+      db.query("UPDATE vault SET agent_ids = ? WHERE name = ?").run(JSON.stringify([a.id]), name);
+      db.close();
+    }
+    expect(await tool(a, "vault_get", { name })).toBe("tool-ok:original");
+  });
 
   test("take-over waits for the user to finish", async () => {
     const r = await withApproval("request_takeover", { reason: "2FA code needed" }, (ap) =>
