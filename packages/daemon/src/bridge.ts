@@ -557,9 +557,13 @@ export class Bridge {
         (isApp ? await this.apps!.call(agentId, name, args) : null) ??
         (await this.call(agentId, name, args));
     } catch (e) {
+      // Tool names are bot-controlled input: only registered names are safe to log.
+      const knownTool =
+        BRIDGE_TOOLS.some((t) => t.name === name) ||
+        (isApp && (this.apps?.hasAppTool?.(name) ?? false));
       console.error("[upbotd] bridge tool failed", {
         agentId,
-        tool: name,
+        tool: knownTool ? name : "<unregistered>",
         isApp,
         durationMs: Date.now() - startedAt,
         reason: e instanceof GateRejection ? e.reason : "error",

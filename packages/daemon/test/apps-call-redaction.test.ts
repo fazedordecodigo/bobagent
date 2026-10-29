@@ -40,10 +40,11 @@ function connect(apps: AppsService, callTool: () => Promise<unknown>) {
     status: "ready",
     error: null,
     tools: [{ name: "leak", inputSchema: { type: "object" } }],
+    secretValues: [SECRET],
   });
 }
 
-test("an app deleted while its call is pending still has its secret redacted from the error", async () => {
+test("an app deleted while its call is pending still has its secret out of the thrown error", async () => {
   const { apps, db } = setup();
   try {
     const cause = Object.assign(new Error(`upstream rejected Bearer ${SECRET}`), { code: -32000 });
@@ -53,7 +54,7 @@ test("an app deleted while its call is pending still has its secret redacted fro
     });
     const err = await apps.call("bot1", "leaky-leak", {}).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AppToolError);
-    expect((err as Error).message).toBe("upstream rejected Bearer [redacted]");
+    expect((err as Error).message).toBe("app MCP tool call failed");
     expect((err as Error).cause).toBe(cause);
   } finally {
     db.close();

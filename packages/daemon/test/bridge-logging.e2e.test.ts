@@ -116,7 +116,7 @@ describe("bridge failure logging e2e", () => {
     }
     const text = await reply(run.c, bot.id, "mcp:leaky-leak_token {}");
     expect(text).toStartWith("tool-error:");
-    expect(text).toContain("[redacted]");
+    expect(text).toContain("app MCP tool call failed");
     expect(text).not.toContain(APP_SECRET);
     const line = await stderrEntry(run.log, "[upbotd] bridge tool failed", "leaky-leak_token");
     expect(line).toContain("isApp: true");

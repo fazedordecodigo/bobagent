@@ -15,7 +15,7 @@ import type {
 } from "@upbot/protocol";
 import { AppPermissions, defaultAppPermissions } from "@upbot/protocol";
 import { RpcError } from "./runtime/agent-runtime";
-import type { Vault } from "./vault";
+import { APP_PREFIX, type Vault } from "./vault";
 
 // Connected apps: MCP servers the daemon runs (stdio) or talks to (streamable HTTP) on behalf
 // of the bots. Secrets live in the vault as app.<id>.<KEY> and only reach the server process
@@ -24,6 +24,10 @@ import type { Vault } from "./vault";
 
 type Broadcast = (event: string, data: unknown) => void;
 type Tool = { name: string; description?: string; inputSchema?: unknown };
+/** zod .partial() output: each level may be present-but-undefined. */
+type AppPermissionsPatch = { [K in keyof AppPermissions]?: AppPermissions[K] | undefined };
+
+const secretName = (id: string, key: string) => `${APP_PREFIX}${id}.${key}`;
 
 export const APP_CATALOG: AppCatalogEntry[] = [
   {
@@ -128,10 +132,12 @@ type Config = {
 
 type Live = {
   client: Client | null;
+  transport: Transport | null;
   starting: Promise<void> | null;
   status: ConnectedApp["status"];
   error: string | null;
   tools: Tool[];
+  secretValues: string[];
 };
 
 export function slugFor(name: string): string {
@@ -169,15 +175,50 @@ export function appToolNames(slug: string, tools: Tool[]): Map<string, Tool> {
   return new Map(named);
 }
 
-function redactSecrets(values: string[], text: string): string {
-  let out = text;
-  for (const v of values) out = out.split(v).join("[redacted]");
-  return out;
+function secretNeedles(values: Iterable<string>): Set<string> {
+  const needles = new Set<string>();
+  for (const value of values) {
+    if (!value) continue;
+    needles.add(value);
+    if (/[\r\n]/.test(value)) {
+      for (const part of value.split(/[\r\n]/)) {
+        const trimmed = part.trim();
+        if (trimmed.length >= 4) needles.add(trimmed);
+      }
+    }
+  }
+  return needles;
+}
+
+export function redactValues(text: string, values: Iterable<string>): string {
+  return [...secretNeedles(values)]
+    .sort((a, b) => b.length - a.length)
+    .reduce((result, value) => result.split(value).join("[redacted]"), text);
+}
+
+export function appStderrDiagnostics(): {
+  push(chunk: Buffer | string): void;
+  summary(): string;
+} {
+  const maxBytes = 1_000_000;
+  let bytes = 0;
+  // stderr may contain arbitrary credential fragments, so never retain its text.
+  return {
+    push(chunk) {
+      bytes = Math.min(maxBytes, bytes + Buffer.byteLength(chunk));
+    },
+    summary() {
+      return bytes
+        ? `stderr output suppressed (${bytes}${bytes === maxBytes ? "+" : ""} bytes)`
+        : "";
+    },
+  };
 }
 
 /**
- * A failed app MCP call; the message has the app's secrets redacted. `cause` is the raw SDK
- * error: never show or log its message, only `errorDiagnostics(cause)`.
+ * A failed app MCP call; the message is a fixed string because upstream errors may echo
+ * credentials. `cause` is the raw SDK error: never show or log its message, only
+ * `errorDiagnostics(cause)`.
  */
 export class AppToolError extends Error {
   override name = "AppToolError";
@@ -245,14 +286,14 @@ export class AppsService {
   }
 
   connect(p: {
-    permissions?: Partial<AppPermissions>;
+    permissions?: AppPermissionsPatch | undefined;
     catalogId: string;
-    name?: string;
+    name?: string | undefined;
     secrets: Record<string, string>;
-    command?: string[];
-    url?: string;
-    headers?: Record<string, string>;
-    agentIds?: string[];
+    command?: string[] | undefined;
+    url?: string | undefined;
+    headers?: Record<string, string> | undefined;
+    agentIds?: string[] | undefined;
   }): ConnectedApp {
     const permissions = AppPermissions.parse({ ...defaultAppPermissions, ...p.permissions });
     const entry = APP_CATALOG.find((e) => e.id === p.catalogId);
@@ -303,7 +344,7 @@ export class AppsService {
     if (this.list().some((a) => a.slug === slug))
       throw new RpcError("conflict", `an app named "${config.name}" is already connected`);
     const id = crypto.randomUUID();
-    for (const [k, v] of Object.entries(p.secrets)) this.vault.set(`app.${id}.${k}`, v, []);
+    for (const [k, v] of Object.entries(p.secrets)) this.vault.set(secretName(id, k), v, []);
     this.db
       .query(
         "INSERT INTO connected_apps (id, catalog_id, config_json, permissions_json, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)",
@@ -315,11 +356,11 @@ export class AppsService {
   }
 
   async update(p: {
-    permissions?: Partial<AppPermissions>;
+    permissions?: AppPermissionsPatch | undefined;
     id: string;
-    enabled?: boolean;
-    agentIds?: string[];
-    secrets?: Record<string, string>;
+    enabled?: boolean | undefined;
+    agentIds?: string[] | undefined;
+    secrets?: Record<string, string> | undefined;
   }): Promise<ConnectedApp> {
     const r = this.row(p.id);
     const permissions = AppPermissions.parse({ ...this.toApp(r).permissions, ...p.permissions });
@@ -328,7 +369,7 @@ export class AppsService {
     if (p.secrets) {
       for (const [k, v] of Object.entries(p.secrets)) {
         if (!c.secretKeys.includes(k)) throw new RpcError("bad_request", `unknown secret ${k}`);
-        if (v) this.vault.set(`app.${p.id}.${k}`, v, []);
+        if (v) this.vault.set(secretName(p.id, k), v, []);
       }
     }
     const enabled = p.enabled ?? r.enabled === 1;
@@ -357,7 +398,7 @@ export class AppsService {
     const c = this.config(this.row(id));
     await this.stop(id);
     this.db.query("DELETE FROM connected_apps WHERE id = ?").run(id);
-    for (const k of c.secretKeys) this.vault.delete(`app.${id}.${k}`);
+    for (const k of c.secretKeys) this.vault.delete(secretName(id, k));
     this.live.delete(id);
     this.changed();
   }
@@ -372,7 +413,8 @@ export class AppsService {
     const l = this.live.get(id);
     if (!l) return;
     this.live.delete(id);
-    await l.client?.close().catch(() => {});
+    if (l.client) await l.client.close().catch(() => {});
+    else await l.transport?.close().catch(() => {});
   }
 
   async closeAll(): Promise<void> {
@@ -381,7 +423,7 @@ export class AppsService {
 
   private secrets(id: string, c: Config): Record<string, string> {
     const out: Record<string, string> = {};
-    for (const k of c.secretKeys) out[k] = this.vault.revealInternal(`app.${id}.${k}`);
+    for (const k of c.secretKeys) out[k] = this.vault.revealInternal(secretName(id, k));
     return out;
   }
 
@@ -390,12 +432,28 @@ export class AppsService {
     const existing = this.live.get(id);
     if (existing?.client && existing.status === "ready") return Promise.resolve();
     if (existing?.starting) return existing.starting;
-    const l: Live = { client: null, starting: null, status: "starting", error: null, tools: [] };
+    const l: Live = {
+      client: null,
+      transport: null,
+      starting: null,
+      status: "starting",
+      error: null,
+      tools: [],
+      secretValues: [],
+    };
     this.live.set(id, l);
     this.changed();
+    const startedAt = Date.now();
+    const stderr = appStderrDiagnostics();
+    let phase = "configuration";
+    let timeout: AbortSignal | null = null;
+    let ctx: { catalogId: string; transport: Config["transport"] } | null = null;
     l.starting = (async () => {
-      const c = this.config(this.row(id));
+      const r = this.row(id);
+      const c = this.config(r);
+      ctx = { catalogId: r.catalog_id, transport: c.transport };
       const secrets = this.secrets(id, c);
+      l.secretValues = Object.values(secrets);
       const fill = (s: string) => s.replace(/\{([A-Za-z0-9_]+)\}/g, (_, k) => secrets[k] ?? "");
       const transport =
         c.transport === "http"
@@ -414,11 +472,17 @@ export class AppsService {
                 PATH: process.env.PATH ?? "",
                 ...secrets,
               },
-              stderr: "ignore",
+              stderr: "pipe",
             });
+      l.transport = transport as Transport;
+      if (transport instanceof StdioClientTransport) {
+        transport.stderr?.on("data", (d: Buffer) => stderr.push(d));
+      }
       const client = new Client({ name: "upbot", version: "0.3.0" });
-      const timeout = AbortSignal.timeout(Number(process.env.UPBOT_APP_START_TIMEOUT_MS) || 60_000);
+      timeout = AbortSignal.timeout(Number(process.env.UPBOT_APP_START_TIMEOUT_MS) || 60_000);
+      phase = "transport initialization";
       await client.connect(transport as Transport, { signal: timeout });
+      phase = "tools/list";
       const tools: Tool[] = [];
       let cursor: string | undefined;
       do {
@@ -428,9 +492,20 @@ export class AppsService {
       } while (cursor && tools.length < 500);
       client.onclose = () => {
         if (this.live.get(id) === l) {
+          const wasReady = l.status === "ready";
           l.status = "error";
-          l.error = "the app's MCP server exited";
+          const diagnostic = stderr.summary();
+          l.error = ["the app's MCP server exited", diagnostic].filter(Boolean).join("\n");
           l.client = null;
+          l.transport = null;
+          if (wasReady) {
+            console.error("[upbotd] app MCP server exited", {
+              appId: id,
+              catalogId: r.catalog_id,
+              transport: c.transport,
+              ...(diagnostic ? { stderr: diagnostic } : {}),
+            });
+          }
           this.changed();
         }
       };
@@ -438,9 +513,21 @@ export class AppsService {
       l.tools = tools;
       l.status = "ready";
     })()
-      .catch((e) => {
+      .catch(() => {
         l.status = "error";
-        l.error = this.redact(id, (e as Error).message).slice(0, 500);
+        l.error = [
+          `app MCP startup ${timeout?.aborted ? "timed out" : "failed"} (${phase})`,
+          stderr.summary(),
+        ]
+          .filter(Boolean)
+          .join("\n");
+        console.error("[upbotd] app start failed", {
+          appId: id,
+          catalogId: ctx?.catalogId ?? null,
+          transport: ctx?.transport ?? null,
+          durationMs: Date.now() - startedAt,
+          error: l.error,
+        });
         throw new Error(l.error);
       })
       .finally(() => {
@@ -450,19 +537,17 @@ export class AppsService {
     return l.starting;
   }
 
-  private secretValues(id: string): string[] {
-    return Object.values(this.secrets(id, this.config(this.row(id)))).filter(Boolean);
+  private currentSecretValues(id: string): string[] {
+    try {
+      const c = this.config(this.row(id));
+      return Object.values(this.secrets(id, c));
+    } catch {
+      return [];
+    }
   }
 
-  /** Fails closed: when the app's secrets can't be read (e.g. it was deleted), nothing is shown. */
-  private redact(id: string, text: string): string {
-    let values: string[];
-    try {
-      values = this.secretValues(id);
-    } catch {
-      return "[app details withheld]";
-    }
-    return redactSecrets(values, text);
+  private redact(id: string, text: string, extra: readonly string[] = []): string {
+    return redactValues(text, [...extra, ...this.currentSecretValues(id)]);
   }
 
   private appsFor(agentId: string): Row[] {
@@ -501,6 +586,17 @@ export class AppsService {
     return this.rows().some((x) => slugFor(this.config(x).name) === slug);
   }
 
+  /** Exact match against a live app's registered tools — untrusted names stay unverifiable. */
+  hasAppTool(name: string): boolean {
+    const i = name.indexOf("-");
+    if (i <= 0) return false;
+    const slug = name.slice(0, i);
+    const r = this.rows().find((x) => slugFor(this.config(x).name) === slug);
+    const l = r && this.live.get(r.id);
+    if (!r || !l || l.status !== "ready") return false;
+    return appToolNames(slug, l.tools).has(name);
+  }
+
   appForTool(name: string): ConnectedApp | undefined {
     return this.list().find((app) => name.startsWith(`${app.slug}-`));
   }
@@ -522,19 +618,28 @@ export class AppsService {
     const l = this.live.get(r.id)!;
     const tool = appToolNames(slug, l.tools).get(name);
     if (!tool) throw new Error(`unknown tool ${name}`);
-    // Snapshot before the call: the app may be updated or deleted while it is pending.
-    const secrets = this.secretValues(r.id);
+    const callStart = Date.now();
+    const logCallFailure = () =>
+      console.error("[upbotd] app tool call failed", {
+        appId: r.id,
+        tool: name,
+        durationMs: Date.now() - callStart,
+      });
     let res: Awaited<ReturnType<Client["callTool"]>>;
     try {
       res = await l.client!.callTool({ name: tool.name, arguments: args });
     } catch (e) {
-      const message = redactSecrets(secrets, (e as Error)?.message ?? String(e)).slice(0, 500);
-      throw new AppToolError(message, { cause: e });
+      logCallFailure();
+      throw new AppToolError("app MCP tool call failed", { cause: e });
     }
+    if (res.isError === true) logCallFailure();
     const content = (res.content ?? []) as { type: string; text?: string }[];
     const text = content
       .map((c) => (c.type === "text" ? (c.text ?? "") : `[${c.type} content]`))
       .join("\n");
-    return { text: redactSecrets(secrets, text).slice(0, 100_000), isError: res.isError === true };
+    return {
+      text: this.redact(r.id, text, l.secretValues).slice(0, 100_000),
+      isError: res.isError === true,
+    };
   }
 }

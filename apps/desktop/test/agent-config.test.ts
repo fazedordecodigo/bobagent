@@ -749,3 +749,69 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
     await windows.close();
   }
 }, 120000);
+
+test("existing memories are editable inline and only persist on Save", async () => {
+  writeFileSync(
+    join(state, "fake", "state.json"),
+    JSON.stringify({ config: { model: fixture.agent.model, effort: fixture.agent.effort } }),
+  );
+  const other = (await rpc.request("agents.create", {
+    name: "Outro bot das memórias",
+    provider: "grok",
+  })) as Agent;
+  await rpc.request("memories.add", { agentId: other.id, text: "Memória do outro bot" });
+  const subject = (await rpc.request("agents.create", {
+    name: "Bot das memórias",
+    provider: "grok",
+  })) as Agent;
+  const first = (await rpc.request("memories.add", {
+    agentId: subject.id,
+    text: "Gosta de café\ncom açúcar",
+  })) as Memory;
+  const second = (await rpc.request("memories.add", {
+    agentId: subject.id,
+    text: "Evita spoilers",
+  })) as Memory;
+
+  const target = await newMacAppPage();
+  try {
+    await target.addInitScript((id) => {
+      localStorage.setItem("upbot.agent", id);
+      localStorage.setItem("upbot.view", "chat");
+    }, subject.id);
+    await gotoApp(target);
+    await openSettings(target);
+
+    const edit = target.getByLabel("Memória 1");
+    await edit.waitFor();
+    expect(await edit.inputValue()).toBe("Gosta de café\ncom açúcar");
+    expect(await target.getByLabel("Memória 2").inputValue()).toBe("Evita spoilers");
+
+    await edit.fill("Gosta de chá\ne café");
+    await target.getByText("Alterações não salvas").waitFor();
+
+    let stored = (await rpc.request("memories.list", { agentId: subject.id })) as Memory[];
+    expect(stored.find((item) => item.id === first.id)?.text).toBe("Gosta de café\ncom açúcar");
+
+    await target.getByRole("button", { name: "Salvar", exact: false }).click();
+    await target.getByRole("status").filter({ hasText: "Configurações salvas." }).waitFor();
+
+    stored = (await rpc.request("memories.list", { agentId: subject.id })) as Memory[];
+    expect(stored.find((item) => item.id === first.id)?.text).toBe("Gosta de chá\ne café");
+    expect(stored.find((item) => item.id === second.id)?.text).toBe("Evita spoilers");
+    expect(stored).toHaveLength(2);
+
+    const untouched = (await rpc.request("memories.list", { agentId: other.id })) as Memory[];
+    expect(untouched.map((item) => item.text)).toEqual(["Memória do outro bot"]);
+
+    await edit.fill("");
+    await target.getByRole("button", { name: "Salvar", exact: false }).click();
+    await target.getByRole("status").filter({ hasText: "Não deu para salvar:" }).waitFor();
+    stored = (await rpc.request("memories.list", { agentId: subject.id })) as Memory[];
+    expect(stored.find((item) => item.id === first.id)?.text).toBe("Gosta de chá\ne café");
+    expect(stored.find((item) => item.id === second.id)?.text).toBe("Evita spoilers");
+    expect(await target.getByLabel("Memória 1").inputValue()).toBe("");
+  } finally {
+    await target.close();
+  }
+}, 60000);

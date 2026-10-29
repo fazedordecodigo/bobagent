@@ -20,6 +20,22 @@ import { resolveCommand } from "./env/login-path";
 
 export const VAULT_NAME = /^[A-Za-z0-9_.-]{1,64}$/;
 
+// Name prefixes reserved for daemon-internal secrets: hidden from `list` and never shared
+// with agents. A service storing an internal secret builds the name from one of these, so
+// declaring the prefix here is what keeps it hidden.
+export const GATEWAY_PREFIX = "gateway.";
+export const TEAM_PREFIX = "team.";
+export const VMCRED_PREFIX = "vmcred.";
+export const EMAIL_PREFIX = "email.";
+export const APP_PREFIX = "app.";
+export const INTERNAL_PREFIXES = [
+  GATEWAY_PREFIX,
+  TEAM_PREFIX,
+  VMCRED_PREFIX,
+  EMAIL_PREFIX,
+  APP_PREFIX,
+] as const;
+
 type Row = { name: string; iv: string; data: string; agent_ids: string; updated_at: number };
 
 function keychainKey(): Buffer | null {
@@ -234,12 +250,18 @@ export class Vault {
     return this.db.query("SELECT * FROM vault WHERE name = ?").get(name) as Row | null;
   }
 
+  /** Entry (name, allowlist, timestamp) for one secret, or null when absent. */
+  get(name: string): VaultEntry | null {
+    const r = this.row(name);
+    if (!r) return null;
+    return { name: r.name, agentIds: JSON.parse(r.agent_ids) as string[], updatedAt: r.updated_at };
+  }
+
   list(): VaultEntry[] {
+    const hidden = INTERNAL_PREFIXES.map(() => "name NOT LIKE ?").join(" AND ");
     const rows = this.db
-      .query(
-        "SELECT * FROM vault WHERE name NOT LIKE 'gateway.%' AND name NOT LIKE 'team.%' AND name NOT LIKE 'vmcred.%' AND name NOT LIKE 'email.%' AND name NOT LIKE 'app.%' ORDER BY name ASC",
-      )
-      .all() as Row[];
+      .query(`SELECT * FROM vault WHERE ${hidden} ORDER BY name ASC`)
+      .all(...INTERNAL_PREFIXES.map((p) => `${p}%`)) as Row[];
     return rows.map((r) => ({
       name: r.name,
       agentIds: JSON.parse(r.agent_ids) as string[],

@@ -15,6 +15,24 @@ export function openDatabase(dataDir: string): Database {
   return db;
 }
 
+export function getSetting<T>(db: Database, key: string, fallback: T): T {
+  const row = db.query("SELECT value FROM settings WHERE key = ?").get(key) as {
+    value: string;
+  } | null;
+  return row ? (JSON.parse(row.value) as T) : fallback;
+}
+
+export function setSetting(db: Database, key: string, value: unknown): void {
+  db.query("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(
+    key,
+    JSON.stringify(value),
+  );
+}
+
+export function deleteSetting(db: Database, key: string): void {
+  db.query("DELETE FROM settings WHERE key = ?").run(key);
+}
+
 function applyMigrations(db: Database): void {
   const row = db.query("SELECT COALESCE(MAX(version), 0) AS v FROM schema_migrations").get() as {
     v: number;

@@ -94,6 +94,7 @@ test("app tool errors are logged without their message", async () => {
   const secret = "ghp_echoedCredential123";
   bridge.apps = {
     isAppTool: () => true,
+    hasAppTool: () => true,
     call: () => Promise.reject(new Error(`upstream rejected Bearer ${secret}`)),
   } as unknown as AppsService;
   const spy = spyOn(console, "error").mockImplementation(() => {});
@@ -106,6 +107,27 @@ test("app tool errors are logged without their message", async () => {
     expect(spy).toHaveBeenCalledWith(
       "[upbotd] bridge tool failed",
       expect.objectContaining({ tool: "fake-create_note", isApp: true, errorType: "Error" }),
+    );
+    expect(JSON.stringify(spy.mock.calls)).not.toContain(secret);
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+test("unregistered tool names are never logged verbatim", async () => {
+  const bridge = makeBridge();
+  const secret = `unknown_tool_${crypto.randomUUID()}`;
+  bridge.apps = { isAppTool: () => false } as unknown as AppsService;
+  const spy = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const res = await bridge.handle("bot1", {
+      method: "tools/call",
+      params: { name: secret, arguments: {} },
+    });
+    expect(res.isError).toBe(true);
+    expect(spy).toHaveBeenCalledWith(
+      "[upbotd] bridge tool failed",
+      expect.objectContaining({ tool: "<unregistered>" }),
     );
     expect(JSON.stringify(spy.mock.calls)).not.toContain(secret);
   } finally {

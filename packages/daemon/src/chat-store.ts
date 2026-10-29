@@ -124,10 +124,13 @@ export class ChatStore {
     return this.getItem(id)!;
   }
 
-  appendItemText(id: string, chunk: string): ChatItem {
-    const item = this.getItem(id)!;
-    const text = ((item as { text?: string }).text ?? "") + chunk;
-    return this.updateItemData(id, { ...stripBase(item), text });
+  /** Overwrites the `text` field of an item's data_json without re-reading the row. */
+  setItemText(id: string, text: string): void {
+    this.db
+      .query(
+        "UPDATE items SET data_json = json_set(data_json, '$.text', ?), updated_at = ? WHERE id = ?",
+      )
+      .run(text, Date.now(), id);
   }
 
   findToolCallItem(turnId: string, toolCallId: string): ChatItem | null {
@@ -144,6 +147,22 @@ export class ChatStore {
       .query("SELECT * FROM items WHERE turn_id = ? ORDER BY seq ASC")
       .all(turnId) as ItemRow[];
     return rows.map(rowToItem);
+  }
+
+  /** A turn's final reply: its agent_message texts joined and trimmed ("" when none). */
+  finalReply(turnId: string): string {
+    return this.itemsForTurn(turnId)
+      .filter((i) => i.kind === "agent_message")
+      .map((i) => ("text" in i ? i.text : ""))
+      .join("\n\n")
+      .trim();
+  }
+
+  /** Reply text for an ended turn, with fallbacks for empty/failed/stopped turns. */
+  turnReplyText(turn: Turn): string {
+    if (turn.status === "completed") return this.finalReply(turn.id) || "(no reply)";
+    if (turn.status === "failed") return `The agent failed: ${turn.error ?? "unknown error"}`;
+    return "The agent stopped before replying.";
   }
 
   history(
@@ -260,14 +279,6 @@ export class ChatStore {
       )
       .run(agentId, provider, sessionId, now, now);
   }
-}
-
-function stripBase(item: ChatItem): Record<string, unknown> {
-  const data = { ...(item as unknown as Record<string, unknown>) };
-  for (const key of ["id", "seq", "agentId", "turnId", "createdAt", "updatedAt", "kind"]) {
-    delete data[key];
-  }
-  return data;
 }
 
 // ---- Queue ----
