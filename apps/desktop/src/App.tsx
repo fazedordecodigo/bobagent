@@ -237,7 +237,10 @@ export default function App() {
         writeStorage("upbot.agent", restored.id);
         navigate("agent-settings");
       } catch (e) {
-        showAgentUndoToast(`Não deu para desfazer: ${e instanceof Error ? e.message : String(e)}`);
+        showAgentUndoToast(
+          `Não deu para desfazer: ${e instanceof Error ? e.message : String(e)}`,
+          () => void restoreDeletedAgent(agentId),
+        );
       }
     },
     [client, navigate, showAgentUndoToast],

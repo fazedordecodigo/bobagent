@@ -506,7 +506,21 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
         (item) => item.id === currentAgent.id,
       ),
     ).toBe(true);
-    if (theme === "escuro") continue;
+    if (theme === "escuro") {
+      if ((await advanced.getAttribute("aria-expanded")) !== "true") await advanced.click();
+      await page.getByRole("button", { name: "Excluir…" }).click();
+      await page.getByRole("dialog", { name: `Excluir ${currentAgent.name}?` }).waitFor();
+      await page.getByRole("button", { name: "Excluir agente" }).click();
+      await page.getByText(`${currentAgent.name} foi excluído.`).waitFor();
+      await page.getByRole("button", { name: "Voltar ao início" }).click();
+      const retryToast = page.getByRole("status").filter({ hasText: "Agente excluído." });
+      await retryToast.getByRole("button", { name: "Desfazer", exact: true }).waitFor();
+      await rpc.request("agents.restore", { id: currentAgent.id });
+      await retryToast.getByRole("button", { name: "Desfazer", exact: true }).click();
+      const failureToast = page.getByRole("status").filter({ hasText: "Não deu para desfazer:" });
+      await failureToast.getByRole("button", { name: "Desfazer", exact: true }).waitFor();
+      continue;
+    }
 
     await page.getByLabel("Instruções").fill("Rascunho descartado.");
     await page.getByLabel("Nova memória").fill("Rascunho descartado");
