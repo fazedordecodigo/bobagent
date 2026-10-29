@@ -230,7 +230,9 @@ export class AgentRuntime {
       this.broadcast("item.created", userItem);
       this.emitQueue();
       const promptText = next.prompt ?? (sender ? wrapAgentMessage(sender, next.text) : next.text);
-      this.runTurn(promptText, turnRow.id).catch(() => {});
+      this.runTurn(promptText, turnRow.id).catch((e) =>
+        console.error("[upbotd] turn failed unexpectedly:", e),
+      );
     } finally {
       this.draining = false;
     }
@@ -371,7 +373,9 @@ export class AgentRuntime {
           const { writeFileSync, mkdirSync } = await import("node:fs");
           mkdirSync(dbgDir, { recursive: true });
           writeFileSync(join(dbgDir, `${this.agent.id}-${turn.id}.txt`), promptText);
-        } catch {}
+        } catch (e) {
+          console.error("[upbotd] failed to write debug prompt:", e);
+        }
       }
       const { stopReason } = await session.prompt(promptText);
       if (this.turn !== turn) return;
@@ -420,7 +424,7 @@ export class AgentRuntime {
       }
     }
     if (status === "completed" && this.shouldAutoCompact()) {
-      this.compact("auto").catch(() => {});
+      this.compact("auto").catch((e) => console.error("[upbotd] auto-compaction failed:", e));
       return;
     }
     this.drain();
