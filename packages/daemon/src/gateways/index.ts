@@ -106,8 +106,8 @@ export class GatewayService {
     name: string;
     agentId: string;
     tokens: Record<string, string>;
-    allowedUsers?: string[];
-    enabled?: boolean;
+    allowedUsers?: string[] | undefined;
+    enabled?: boolean | undefined;
   }): Gateway {
     if (!this.agents.get(p.agentId)) throw new RpcError("not_found", "agent not found");
     const id = crypto.randomUUID().slice(0, 12);
@@ -133,11 +133,11 @@ export class GatewayService {
 
   update(p: {
     id: string;
-    name?: string;
-    agentId?: string;
-    tokens?: Record<string, string>;
-    allowedUsers?: string[];
-    enabled?: boolean;
+    name?: string | undefined;
+    agentId?: string | undefined;
+    tokens?: Record<string, string> | undefined;
+    allowedUsers?: string[] | undefined;
+    enabled?: boolean | undefined;
   }): Gateway {
     const r = this.row(p.id);
     if (!r) throw new RpcError("not_found", "gateway not found");

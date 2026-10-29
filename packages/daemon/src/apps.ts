@@ -24,6 +24,8 @@ import type { Vault } from "./vault";
 
 type Broadcast = (event: string, data: unknown) => void;
 type Tool = { name: string; description?: string; inputSchema?: unknown };
+/** zod .partial() output: each level may be present-but-undefined. */
+type AppPermissionsPatch = { [K in keyof AppPermissions]?: AppPermissions[K] | undefined };
 
 export const APP_CATALOG: AppCatalogEntry[] = [
   {
@@ -231,14 +233,14 @@ export class AppsService {
   }
 
   connect(p: {
-    permissions?: Partial<AppPermissions>;
+    permissions?: AppPermissionsPatch | undefined;
     catalogId: string;
-    name?: string;
+    name?: string | undefined;
     secrets: Record<string, string>;
-    command?: string[];
-    url?: string;
-    headers?: Record<string, string>;
-    agentIds?: string[];
+    command?: string[] | undefined;
+    url?: string | undefined;
+    headers?: Record<string, string> | undefined;
+    agentIds?: string[] | undefined;
   }): ConnectedApp {
     const permissions = AppPermissions.parse({ ...defaultAppPermissions, ...p.permissions });
     const entry = APP_CATALOG.find((e) => e.id === p.catalogId);
@@ -301,11 +303,11 @@ export class AppsService {
   }
 
   async update(p: {
-    permissions?: Partial<AppPermissions>;
+    permissions?: AppPermissionsPatch | undefined;
     id: string;
-    enabled?: boolean;
-    agentIds?: string[];
-    secrets?: Record<string, string>;
+    enabled?: boolean | undefined;
+    agentIds?: string[] | undefined;
+    secrets?: Record<string, string> | undefined;
   }): Promise<ConnectedApp> {
     const r = this.row(p.id);
     const permissions = AppPermissions.parse({ ...this.toApp(r).permissions, ...p.permissions });

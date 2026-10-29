@@ -140,9 +140,9 @@ export class RoutineService {
     agentId: string;
     name: string;
     prompt: string;
-    schedule?: string | null;
-    webhook?: boolean;
-    enabled?: boolean;
+    schedule?: string | null | undefined;
+    webhook?: boolean | undefined;
+    enabled?: boolean | undefined;
   }): Routine {
     if (!this.agents.get(p.agentId)) throw new RpcError("not_found", "agent not found");
     const id = crypto.randomUUID();
@@ -171,11 +171,11 @@ export class RoutineService {
 
   update(p: {
     id: string;
-    name?: string;
-    prompt?: string;
-    schedule?: string | null;
-    webhook?: boolean;
-    enabled?: boolean;
+    name?: string | undefined;
+    prompt?: string | undefined;
+    schedule?: string | null | undefined;
+    webhook?: boolean | undefined;
+    enabled?: boolean | undefined;
   }): Routine {
     const r = this.row(p.id);
     if (!r) throw new RpcError("not_found", "routine not found");

@@ -138,7 +138,12 @@ export class HostStore {
     return r ? this.toHost(r) : null;
   }
 
-  create(p: { name: string; target: string; port?: number; identityFile?: string | null }) {
+  create(p: {
+    name: string;
+    target: string;
+    port?: number | undefined;
+    identityFile?: string | null | undefined;
+  }) {
     const id = crypto.randomUUID();
     this.db
       .query(
@@ -150,10 +155,10 @@ export class HostStore {
 
   update(p: {
     id: string;
-    name?: string;
-    target?: string;
-    port?: number;
-    identityFile?: string | null;
+    name?: string | undefined;
+    target?: string | undefined;
+    port?: number | undefined;
+    identityFile?: string | null | undefined;
   }): RemoteHost | null {
     const h = this.get(p.id);
     if (!h) return null;
@@ -251,8 +256,8 @@ export class HostStore {
     agentId: string;
     hostId: string | null;
     isolation: Isolation;
-    vcpus?: number;
-    memMib?: number;
+    vcpus?: number | undefined;
+    memMib?: number | undefined;
   }): AgentPlacement {
     if (p.hostId) {
       const h = this.mustGet(p.hostId);

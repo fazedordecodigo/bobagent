@@ -1204,6 +1204,8 @@ export const methodMap = {
 
 export type MethodName = keyof typeof methodMap;
 export type MethodParams<M extends MethodName> = z.input<(typeof methodMap)[M]["params"]>;
+/** Params after schema validation (defaults applied) — what a daemon handler receives. */
+export type MethodParsedParams<M extends MethodName> = z.infer<(typeof methodMap)[M]["params"]>;
 export type MethodResult<M extends MethodName> = z.infer<(typeof methodMap)[M]["result"]>;
 
 export type DaemonEventMap = {
