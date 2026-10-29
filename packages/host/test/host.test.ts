@@ -394,6 +394,28 @@ describe("upbot-host", () => {
     expect(r.stderr).toMatch(/firecracker|missing/);
   });
 
+  test("firecracker run rejects a non-positive or malformed boot timeout", () => {
+    const root = mkdtempSync(join(tmpdir(), "host-root-"));
+    try {
+      for (const value of ["0", "-1", "abc", "Infinity"]) {
+        const r = spawnSync("bun", [MAIN, "run"], {
+          input: `${JSON.stringify({ agentId: "a", isolation: "firecracker", cmd: ["true"] })}\n`,
+          env: {
+            ...process.env,
+            UPBOT_HOST_ROOT: root,
+            UPBOT_FIRECRACKER_BIN: "",
+            UPBOT_VM_BOOT_TIMEOUT_MS: value,
+          },
+          encoding: "utf8",
+        });
+        expect(r.status).not.toBe(0);
+        expect(r.stderr).toContain("UPBOT_VM_BOOT_TIMEOUT_MS must be a positive number");
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test("local run executes the command in the agent workspace", () => {
     const root = mkdtempSync(join(tmpdir(), "host-root-"));
     const r = spawnSync("bun", [MAIN, "run"], {

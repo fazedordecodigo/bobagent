@@ -11,7 +11,7 @@ import type {
 } from "@upbot/protocol";
 import type { AgentStore } from "../agents";
 import { type ChatStore, type QueueSource, type QueueStore, readQueueMeta } from "../chat-store";
-import { envPositiveNumber } from "../env/vars";
+import { envNumber, envPositiveNumber } from "../env/vars";
 import { checkProviderAvailable, DEFAULT_MODE, getDriver } from "../providers";
 import { withTimeout } from "../providers/process";
 import {
@@ -33,8 +33,7 @@ do not use any tools.
 function compactThreshold(): number | null {
   const raw = process.env.UPBOT_COMPACT_THRESHOLD;
   if (raw === "off" || raw === "0") return null;
-  const n = raw ? Number(raw) : 0.85;
-  return Number.isFinite(n) && n > 0 && n <= 1 ? n : 0.85;
+  return envNumber("UPBOT_COMPACT_THRESHOLD", 0.85, { max: 1 });
 }
 
 function compactTimeoutMs(): number {
@@ -113,7 +112,27 @@ function providerExitFields(error: string | null): string {
   if (error === null) return "exit=unknown detail=no";
   return `exit=other detail=${error.length > 0 ? "yes" : "no"}`;
 }
-
+/**
+ * Runs `fn` and converts a thrown `Error` into `RpcError("bad_request", e.message)`.
+ * `RpcError`/`ProviderError` and non-`Error` throws pass through untouched so
+ * `Rpc.handle` can still mask unexpected failures as `internal`.
+ */
+export function asBadRequest<T>(fn: () => Promise<T>): Promise<T>;
+export function asBadRequest<T>(fn: () => T): T;
+export function asBadRequest<T>(fn: () => T | Promise<T>): T | Promise<T> {
+  const rethrow = (e: unknown): never => {
+    if (e instanceof Error && !(e instanceof RpcError) && !(e instanceof ProviderError)) {
+      throw new RpcError("bad_request", e.message, { cause: e });
+    }
+    throw e;
+  };
+  try {
+    const result = fn();
+    return result instanceof Promise ? result.catch(rethrow) : result;
+  } catch (e) {
+    return rethrow(e);
+  }
+}
 type PendingEntry = {
   requestId: string;
   turnId: string;
@@ -124,8 +143,9 @@ type PendingEntry = {
   resolve: (r: { optionId: string | null }) => void;
 };
 
-const cancelGraceMs = () =>
-  Math.max(0, Number.parseInt(process.env.UPBOT_CANCEL_GRACE_MS ?? "", 10) || 10_000);
+// min: 0 honors UPBOT_CANCEL_GRACE_MS=0 as an immediate kill, which the old
+// Math.max(0, …) clamp suggested but the `|| 10_000` fallback silently ignored.
+const cancelGraceMs = () => envNumber("UPBOT_CANCEL_GRACE_MS", 10_000, { min: 0 });
 
 /** How often the in-memory streamed text is flushed to SQLite mid-stream. */
 const TEXT_FLUSH_MS = 150;

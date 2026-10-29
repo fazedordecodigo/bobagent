@@ -14,6 +14,7 @@ import type {
   ConnectedApp,
 } from "@upbot/protocol";
 import { AppPermissions, defaultAppPermissions } from "@upbot/protocol";
+import { envPositiveNumber } from "./env/vars";
 import { RpcError } from "./runtime/agent-runtime";
 import { APP_PREFIX, type Vault } from "./vault";
 import { VERSION } from "./version";
@@ -508,7 +509,7 @@ export class AppsService {
         transport.stderr?.on("data", (d: Buffer) => stderr.push(d));
       }
       const client = new Client({ name: "upbot", version: VERSION });
-      timeout = AbortSignal.timeout(Number(process.env.UPBOT_APP_START_TIMEOUT_MS) || 60_000);
+      timeout = AbortSignal.timeout(envPositiveNumber("UPBOT_APP_START_TIMEOUT_MS", 60_000));
       phase = "transport initialization";
       await client.connect(transport as Transport, { signal: timeout });
       phase = "tools/list";

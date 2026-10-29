@@ -192,7 +192,8 @@ stdin EOF afterwards = shutdown. `spawnEnv` strips all `UPBOT_*` vars.
 Env vars (daemon):
 - `UPBOT_ACP_COMMAND_<PROVIDER>` — JSON array overriding the spawn command per
   provider (e.g. `UPBOT_ACP_COMMAND_DEVIN='["bun","path/to/agent.ts"]'`).
-- `UPBOT_CANCEL_GRACE_MS` — ms after `chat.cancel` before the process is killed.
+- `UPBOT_CANCEL_GRACE_MS` — ms after `chat.cancel` before the process is killed
+  (`0` kills immediately).
 
 Sign-in commands surfaced on auth errors: `devin auth login`, `agent login`,
 `grok login`, `opencode auth login`, `claude auth login`, `codex login` (all verified via --help). Gemini: `gemini`
