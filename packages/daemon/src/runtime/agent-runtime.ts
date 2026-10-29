@@ -81,8 +81,8 @@ const cancelGraceMs = () =>
 /** How often the in-memory streamed text is flushed to SQLite mid-stream. */
 const TEXT_FLUSH_MS = 150;
 
-/** Pending streamed text that triggers an immediate flush (bounds crash loss). */
-const TEXT_FLUSH_MAX_PENDING = 8 * 1024;
+/** Pending streamed bytes that trigger an immediate flush (bounds crash loss). */
+const TEXT_FLUSH_MAX_PENDING_BYTES = 8 * 1024;
 
 export class AgentRuntime {
   status: AgentStatus = "idle";
@@ -100,7 +100,7 @@ export class AgentRuntime {
     /** Accumulated text; the in-memory source of truth until flushed. */
     text: string;
     /** Bytes appended since the last successful flush. */
-    pendingChars: number;
+    pendingBytes: number;
   } | null = null;
   private textFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private pending = new Map<string, PendingEntry>();
@@ -719,8 +719,8 @@ export class AgentRuntime {
     if (this.openTextItem && this.openTextItem.kind === kind) {
       const item = this.openTextItem;
       item.text += text;
-      item.pendingChars += text.length;
-      if (item.pendingChars >= TEXT_FLUSH_MAX_PENDING) {
+      item.pendingBytes += Buffer.byteLength(text, "utf8");
+      if (item.pendingBytes >= TEXT_FLUSH_MAX_PENDING_BYTES) {
         this.tryFlushTextItem();
       } else {
         this.scheduleTextFlush();
@@ -729,7 +729,7 @@ export class AgentRuntime {
     } else {
       this.closeTextItem();
       const item = this.store.createItem(this.agent.id, turn.id, kind, { text });
-      this.openTextItem = { id: item.id, kind, text, pendingChars: 0 };
+      this.openTextItem = { id: item.id, kind, text, pendingBytes: 0 };
       this.broadcast("item.created", item);
     }
   }
@@ -751,9 +751,9 @@ export class AgentRuntime {
   /** Persists the open streaming item's accumulated text, if chunks are pending. */
   private flushTextItem(): void {
     const item = this.openTextItem;
-    if (!item || item.pendingChars === 0) return;
+    if (!item || item.pendingBytes === 0) return;
     this.store.setItemText(item.id, item.text);
-    item.pendingChars = 0;
+    item.pendingBytes = 0;
   }
 
   private tryFlushTextItem(): void {
@@ -770,7 +770,7 @@ export class AgentRuntime {
     const turn = this.turn;
     if (!turn || this.status === "error") return;
     // don't retry the failing write while closing the item/turn
-    if (this.openTextItem) this.openTextItem.pendingChars = 0;
+    if (this.openTextItem) this.openTextItem.pendingBytes = 0;
     try {
       const errItem = this.store.createItem(this.agent.id, turn.id, "error", { message });
       this.broadcast("item.created", errItem);
