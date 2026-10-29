@@ -1,6 +1,7 @@
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useState } from "react";
 import { errorMessage } from "../lib/errors";
+import { pendingUpdate, runUpdater, type UpdaterPhase } from "../lib/updater";
 
 export function UpdateButton() {
   const [state, setState] = useState<
@@ -8,24 +9,27 @@ export function UpdateButton() {
   >("idle");
   const [update, setUpdate] = useState<Update | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [failedPhase, setFailedPhase] = useState<UpdaterPhase | null>(null);
   if (!("__TAURI_INTERNALS__" in window)) return null;
   const run = async () => {
     setError(null);
-    try {
-      if (state === "available" && update) {
-        setState("installing");
-        await update.downloadAndInstall();
-        setState("done");
-        return;
-      }
-      setState("checking");
-      const u = await check();
-      setUpdate(u);
-      setState(u ? "available" : "none");
-    } catch (e) {
-      setError(errorMessage(e));
-      setState("error");
+    setFailedPhase(null);
+    const pending = pendingUpdate(state, update);
+    setState(pending ? "installing" : "checking");
+    const outcome = await runUpdater(pending, () => check());
+    if (outcome.kind === "installed") {
+      setState("done");
+      return;
     }
+    if (outcome.kind === "checked") {
+      setUpdate(outcome.update);
+      setState(outcome.update ? "available" : "none");
+      return;
+    }
+    setUpdate(outcome.update);
+    setFailedPhase(outcome.phase);
+    setError(errorMessage(outcome.error));
+    setState("error");
   };
   const label = {
     idle: "Verificar atualizações",
@@ -34,7 +38,10 @@ export function UpdateButton() {
     available: `Instalar ${update?.version ?? "atualização"}`,
     installing: "Instalando…",
     done: "Reinicie o UpBot para concluir",
-    error: "Falha ao verificar atualizações",
+    error:
+      failedPhase === "install"
+        ? "Falha ao instalar atualização"
+        : "Falha ao verificar atualizações",
   }[state];
   return (
     <button

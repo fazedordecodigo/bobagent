@@ -1,6 +1,7 @@
 import type { Agent, AgentStatusInfo, Channel } from "@upbot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
+import { errorFields, logError } from "../lib/log";
 
 const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -57,6 +58,7 @@ export function useDaemonState(
       .connect()
       .then(refresh)
       .catch((e: unknown) => {
+        logError("app.connect_failed", errorFields(e));
         if (!alive) return;
         const message = errorMessage(e);
         connectionError.current = message;

@@ -133,29 +133,34 @@ describe("avatars, memories, skills, agent creation e2e", () => {
     ).rejects.toMatchObject({ code: "bad_request" });
   });
 
-  test("memories.update edits text, emits memories.changed and rejects unknown ids", async () => {
-    const m = (await c.request("memories.add", {
-      agentId: a.id,
-      text: "before the edit",
-    })) as Memory;
+  test("memories.update rewrites the text, emits memories.changed and rejects missing ids", async () => {
+    const m = (await c.request("memories.add", { agentId: a.id, text: "Old note" })) as Memory;
     const changed = c.waitForEventWhere(
       "memories.changed",
       (d) => (d as { agentId: string }).agentId === a.id,
     );
     const updated = (await c.request("memories.update", {
       id: m.id,
-      text: "  after the edit  ",
+      text: "  New note  ",
     })) as Memory;
-    expect(updated.id).toBe(m.id);
-    expect(updated.text).toBe("after the edit");
-    expect(updated.updatedAt).toBeGreaterThanOrEqual(updated.createdAt);
     await changed;
+    expect(updated).toMatchObject({ id: m.id, agentId: a.id, text: "New note" });
+    expect(updated.updatedAt).toBeGreaterThanOrEqual(m.updatedAt);
     const list = (await c.request("memories.list", { agentId: a.id })) as Memory[];
-    expect(list.find((x) => x.id === m.id)?.text).toBe("after the edit");
+    expect(list.find((x) => x.id === m.id)?.text).toBe("New note");
     await expect(
-      c.request("memories.update", { id: "mem-missing", text: "x" }),
-    ).rejects.toMatchObject({ code: "not_found" });
+      c.request("memories.update", { id: m.id, text: "x".repeat(2_001) }),
+    ).rejects.toMatchObject({ code: "bad_request" });
+    await expect(c.request("memories.update", { id: "missing", text: "x" })).rejects.toMatchObject({
+      code: "not_found",
+    });
     await c.request("memories.delete", { id: m.id });
+    await expect(
+      c.request("memories.update", { id: m.id, text: "after delete" }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect((await c.request("memories.list", { agentId: a.id })) as Memory[]).not.toContainEqual(
+      expect.objectContaining({ id: m.id }),
+    );
   });
 
   test("memories.update enforces edit limits without changing stored memory on invalid edits", async () => {

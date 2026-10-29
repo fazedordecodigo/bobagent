@@ -13,8 +13,9 @@ dialog {
 button { min-width: 44px; }
 :focus-visible { outline: 2px solid var(--focus) !important; outline-offset: 3px !important; }
 
-.hint.is-err {
-  color: var(--fg);
+.hint.is-err,
+.notice.is-err {
+  color: color-mix(in oklch, var(--st-err) 80%, var(--fg));
 }
 
 button.bg-sky-600, button.bg-sky-700 {

@@ -4,6 +4,7 @@ import type { Agent } from "@upbot/protocol";
 import { useEffect, useRef } from "react";
 import type { DaemonClient } from "./daemon";
 import { errorMessage } from "./errors";
+import { errorFields, logWarn } from "./log";
 import {
   ApprovalNotifications,
   type NotificationBridge,
@@ -35,7 +36,10 @@ export function useNativeNotifications(
               const responses = await invoke<NotificationResponse[]>("notifications_take_actions");
               if (!stopped) for (const response of responses) handler(response);
             })
-            .catch((e) => onError(errorMessage(e)));
+            .catch((e) => {
+              logWarn("notifications.drain_failed", errorFields(e));
+              onError(errorMessage(e));
+            });
         };
         const off = await listen("upbot://notification-actions", drain);
         drain();
@@ -53,7 +57,10 @@ export function useNativeNotifications(
       review,
       onError,
     );
-    void notifications.start().catch((e) => onError(errorMessage(e)));
+    void notifications.start().catch((e) => {
+      logWarn("notifications.start_failed", errorFields(e));
+      onError(errorMessage(e));
+    });
     return () => notifications.stop();
   }, [client, ready, review, onError]);
 }
