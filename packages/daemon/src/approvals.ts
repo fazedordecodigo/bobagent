@@ -3,6 +3,7 @@ import type { Approval, ApprovalDecision, ApprovalRule } from "@upbot/protocol";
 import { classifyAppTool, isSensitivePermission } from "@upbot/protocol";
 import type { AppsService } from "./apps";
 import { getSetting, setSetting } from "./db";
+import { envPositiveNumber } from "./env/vars";
 import { RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
 import type { Vault } from "./vault";
@@ -28,8 +29,6 @@ function globRe(pattern: string): RegExp {
 export function legacyPattern(pattern: string): string {
   return pattern.includes("__") ? pattern.replace("__", "-").replace(/_{2,}/g, "_") : pattern;
 }
-
-const ms = (env: string | undefined, d: number) => (env && Number(env) > 0 ? Number(env) : d);
 
 /** Expected tool-call rejection: the user denied, the approval expired or the app forbids it. */
 export class GateRejection extends Error {
@@ -158,8 +157,8 @@ export class ApprovalService {
     const cur = this.runtimes().currentTurn(agentId);
     const background = cur?.background ?? true;
     const ttl = background
-      ? ms(process.env.UPBOT_APPROVAL_BACKGROUND_TTL_MS, 10 * 60_000)
-      : ms(process.env.UPBOT_APPROVAL_TTL_MS, 60 * 60_000);
+      ? envPositiveNumber("UPBOT_APPROVAL_BACKGROUND_TTL_MS", 10 * 60_000)
+      : envPositiveNumber("UPBOT_APPROVAL_TTL_MS", 60 * 60_000);
     const now = Date.now();
     const approval: Approval = {
       id: crypto.randomUUID(),

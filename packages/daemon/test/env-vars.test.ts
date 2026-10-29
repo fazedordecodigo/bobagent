@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { envOverride, envPositiveNumber, envStringArray } from "../src/env/vars";
+import { envNumber, envOverride, envPositiveNumber, envStringArray } from "../src/env/vars";
 
 const NAME = "UPBOT_TEST_ENV_VARS";
 
@@ -54,5 +54,56 @@ describe("envPositiveNumber", () => {
     expect(envPositiveNumber(NAME, 30)).toBe(150);
     process.env[NAME] = "2.5";
     expect(envPositiveNumber(NAME, 30)).toBe(2.5);
+  });
+});
+
+describe("envNumber", () => {
+  test("returns the fallback when unset, empty, or non-numeric", () => {
+    expect(envNumber(NAME, 42)).toBe(42);
+    for (const raw of ["abc", "oito", "10x", "Infinity", "NaN", "", "   "]) {
+      process.env[NAME] = raw;
+      expect(envNumber(NAME, 42)).toBe(42);
+    }
+  });
+
+  test("requires a positive number by default", () => {
+    for (const raw of ["0", "-5", "-0.1"]) {
+      process.env[NAME] = raw;
+      expect(envNumber(NAME, 42)).toBe(42);
+    }
+    process.env[NAME] = "7";
+    expect(envNumber(NAME, 42)).toBe(7);
+    process.env[NAME] = "0.5";
+    expect(envNumber(NAME, 42)).toBe(0.5);
+  });
+
+  test("honors zero when min is 0", () => {
+    process.env[NAME] = "0";
+    expect(envNumber(NAME, 42, { min: 0 })).toBe(0);
+    process.env[NAME] = "-1";
+    expect(envNumber(NAME, 42, { min: 0 })).toBe(42);
+  });
+
+  test("rejects values above max", () => {
+    process.env[NAME] = "2";
+    expect(envNumber(NAME, 0.85, { max: 1 })).toBe(0.85);
+    process.env[NAME] = "1";
+    expect(envNumber(NAME, 0.85, { max: 1 })).toBe(1);
+    process.env[NAME] = "0.5";
+    expect(envNumber(NAME, 0.85, { max: 1 })).toBe(0.5);
+  });
+
+  test("requires an integer when integer is true", () => {
+    for (const raw of ["1.5", "0.1"]) {
+      process.env[NAME] = raw;
+      expect(envNumber(NAME, 8, { integer: true })).toBe(8);
+    }
+    process.env[NAME] = "4";
+    expect(envNumber(NAME, 8, { integer: true })).toBe(4);
+  });
+
+  test("trims surrounding whitespace", () => {
+    process.env[NAME] = "  25  ";
+    expect(envNumber(NAME, 42)).toBe(25);
   });
 });
