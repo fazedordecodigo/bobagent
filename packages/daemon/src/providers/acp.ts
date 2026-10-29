@@ -5,6 +5,7 @@ import type { ConfigOption, ProviderId } from "@upbot/protocol";
 import { resolveCommand, spawnEnv } from "../env/login-path";
 import { spawnChild, waitForChildSpawn } from "../env/spawn";
 import { envPositiveNumber } from "../env/vars";
+import { VERSION } from "../version";
 import {
   AUTH_RE,
   authMessage,
@@ -657,7 +658,7 @@ export class AcpDriver implements ProviderDriver {
                 fs: { readTextFile: false, writeTextFile: false },
                 terminal: false,
               },
-              clientInfo: { name: "upbot", version: "0.3.0" },
+              clientInfo: { name: "upbot", version: VERSION },
             } as never),
           ),
         )) as {

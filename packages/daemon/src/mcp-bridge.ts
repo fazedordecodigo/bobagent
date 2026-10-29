@@ -2,6 +2,7 @@
 // tools/list and tools/call to the daemon's /bridge endpoint.
 
 import { createInterface } from "node:readline";
+import { VERSION } from "./version";
 
 const PROTOCOL_VERSION = "2025-06-18";
 
@@ -46,7 +47,7 @@ export async function runMcpBridge(): Promise<void> {
           reply(m.id, {
             protocolVersion: requested ?? PROTOCOL_VERSION,
             capabilities: { tools: {} },
-            serverInfo: { name: "upbot", version: "0.3.0" },
+            serverInfo: { name: "upbot", version: VERSION },
           });
           return;
         }

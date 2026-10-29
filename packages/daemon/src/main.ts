@@ -32,9 +32,9 @@ import { SkillLibrary } from "./skills";
 import { SubagentService } from "./subagents";
 import { TeamClient } from "./team";
 import { Vault } from "./vault";
+import { VERSION } from "./version";
 import { Voice } from "./voice";
 
-const VERSION = "0.3.0";
 const ORIGIN_ALLOWLIST = new Set([
   "tauri://localhost",
   "http://tauri.localhost",

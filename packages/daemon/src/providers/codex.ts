@@ -1,4 +1,5 @@
 import type { ConfigOption, PermissionOption, ToolCallStatus } from "@upbot/protocol";
+import { VERSION } from "../version";
 import {
   AUTH_RE,
   authMessage,
@@ -509,7 +510,7 @@ export class CodexDriver implements ProviderDriver {
     try {
       await proc.waitForSpawn();
       await session.request("initialize", {
-        clientInfo: { name: "upbot", title: "UpBot", version: "0.3.0" },
+        clientInfo: { name: "upbot", title: "UpBot", version: VERSION },
         capabilities: null,
       });
       session.notify("initialized");
