@@ -247,7 +247,9 @@ export class GatewayService {
       let message = e instanceof Error ? e.message : "send failed";
       for (const secret of info?.secrets ?? []) message = message.split(secret).join("[redacted]");
       message = message.slice(0, 500);
-      console.error(`[upbotd] gateway ${id} (${info?.kind ?? "unknown"}) send failed (${errorName(e)})`);
+      console.error(
+        `[upbotd] gateway ${id} (${info?.kind ?? "unknown"}) send failed (${errorName(e)})`,
+      );
       if (this.transports.get(id) !== t) return;
       const status = this.status.get(id) ?? {
         status: "error" as GatewayStatus,
@@ -266,14 +268,14 @@ export class GatewayService {
     }
   }
 
-  private onInbound(id: string, source: Transport, m: Inbound) {
+  private onInbound(id: string, sourceTransport: Transport, m: Inbound) {
     const r = this.row(id);
     if (!r || !this.transports.has(id) || r.enabled !== 1) return;
     const allowed = JSON.parse(r.allowed_users) as string[];
     if (!allowed.includes(m.userId)) {
       void this.deliver(
         id,
-        source,
+        sourceTransport,
         m.chatId,
         `This UpBot gateway doesn't know you yet. Ask its owner to allow user id ${m.userId}.`,
         m.replyTo,
@@ -313,7 +315,7 @@ export class GatewayService {
     } catch (e) {
       void this.deliver(
         id,
-        source,
+        sourceTransport,
         m.chatId,
         `UpBot could not deliver this: ${(e as Error).message}`,
         m.replyTo,

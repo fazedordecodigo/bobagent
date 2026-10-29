@@ -17,7 +17,10 @@ import {
 const TOKEN = `gw-test-${crypto.randomUUID()}`;
 type Json = Record<string, unknown>;
 
-async function waitFor<T>(fn: () => T | undefined | Promise<T | undefined>, ms = 15000): Promise<T> {
+async function waitFor<T>(
+  fn: () => T | undefined | Promise<T | undefined>,
+  ms = 15000,
+): Promise<T> {
   const end = Date.now() + ms;
   while (Date.now() < end) {
     const v = await fn();
@@ -397,8 +400,11 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
         const { items, turns } = (await c.request("chat.history", {
           agentId: relay.id,
         })) as { items: ChatItem[]; turns: { id: string; status: string }[] };
-        const userMessage = items.find((item) => item.kind === "user_message" && item.text === "slow");
-        return userMessage && turns.some((turn) => turn.id === userMessage.turnId && turn.status === "running")
+        const userMessage = items.find(
+          (item) => item.kind === "user_message" && item.text === "slow",
+        );
+        return userMessage &&
+          turns.some((turn) => turn.id === userMessage.turnId && turn.status === "running")
           ? true
           : undefined;
       });

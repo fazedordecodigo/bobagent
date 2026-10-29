@@ -1,8 +1,7 @@
-import { Database } from "bun:sqlite";
+import { expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, spyOn, test } from "bun:test";
 import type { Agent, GatewayKind, Turn } from "@upbot/protocol";
 import type { AgentStore } from "../src/agents";
 import type { ChatStore } from "../src/chat-store";
@@ -61,7 +60,8 @@ test("gateway notices stay bound to their source transport and send errors stay 
       delete: (name: string) => secrets.delete(name),
     } as unknown as Vault;
     const broadcasts: { event: string; data: unknown }[] = [];
-    const transports: (FakeTransport & { kind: GatewayKind; tokens: Record<string, string> })[] = [];
+    const transports: (FakeTransport & { kind: GatewayKind; tokens: Record<string, string> })[] =
+      [];
     const createTransport = (
       kind: GatewayKind,
       tokens: Record<string, string>,
@@ -103,9 +103,11 @@ test("gateway notices stay bound to their source transport and send errors stay 
       tokens: { botToken: "bot-secret" },
       allowedUsers: ["1"],
     });
-    const first = transports[0]!;
+    const first = transports[0];
+    if (!first) throw new Error("transport factory was not called");
     service.update({ id: gateway.id, tokens: { botToken: "bot-secret-2" } });
-    const second = transports[1]!;
+    const second = transports[1];
+    if (!second) throw new Error("updated transport factory was not called");
     expect(first.stopped).toBe(true);
 
     first.hooks.onMessage({
