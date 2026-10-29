@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { DaemonClient } from "../lib/daemon";
 import { errorMessage } from "../lib/errors";
+import { errorFields, type LogFields, logWarn } from "../lib/log";
 import { btnCls, inputCls, PROVIDERS } from "./AgentSettings";
 import { Markdown } from "./Markdown";
 
@@ -94,11 +95,17 @@ export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agent
     client,
     "memories.list",
     { agentId },
-    { events: { "memories.changed": (d) => d.agentId === agentId } },
+    {
+      events: { "memories.changed": (d) => d.agentId === agentId },
+      onError: (e) => logWarn("memories.list_failed", { agentId, ...errorFields(e) }),
+    },
   );
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const fail = (e: unknown) => setError(errorMessage(e));
+  const fail = (scope: string, fields?: LogFields) => (e: unknown) => {
+    logWarn(scope, { ...fields, ...errorFields(e) });
+    setError(errorMessage(e));
+  };
   return (
     <section className="mx-auto max-w-lg space-y-2 px-6 pb-6">
       <h3 className="text-sm font-semibold text-zinc-300">Memories</h3>
@@ -110,7 +117,11 @@ export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agent
             <button
               type="button"
               className="text-xs text-zinc-500 hover:text-red-400"
-              onClick={() => client.request("memories.delete", { id: m.id }).catch(fail)}
+              onClick={() =>
+                client
+                  .request("memories.delete", { id: m.id })
+                  .catch(fail("memories.delete_failed", { id: m.id }))
+              }
             >
               Delete
             </button>
@@ -127,7 +138,7 @@ export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agent
           client
             .request("memories.add", { agentId, text })
             .then(() => setText(""))
-            .catch(fail);
+            .catch(fail("memories.add_failed", { agentId }));
         }}
       >
         <input
@@ -154,10 +165,14 @@ export function SkillsView({ client }: { client: DaemonClient }) {
     {},
     {
       events: { "skills.changed": true },
+      onError: (e) => logWarn("skills.list_failed", errorFields(e)),
     },
   );
   const [error, setError] = useState<string | null>(null);
-  const fail = (e: unknown) => setError(errorMessage(e));
+  const fail = (scope: string, fields?: LogFields) => (e: unknown) => {
+    logWarn(scope, { ...fields, ...errorFields(e) });
+    setError(errorMessage(e));
+  };
 
   if (edit) {
     return (
@@ -169,7 +184,10 @@ export function SkillsView({ client }: { client: DaemonClient }) {
           client
             .request("skills.save", edit)
             .then(() => setEdit(null))
-            .catch((err) => setError(errorMessage(err)));
+            .catch((err) => {
+              logWarn("skills.save_failed", { name: edit.name, ...errorFields(err) });
+              setError(errorMessage(err));
+            });
         }}
       >
         <h2 className="text-lg font-semibold">Skill</h2>
@@ -239,7 +257,11 @@ export function SkillsView({ client }: { client: DaemonClient }) {
               <button
                 type="button"
                 className="text-xs text-zinc-500 hover:text-red-400"
-                onClick={() => client.request("skills.delete", { name: s.name }).catch(fail)}
+                onClick={() =>
+                  client
+                    .request("skills.delete", { name: s.name })
+                    .catch(fail("skills.delete_failed", { name: s.name }))
+                }
               >
                 Delete
               </button>
@@ -264,11 +286,15 @@ export function RoutinesPanel({ client, agentId }: { client: DaemonClient; agent
         "routine.updated": (r) => r.agentId === agentId,
         "routine.deleted": true,
       },
+      onError: (e) => logWarn("routines.list_failed", { agentId, ...errorFields(e) }),
     },
   );
   const [form, setForm] = useState({ name: "", prompt: "", schedule: "", webhook: false });
   const [error, setError] = useState<string | null>(null);
-  const fail = (e: unknown) => setError(errorMessage(e));
+  const fail = (scope: string, fields?: LogFields) => (e: unknown) => {
+    logWarn(scope, { ...fields, ...errorFields(e) });
+    setError(errorMessage(e));
+  };
   return (
     <section className="mx-auto max-w-lg space-y-2 px-6 pb-6">
       <h3 className="text-sm font-semibold text-zinc-300">Routines</h3>
@@ -289,7 +315,7 @@ export function RoutinesPanel({ client, agentId }: { client: DaemonClient; agent
                   onChange={(e) =>
                     client
                       .request("routines.update", { id: r.id, enabled: e.target.checked })
-                      .catch(fail)
+                      .catch(fail("routines.update_failed", { id: r.id }))
                   }
                 />
                 on
@@ -297,14 +323,22 @@ export function RoutinesPanel({ client, agentId }: { client: DaemonClient; agent
               <button
                 type="button"
                 className="text-xs text-sky-400 hover:text-sky-300"
-                onClick={() => client.request("routines.run", { id: r.id }).catch(fail)}
+                onClick={() =>
+                  client
+                    .request("routines.run", { id: r.id })
+                    .catch(fail("routines.run_failed", { id: r.id }))
+                }
               >
                 Run now
               </button>
               <button
                 type="button"
                 className="text-xs text-zinc-500 hover:text-red-400"
-                onClick={() => client.request("routines.delete", { id: r.id }).catch(fail)}
+                onClick={() =>
+                  client
+                    .request("routines.delete", { id: r.id })
+                    .catch(fail("routines.delete_failed", { id: r.id }))
+                }
               >
                 Delete
               </button>
@@ -338,7 +372,7 @@ export function RoutinesPanel({ client, agentId }: { client: DaemonClient; agent
               webhook: form.webhook,
             })
             .then(() => setForm({ name: "", prompt: "", schedule: "", webhook: false }))
-            .catch(fail);
+            .catch(fail("routines.add_failed", { agentId }));
         }}
       >
         <div className="flex gap-2">
@@ -389,10 +423,14 @@ export function BrowserView({ client, agents }: { client: DaemonClient; agents: 
     {},
     {
       events: { "browser.updated": true },
+      onError: (e) => logWarn("browser.status_failed", errorFields(e)),
     },
   );
   const [error, setError] = useState<string | null>(null);
-  const fail = (e: unknown) => setError(errorMessage(e));
+  const fail = (scope: string, fields?: LogFields) => (e: unknown) => {
+    logWarn(scope, { ...fields, ...errorFields(e) });
+    setError(errorMessage(e));
+  };
   if (!state) {
     return loadError ? (
       <div className="mx-auto max-w-2xl p-6">
@@ -409,7 +447,7 @@ export function BrowserView({ client, agents }: { client: DaemonClient; agents: 
           <button
             type="button"
             className={`${btnCls} ml-auto bg-zinc-700 hover:bg-zinc-600`}
-            onClick={() => client.request("browser.close", {}).catch(fail)}
+            onClick={() => client.request("browser.close", {}).catch(fail("browser.close_failed"))}
           >
             Close browser
           </button>
@@ -434,7 +472,11 @@ export function BrowserView({ client, agents }: { client: DaemonClient; agents: 
             <button
               type="button"
               className="text-xs text-zinc-500 hover:text-red-400"
-              onClick={() => client.request("browser.closeTab", { agentId: t.agentId }).catch(fail)}
+              onClick={() =>
+                client
+                  .request("browser.closeTab", { agentId: t.agentId })
+                  .catch(fail("browser.closeTab_failed", { agentId: t.agentId }))
+              }
             >
               Close tab
             </button>
@@ -463,13 +505,17 @@ export function VaultView({ client, agents }: { client: DaemonClient; agents: Ag
     {},
     {
       events: { "vault.changed": true },
+      onError: (e) => logWarn("vault.list_failed", errorFields(e)),
     },
   );
   const [form, setForm] = useState({ name: "", value: "", agentIds: [] as string[] });
   const [error, setError] = useState<string | null>(null);
   const toggle = (ids: string[], id: string) =>
     ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id];
-  const fail = (e: unknown) => setError(errorMessage(e));
+  const fail = (scope: string, fields?: LogFields) => (e: unknown) => {
+    logWarn(scope, { ...fields, ...errorFields(e) });
+    setError(errorMessage(e));
+  };
   return (
     <div className="mx-auto max-w-2xl space-y-4 p-6">
       <h2 className="text-lg font-semibold">Vault</h2>
@@ -486,7 +532,11 @@ export function VaultView({ client, agents }: { client: DaemonClient; agents: Ag
               <button
                 type="button"
                 className="ml-auto text-xs text-zinc-500 hover:text-red-400"
-                onClick={() => client.request("vault.delete", { name: e.name }).catch(fail)}
+                onClick={() =>
+                  client
+                    .request("vault.delete", { name: e.name })
+                    .catch(fail("vault.delete_failed"))
+                }
               >
                 Delete
               </button>
@@ -503,7 +553,7 @@ export function VaultView({ client, agents }: { client: DaemonClient; agents: Ag
                           name: e.name,
                           agentIds: toggle(e.agentIds, a.id),
                         })
-                        .catch(fail)
+                        .catch(fail("vault.setAccess_failed"))
                     }
                   />
                   {a.name}
@@ -522,7 +572,7 @@ export function VaultView({ client, agents }: { client: DaemonClient; agents: Ag
           client
             .request("vault.set", form)
             .then(() => setForm({ name: "", value: "", agentIds: [] }))
-            .catch(fail);
+            .catch(fail("vault.set_failed"));
         }}
       >
         <h3 className="text-sm font-semibold text-zinc-300">Add or replace a secret</h3>
@@ -586,10 +636,14 @@ export function ComputerUsePanel({ client, agentId }: { client: DaemonClient; ag
     {},
     {
       events: { "computer.changed": true },
+      onError: (e) => logWarn("computer.access_failed", errorFields(e)),
     },
   );
   const [error, setError] = useState<string | null>(null);
-  const fail = (e: unknown) => setError(errorMessage(e));
+  const fail = (scope: string, fields?: LogFields) => (e: unknown) => {
+    logWarn(scope, { ...fields, ...errorFields(e) });
+    setError(errorMessage(e));
+  };
   if (!state?.available) {
     return loadError ? <p className="text-xs text-red-400">{loadError}</p> : null;
   }
@@ -608,7 +662,7 @@ export function ComputerUsePanel({ client, agentId }: { client: DaemonClient; ag
                   ? state.agentIds.filter((x) => x !== agentId)
                   : [...state.agentIds, agentId],
               })
-              .catch(fail)
+              .catch(fail("computer.setAccess_failed", { agentId }))
           }
         />
         Let this bot see the screen and control the mouse and keyboard
@@ -653,10 +707,14 @@ export function GatewaysView({ client, agents }: { client: DaemonClient; agents:
     {},
     {
       events: { "gateway.updated": true, "gateway.deleted": true },
+      onError: (e) => logWarn("gateways.list_failed", errorFields(e)),
     },
   );
   const [error, setError] = useState<string | null>(null);
-  const fail = (e: unknown) => setError(errorMessage(e));
+  const fail = (scope: string, fields?: LogFields) => (e: unknown) => {
+    logWarn(scope, { ...fields, ...errorFields(e) });
+    setError(errorMessage(e));
+  };
   const users = (s: string) =>
     s
       .split(/[\s,]+/)
@@ -692,7 +750,7 @@ export function GatewaysView({ client, agents }: { client: DaemonClient; agents:
                 onChange={(e) =>
                   client
                     .request("gateways.update", { id: g.id, agentId: e.target.value })
-                    .catch(fail)
+                    .catch(fail("gateways.update_failed", { id: g.id }))
                 }
               >
                 {agents.map((a) => (
@@ -708,7 +766,7 @@ export function GatewaysView({ client, agents }: { client: DaemonClient; agents:
                   onChange={(e) =>
                     client
                       .request("gateways.update", { id: g.id, enabled: e.target.checked })
-                      .catch(fail)
+                      .catch(fail("gateways.update_failed", { id: g.id }))
                   }
                 />
                 on
@@ -716,7 +774,11 @@ export function GatewaysView({ client, agents }: { client: DaemonClient; agents:
               <button
                 type="button"
                 className="text-xs text-zinc-500 hover:text-red-400"
-                onClick={() => client.request("gateways.delete", { id: g.id }).catch(fail)}
+                onClick={() =>
+                  client
+                    .request("gateways.delete", { id: g.id })
+                    .catch(fail("gateways.delete_failed", { id: g.id }))
+                }
               >
                 Delete
               </button>
@@ -729,7 +791,7 @@ export function GatewaysView({ client, agents }: { client: DaemonClient; agents:
               onBlur={(e) =>
                 client
                   .request("gateways.update", { id: g.id, allowedUsers: users(e.target.value) })
-                  .catch(fail)
+                  .catch(fail("gateways.update_failed", { id: g.id }))
               }
             />
           </li>
@@ -751,7 +813,7 @@ export function GatewaysView({ client, agents }: { client: DaemonClient; agents:
               allowedUsers: users(form.users),
             })
             .then(() => setForm({ name: "", agentId: "", users: "", tokens: {} }))
-            .catch(fail);
+            .catch(fail("gateways.create_failed"));
         }}
       >
         <h3 className="text-sm font-semibold text-zinc-300">New gateway</h3>
@@ -818,7 +880,18 @@ export function GatewaysView({ client, agents }: { client: DaemonClient; agents:
 }
 
 export function MarketplaceView({ client }: { client: DaemonClient }) {
-  const { data, error: loadError, reload } = useDaemonQuery(client, "marketplace.list", {});
+  const {
+    data,
+    error: loadError,
+    reload,
+  } = useDaemonQuery(
+    client,
+    "marketplace.list",
+    {},
+    {
+      onError: (e) => logWarn("marketplace.list_failed", errorFields(e)),
+    },
+  );
   const [sources, setSources] = useState("");
   const [provider, setProvider] = useState<ProviderId>("claude");
   const [busy, setBusy] = useState<string | null>(null);
@@ -836,7 +909,10 @@ export function MarketplaceView({ client }: { client: DaemonClient }) {
         ...(i.kind === "agent" ? { provider } : {}),
       })
       .then(reload)
-      .catch((e) => setError(errorMessage(e)))
+      .catch((e) => {
+        logWarn("marketplace.install_failed", { id: i.id, ...errorFields(e) });
+        setError(errorMessage(e));
+      })
       .finally(() => setBusy(null));
   };
   return (
@@ -908,7 +984,10 @@ export function MarketplaceView({ client }: { client: DaemonClient }) {
                 .filter(Boolean),
             })
             .then(reload)
-            .catch((err) => setError(errorMessage(err)));
+            .catch((err) => {
+              logWarn("marketplace.setSources_failed", errorFields(err));
+              setError(errorMessage(err));
+            });
         }}
       >
         <h3 className="text-sm font-semibold text-zinc-300">Registries</h3>
@@ -929,14 +1008,28 @@ export function MarketplaceView({ client }: { client: DaemonClient }) {
 }
 
 export function MobileView({ client }: { client: DaemonClient }) {
-  const { data: st, error: loadError, reload } = useDaemonQuery(client, "mobile.status", {});
+  const {
+    data: st,
+    error: loadError,
+    reload,
+  } = useDaemonQuery(
+    client,
+    "mobile.status",
+    {},
+    {
+      onError: (e) => logWarn("mobile.status_failed", errorFields(e)),
+    },
+  );
   const [pair, setPair] = useState<{ code: string; expiresAt: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     const t = setInterval(reload, 5000);
     return () => clearInterval(t);
   }, [reload]);
-  const fail = (e: unknown) => setError(errorMessage(e));
+  const fail = (scope: string, fields?: LogFields) => (e: unknown) => {
+    logWarn(scope, { ...fields, ...errorFields(e) });
+    setError(errorMessage(e));
+  };
   if (!st) {
     return loadError ? (
       <div className="mx-auto max-w-lg p-6">
@@ -958,7 +1051,10 @@ export function MobileView({ client }: { client: DaemonClient }) {
           checked={st.enabled}
           onChange={(e) => {
             setPair(null);
-            client.request("mobile.enable", { enabled: e.target.checked }).then(reload).catch(fail);
+            client
+              .request("mobile.enable", { enabled: e.target.checked })
+              .then(reload)
+              .catch(fail("mobile.enable_failed"));
           }}
         />
         Allow mobile access on this network
@@ -979,7 +1075,9 @@ export function MobileView({ client }: { client: DaemonClient }) {
             <button
               type="button"
               className={`${btnCls} bg-sky-600 hover:bg-sky-500`}
-              onClick={() => client.request("mobile.pair", {}).then(setPair).catch(fail)}
+              onClick={() =>
+                client.request("mobile.pair", {}).then(setPair).catch(fail("mobile.pair_failed"))
+              }
             >
               Pair a device
             </button>
@@ -1006,7 +1104,12 @@ export function MobileView({ client }: { client: DaemonClient }) {
             <button
               type="button"
               className="ml-auto text-xs text-zinc-500 hover:text-red-400"
-              onClick={() => client.request("mobile.revoke", { id: d.id }).then(reload).catch(fail)}
+              onClick={() =>
+                client
+                  .request("mobile.revoke", { id: d.id })
+                  .then(reload)
+                  .catch(fail("mobile.revoke_failed", { id: d.id }))
+              }
             >
               Revoke
             </button>
@@ -1023,20 +1126,32 @@ export function TeamView({ client, agents }: { client: DaemonClient; agents: Age
     data: st,
     error: statusError,
     reload: reloadStatus,
-  } = useDaemonQuery(client, "team.status", {}, { events: { "team.updated": true } });
+  } = useDaemonQuery(
+    client,
+    "team.status",
+    {},
+    {
+      events: { "team.updated": true },
+      onError: (e) => logWarn("team.status_failed", errorFields(e)),
+    },
+  );
   const { data: msgs = [], error: msgsError } = useDaemonQuery(
     client,
     "team.messages",
     {},
     {
       events: { "team.message": true },
+      onError: (e) => logWarn("team.messages_failed", errorFields(e)),
     },
   );
   const [join, setJoin] = useState({ url: "", token: "" });
   const [target, setTarget] = useState("");
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const fail = (e: unknown) => setError(errorMessage(e));
+  const fail = (scope: string, fields?: LogFields) => (e: unknown) => {
+    logWarn(scope, { ...fields, ...errorFields(e) });
+    setError(errorMessage(e));
+  };
   const shownError = error ?? statusError ?? msgsError;
   if (!st) {
     return shownError ? (
@@ -1052,7 +1167,10 @@ export function TeamView({ client, agents }: { client: DaemonClient; agents: Age
         onSubmit={(e) => {
           e.preventDefault();
           setError(null);
-          client.request("team.connect", join).then(reloadStatus).catch(fail);
+          client
+            .request("team.connect", join)
+            .then(reloadStatus)
+            .catch(fail("team.connect_failed"));
         }}
       >
         <h2 className="text-lg font-semibold">Team</h2>
@@ -1095,7 +1213,12 @@ export function TeamView({ client, agents }: { client: DaemonClient; agents: Age
         <button
           type="button"
           className="ml-auto text-xs text-zinc-500 hover:text-red-400"
-          onClick={() => client.request("team.disconnect", {}).then(reloadStatus).catch(fail)}
+          onClick={() =>
+            client
+              .request("team.disconnect", {})
+              .then(reloadStatus)
+              .catch(fail("team.disconnect_failed"))
+          }
         >
           Leave
         </button>
@@ -1116,7 +1239,7 @@ export function TeamView({ client, agents }: { client: DaemonClient; agents: Age
                         : [...st.sharedAgentIds, a.id],
                     })
                     .then(reloadStatus)
-                    .catch(fail)
+                    .catch(fail("team.share_failed"))
                 }
               />
               {a.name}
@@ -1167,7 +1290,7 @@ export function TeamView({ client, agents }: { client: DaemonClient; agents: Age
           client
             .request("team.send", { memberId, agentId, text })
             .then(() => setText(""))
-            .catch(fail);
+            .catch(fail("team.send_failed"));
         }}
       >
         <select

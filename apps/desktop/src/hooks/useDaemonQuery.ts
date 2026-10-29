@@ -19,7 +19,11 @@ export function useDaemonQuery<M extends MethodName>(
   client: DaemonClient,
   method: M,
   params: MethodParams<M>,
-  { events = {}, enabled = true }: { events?: DaemonQueryEvents; enabled?: boolean } = {},
+  {
+    events = {},
+    enabled = true,
+    onError,
+  }: { events?: DaemonQueryEvents; enabled?: boolean; onError?: (error: unknown) => void } = {},
 ) {
   const [data, setData] = useState<MethodResult<M> | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
@@ -29,6 +33,8 @@ export function useDaemonQuery<M extends MethodName>(
   paramsRef.current = params;
   const eventsRef = useRef(events);
   eventsRef.current = events;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
   const generation = useRef(0);
   const mounted = useRef(false);
 
@@ -47,6 +53,7 @@ export function useDaemonQuery<M extends MethodName>(
         }
       })
       .catch((e: unknown) => {
+        onErrorRef.current?.(e);
         if (mounted.current && gen === generation.current) {
           setError(errorMessage(e));
         }

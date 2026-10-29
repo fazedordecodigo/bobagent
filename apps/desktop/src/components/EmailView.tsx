@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { DaemonClient } from "../lib/daemon";
 import { errorMessage } from "../lib/errors";
+import { errorFields, logWarn } from "../lib/log";
 import { btnCls, inputCls } from "./AgentSettings";
 
 const PROVIDER_HINTS: Record<EmailProvider, string> = {
@@ -27,6 +28,7 @@ function useDrafts(client: DaemonClient, agentId?: string) {
     agentId ? { agentId, pendingOnly: true } : {},
     {
       events: { "email.draft.updated": (d) => !agentId || d.agentId === agentId },
+      onError: (e) => logWarn("email.drafts.list_failed", { agentId, ...errorFields(e) }),
     },
   );
 }
@@ -57,7 +59,10 @@ export function DraftCard({
       subject,
       body,
     });
-  const fail = (e: unknown) => setError(errorMessage(e));
+  const fail = (scope: string) => (e: unknown) => {
+    logWarn(scope, errorFields(e));
+    setError(errorMessage(e));
+  };
   return (
     <div
       className="space-y-2 rounded-lg border border-sky-800/60 bg-sky-950/20 p-3 text-sm"
@@ -110,7 +115,7 @@ export function DraftCard({
               setError(null);
               save()
                 .then(() => client.request("email.drafts.send", { id: draft.id }))
-                .catch(fail);
+                .catch(fail("email.drafts.send_failed"));
             }}
           >
             Send
@@ -120,7 +125,7 @@ export function DraftCard({
             className={`${btnCls} bg-zinc-700 hover:bg-zinc-600`}
             onClick={() => {
               setError(null);
-              save().catch(fail);
+              save().catch(fail("email.drafts.update_failed"));
             }}
           >
             Save
@@ -128,7 +133,11 @@ export function DraftCard({
           <button
             type="button"
             className={`${btnCls} ml-auto bg-zinc-800 hover:bg-red-900`}
-            onClick={() => client.request("email.drafts.discard", { id: draft.id }).catch(fail)}
+            onClick={() =>
+              client
+                .request("email.drafts.discard", { id: draft.id })
+                .catch(fail("email.drafts.discard_failed"))
+            }
           >
             Discard
           </button>
@@ -145,17 +154,21 @@ function useAccounts(client: DaemonClient) {
     {},
     {
       events: { "email.accounts.changed": true },
+      onError: (e) => logWarn("email.accounts.list_failed", errorFields(e)),
     },
   );
 }
 
 /** Pending drafts of one bot, shown above the composer. */
 export function DraftCards({ client, agentId }: { client: DaemonClient; agentId: string }) {
-  const { data: drafts = [] } = useDrafts(client, agentId);
+  const { data: drafts = [], error } = useDrafts(client, agentId);
   const { data: accounts = [] } = useAccounts(client);
+  if (error && !drafts.length)
+    return <div className="border-t border-zinc-800 px-4 py-2 text-xs text-red-400">{error}</div>;
   if (!drafts.length) return null;
   return (
     <div className="max-h-[50vh] space-y-2 overflow-y-auto border-t border-zinc-800 px-4 py-2">
+      {error && <p className="px-4 py-1 text-xs text-red-400">{error}</p>}
       {drafts.map((d) => (
         <DraftCard key={`${d.id}:${d.updatedAt}`} client={client} draft={d} accounts={accounts} />
       ))}
@@ -178,7 +191,10 @@ export function EmailView({ client, agents }: { client: DaemonClient; agents: Ag
   });
   const [error, setError] = useState<string | null>(null);
   const [tests, setTests] = useState<Record<string, string>>({});
-  const fail = (e: unknown) => setError(errorMessage(e));
+  const fail = (scope: string) => (e: unknown) => {
+    logWarn(scope, errorFields(e));
+    setError(errorMessage(e));
+  };
   const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? "deleted bot";
   return (
     <div className="mx-auto max-w-2xl space-y-4 p-6">
@@ -211,7 +227,7 @@ export function EmailView({ client, agents }: { client: DaemonClient; agents: Ag
                           : [r.imap, r.smtp].filter((x) => x !== "ok").join(" · "),
                       })),
                     )
-                    .catch(fail);
+                    .catch(fail("email.accounts.test_failed"));
                 }}
               >
                 Test
@@ -219,7 +235,11 @@ export function EmailView({ client, agents }: { client: DaemonClient; agents: Ag
               <button
                 type="button"
                 className="text-xs text-zinc-500 hover:text-red-400"
-                onClick={() => client.request("email.accounts.delete", { id: a.id }).catch(fail)}
+                onClick={() =>
+                  client
+                    .request("email.accounts.delete", { id: a.id })
+                    .catch(fail("email.accounts.delete_failed"))
+                }
               >
                 Remove
               </button>
@@ -248,7 +268,7 @@ export function EmailView({ client, agents }: { client: DaemonClient; agents: Ag
                             address: a.address,
                             agentIds,
                           })
-                          .catch(fail);
+                          .catch(fail("email.accounts.save_failed"));
                       }}
                     />
                     {b.name}
@@ -283,7 +303,7 @@ export function EmailView({ client, agents }: { client: DaemonClient; agents: Ag
                 : {}),
             })
             .then(() => setForm({ ...form, address: "", password: "", label: "" }))
-            .catch(fail);
+            .catch(fail("email.accounts.save_failed"));
         }}
       >
         <h3 className="text-sm font-semibold text-zinc-300">Connect an account</h3>
