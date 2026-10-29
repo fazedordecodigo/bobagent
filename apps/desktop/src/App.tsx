@@ -23,6 +23,7 @@ import { ScheduledView } from "./components/ScheduledView";
 import { Sidebar } from "./components/Sidebar";
 import { TABS, ToolBody, type ToolTab } from "./components/ToolsView";
 import { UpdateButton } from "./components/UpdateButton";
+import { ChatProvider } from "./hooks/useChat";
 import { useLayerFocus, useMediaQuery } from "./hooks/useLayerFocus";
 import { useOverview } from "./hooks/useOverview";
 import { DaemonClient } from "./lib/daemon";
@@ -568,61 +569,44 @@ export default function App() {
         />
       )}
 
-      <main className="main">
-        {notice && view !== "chat" && (
-          <div className="notice" role="status">
-            {notice}
-            <button type="button" aria-label="Dispensar aviso" onClick={() => setNotice(null)}>
-              ×
-            </button>
-          </div>
-        )}
-        <IconButton
-          aria-label="Abrir barra lateral"
-          aria-expanded={sideOpen && narrow}
-          aria-controls="bot-drawer"
-          className="window-menu"
-          onClick={() => setSideOpen((open) => !open)}
-        >
-          <Icon name="panel" />
-        </IconButton>
-        {error ? (
-          <section className="view on">
-            <div className="empty">
-              <h2>Não foi possível conectar ao UpBot</h2>
-              <p className="meta">{error}</p>
-            </div>
-          </section>
-        ) : !clientReady ? (
-          <section className="view on">
-            <div className="empty">
-              <h2>Conectando ao UpBot…</h2>
-            </div>
-          </section>
-        ) : view === "scheduled" ? (
-          <ScheduledView client={client} agents={agents} onOpen={openAgent} />
-        ) : view === "home" ? (
-          <section className="view on">
-            <div className="empty">
-              <h2>Escolha um bot ou crie um novo.</h2>
-              <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
-                Criar bot
+      <ChatProvider
+        client={client}
+        agentId={clientReady && view === "chat" ? (selected?.id ?? null) : null}
+      >
+        <main className="main">
+          {notice && view !== "chat" && (
+            <div className="notice" role="status">
+              {notice}
+              <button type="button" aria-label="Dispensar aviso" onClick={() => setNotice(null)}>
+                ×
               </button>
             </div>
-          </section>
-        ) : view === "chat" ? (
-          selected ? (
-            <ChatView
-              key={selected.id}
-              client={client}
-              agent={selected}
-              overview={selectedOverview}
-              onOpenSettings={() => navigate("agent-settings")}
-              notice={notice}
-              onNoticeDismiss={() => setNotice(null)}
-              onPanelToggle={togglePanel}
-            />
-          ) : (
+          )}
+          <IconButton
+            aria-label="Abrir barra lateral"
+            aria-expanded={sideOpen && narrow}
+            aria-controls="bot-drawer"
+            className="window-menu"
+            onClick={() => setSideOpen((open) => !open)}
+          >
+            <Icon name="panel" />
+          </IconButton>
+          {error ? (
+            <section className="view on">
+              <div className="empty">
+                <h2>Não foi possível conectar ao UpBot</h2>
+                <p className="meta">{error}</p>
+              </div>
+            </section>
+          ) : !clientReady ? (
+            <section className="view on">
+              <div className="empty">
+                <h2>Conectando ao UpBot…</h2>
+              </div>
+            </section>
+          ) : view === "scheduled" ? (
+            <ScheduledView client={client} agents={agents} onOpen={openAgent} />
+          ) : view === "home" ? (
             <section className="view on">
               <div className="empty">
                 <h2>Escolha um bot ou crie um novo.</h2>
@@ -631,97 +615,123 @@ export default function App() {
                 </button>
               </div>
             </section>
-          )
-        ) : view === "agents" ? (
-          <AgentsView
-            agents={agents}
-            overview={overview}
-            onCreate={() => setCreating(true)}
-            onOpen={openAgent}
-          />
-        ) : view === "tasks" ? (
-          <TasksView agents={agents} overview={overview} onOpen={openAgent} />
-        ) : view === "settings" ? (
-          <SettingsView
+          ) : view === "chat" ? (
+            selected ? (
+              <ChatView
+                key={selected.id}
+                client={client}
+                agent={selected}
+                overview={selectedOverview}
+                onOpenSettings={() => navigate("agent-settings")}
+                notice={notice}
+                onNoticeDismiss={() => setNotice(null)}
+                onPanelToggle={togglePanel}
+              />
+            ) : (
+              <section className="view on">
+                <div className="empty">
+                  <h2>Escolha um bot ou crie um novo.</h2>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => setCreating(true)}
+                  >
+                    Criar bot
+                  </button>
+                </div>
+              </section>
+            )
+          ) : view === "agents" ? (
+            <AgentsView
+              agents={agents}
+              overview={overview}
+              onCreate={() => setCreating(true)}
+              onOpen={openAgent}
+            />
+          ) : view === "tasks" ? (
+            <TasksView agents={agents} overview={overview} onOpen={openAgent} />
+          ) : view === "settings" ? (
+            <SettingsView
+              client={client}
+              agents={agents}
+              selected={settingsTab}
+              onSelect={setSettingsTab}
+              profileName={profileName}
+              onProfileName={(name) => {
+                setProfileName(name);
+                writeStorage("upbot.profile.name", name);
+              }}
+            />
+          ) : view === "channel-new" ? (
+            <section className="view on">
+              <ChannelCreateForm
+                agents={agents}
+                onSubmit={createChannel}
+                onCancel={() => navigate("chat")}
+              />
+            </section>
+          ) : view === "channel" && selectedChannel ? (
+            <section className="view on">
+              <ChannelView client={client} channel={selectedChannel} agents={agents} />
+            </section>
+          ) : view === "pages" ? (
+            <section className="view on">
+              <PagesView client={client} agents={agents} onOpenBot={openAgent} />
+            </section>
+          ) : view === "agent-settings" && settingsAgent ? (
+            <section className="view on">
+              <AgentConfigScreen
+                key={settingsAgent.id}
+                agent={settingsAgent}
+                client={client}
+                deleted={!selected}
+                onBack={() => navigate("chat")}
+                onHome={() => {
+                  setDeletedAgentSnapshot(null);
+                  setSelectedId(null);
+                  navigate("home");
+                }}
+                onName={updateAgentNameDraft}
+                onDeleted={(deletedAgent, committed) => {
+                  setDeletedAgentSnapshot(deletedAgent);
+                  if (committed) {
+                    setSelectedId(null);
+                    setAgents((current) => current.filter((item) => item.id !== deletedAgent.id));
+                    showAgentUndoToast(
+                      "Agente excluído.",
+                      () => void restoreDeletedAgent(deletedAgent.id),
+                    );
+                  }
+                }}
+                onOpenApps={() => {
+                  setSettingsTab("apps");
+                  navigate("settings");
+                }}
+              />
+            </section>
+          ) : (
+            <section className="view on">
+              <div className="empty">
+                <h2>Escolha um bot ou crie um novo.</h2>
+              </div>
+            </section>
+          )}
+        </main>
+
+        {view === "chat" && selected && selectedOverview && (
+          <RunPanel
             client={client}
-            agents={agents}
-            selected={settingsTab}
-            onSelect={setSettingsTab}
-            profileName={profileName}
-            onProfileName={(name) => {
-              setProfileName(name);
-              writeStorage("upbot.profile.name", name);
+            agent={selected}
+            overview={selectedOverview}
+            overlayOpen={panelOpen && !sideOpen}
+            onClose={togglePanel}
+            onOpenApps={() => {
+              setSettingsTab("apps");
+              navigate("settings");
             }}
           />
-        ) : view === "channel-new" ? (
-          <section className="view on">
-            <ChannelCreateForm
-              agents={agents}
-              onSubmit={createChannel}
-              onCancel={() => navigate("chat")}
-            />
-          </section>
-        ) : view === "channel" && selectedChannel ? (
-          <section className="view on">
-            <ChannelView client={client} channel={selectedChannel} agents={agents} />
-          </section>
-        ) : view === "pages" ? (
-          <section className="view on">
-            <PagesView client={client} agents={agents} onOpenBot={openAgent} />
-          </section>
-        ) : view === "agent-settings" && settingsAgent ? (
-          <section className="view on">
-            <AgentConfigScreen
-              key={settingsAgent.id}
-              agent={settingsAgent}
-              client={client}
-              deleted={!selected}
-              onBack={() => navigate("chat")}
-              onHome={() => {
-                setDeletedAgentSnapshot(null);
-                setSelectedId(null);
-                navigate("home");
-              }}
-              onName={updateAgentNameDraft}
-              onDeleted={(deletedAgent, committed) => {
-                setDeletedAgentSnapshot(deletedAgent);
-                if (committed) {
-                  setSelectedId(null);
-                  setAgents((current) => current.filter((item) => item.id !== deletedAgent.id));
-                  showAgentUndoToast(
-                    "Agente excluído.",
-                    () => void restoreDeletedAgent(deletedAgent.id),
-                  );
-                }
-              }}
-              onOpenApps={() => {
-                setSettingsTab("apps");
-                navigate("settings");
-              }}
-            />
-          </section>
-        ) : (
-          <section className="view on">
-            <div className="empty">
-              <h2>Escolha um bot ou crie um novo.</h2>
-            </div>
-          </section>
         )}
-      </main>
-
-      {view === "chat" && selected && selectedOverview && (
-        <RunPanel
-          client={client}
-          agent={selected}
-          overview={selectedOverview}
-          overlayOpen={panelOpen && !sideOpen}
-          onClose={togglePanel}
-          onOpenApps={() => {
-            setSettingsTab("apps");
-            navigate("settings");
-          }}
-        />
-      )}
+      </ChatProvider>
 
       {creating && (
         <CreateAgentDialog
