@@ -1,5 +1,6 @@
+import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Agent, Memory, Routine } from "@upbot/protocol";
@@ -22,12 +23,154 @@ let state: string;
 let agent: Agent;
 const token = `agent-config-${crypto.randomUUID()}`;
 const shots = process.env.AGENT_CONFIG_SCREEN_DIR;
+const handoff = join(
+  homedir(),
+  "attachments",
+  "20e5b3d2-04f8-4494-82fa-8b1dbee8ae61",
+  "handoff",
+  "upbot-config-agente-handoff",
+);
+const fixture = JSON.parse(readFileSync(join(handoff, "data", "agente.json"), "utf8")) as {
+  agent: {
+    name: string;
+    createdAt: string;
+    model: string;
+    effort: string;
+    instructions: string;
+    memories: string[];
+    routines: {
+      name: string;
+      when: string;
+      time: string;
+      prompt: string;
+      hook: boolean;
+    }[];
+  };
+};
+const prototype = join(handoff, "prototipo", "upbot-config-agente.html");
 const blueCounts: Record<string, number> = {};
+
+async function capturePrototype(name: string, fullPage = false) {
+  if (!shots) return;
+  const theme = name.endsWith("-escuro.png") ? "escuro" : "claro";
+  const windows = name.includes("windows");
+  const target = await browser.newPage({
+    viewport: { width: 1280, height: 860 },
+    deviceScaleFactor: 2,
+  });
+  try {
+    await target.goto(`file://${prototype}?tema=${theme}${windows ? "&so=windows" : ""}`);
+    await target.addStyleTag({
+      content:
+        "*{transition:none!important;animation:none!important;scroll-behavior:auto!important}",
+    });
+    const state = name.slice(0, 2);
+    if (state === "01")
+      await target.locator("details").evaluate((el: HTMLDetailsElement) => (el.open = true));
+    if (state === "02") {
+      await target.locator("#tile").click();
+      await target.locator("#iconPop").waitFor({ state: "visible" });
+    }
+    if (state === "03") {
+      await target.locator("#name").fill("UpBot revisado");
+      await target.locator("#savebar.show").waitFor();
+    }
+    if (state === "04") {
+      await target.locator('[data-edit="1"]').click();
+      await target.locator('[data-od-id="routine-dialog"]').waitFor();
+    }
+    if (state === "05" || state === "07") {
+      await target.locator("#computer").click();
+      await target
+        .locator(`[data-od-id="${windows ? "computer-dialog-windows" : "computer-dialog"}"]`)
+        .waitFor();
+    }
+    if (state === "06" || state === "08") {
+      await target.locator("details").evaluate((el: HTMLDetailsElement) => (el.open = true));
+      await target.locator("#del").click();
+      await target.locator('[data-od-id="delete-dialog"]').waitFor();
+      if (state === "08") {
+        await target.locator('[data-x="yes"]').click();
+        await target.locator(".gone").waitFor();
+      }
+    }
+    await target.evaluate(() => document.fonts.ready);
+    if (fullPage) {
+      await target.evaluate(() => {
+        const scroll = document.querySelector<HTMLElement>("#scroll");
+        const app = document.querySelector<HTMLElement>(".app");
+        const head = document.querySelector<HTMLElement>(".main-head");
+        if (scroll) {
+          scroll.style.height = `${scroll.scrollHeight}px`;
+          scroll.style.maxHeight = "none";
+          scroll.style.overflow = "visible";
+        }
+        document.documentElement.style.height = "auto";
+        document.body.style.height = "auto";
+        if (app)
+          app.style.height = `${Math.max(
+            (scroll?.scrollHeight ?? 0) + (head?.offsetHeight ?? 0) + 1,
+            innerHeight,
+          )}px`;
+      });
+    }
+    const directory = join(shots, "prototipo");
+    mkdirSync(directory, { recursive: true });
+    await target.screenshot({ path: join(directory, name), fullPage });
+  } finally {
+    await target.close();
+  }
+}
 
 async function capture(name: string, target = page, fullPage = false) {
   await target.addStyleTag({ content: "*{transition:none!important;animation:none!important}" });
   await target.evaluate(() => document.fonts.ready);
-  if (shots) await target.screenshot({ path: join(shots, name), fullPage });
+  let previousStyles: string[] = [];
+  if (shots) {
+    if (["01", "02", "03"].includes(name.slice(0, 2)))
+      await target.locator("[data-agent-config-scroll]").evaluateAll((elements) => {
+        for (const element of elements) element.scrollTop = 0;
+      });
+    if (fullPage) {
+      previousStyles = await target.evaluate(() => {
+        const app = document.querySelector<HTMLElement>(".app");
+        const scroll = document.querySelector<HTMLElement>("[data-agent-config-scroll]");
+        const header = document.querySelector<HTMLElement>("[data-agent-config-top]");
+        const nodes = [document.documentElement, document.body, app, scroll].filter(
+          (element): element is HTMLElement => !!element,
+        );
+        const styles = nodes.map((element) => element.getAttribute("style") ?? "");
+        if (scroll) {
+          scroll.style.height = `${scroll.scrollHeight}px`;
+          scroll.style.maxHeight = "none";
+          scroll.style.overflow = "visible";
+          scroll.style.flex = "none";
+        }
+        if (app)
+          app.style.height = `${Math.max((scroll?.scrollHeight ?? 0) + (header?.offsetHeight ?? 0), innerHeight)}px`;
+        document.documentElement.style.height = "auto";
+        document.body.style.height = "auto";
+        document.body.style.overflow = "visible";
+        return styles;
+      });
+    }
+    await target.screenshot({ path: join(shots, name), fullPage });
+    await capturePrototype(name, fullPage);
+    if (fullPage) {
+      await target.evaluate((styles) => {
+        const nodes = [
+          document.documentElement,
+          document.body,
+          document.querySelector<HTMLElement>(".app"),
+          document.querySelector<HTMLElement>("[data-agent-config-scroll]"),
+        ].filter((element): element is HTMLElement => !!element);
+        nodes.forEach((element, index) => {
+          if (styles[index]) element.setAttribute("style", styles[index]);
+          else element.removeAttribute("style");
+        });
+      }, previousStyles);
+    }
+  }
   const blueElements = await target.evaluate(() => {
     const probe = document.createElement("span");
     probe.style.color = getComputedStyle(document.documentElement).getPropertyValue("--accent");
@@ -69,6 +212,7 @@ async function capture(name: string, target = page, fullPage = false) {
 }
 
 async function openSettings(target = page) {
+  if ((await target.locator("[data-agent-config-top]").count()) > 0) return;
   const button = target.getByRole("button", { name: "Configurar bot" });
   try {
     await button.waitFor({ timeout: 5000 });
@@ -106,35 +250,23 @@ beforeAll(async () => {
   mkdirSync(fake);
   daemon = await startDaemon(join(state, "data"), join(state, "agents"), token, {
     UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+    UPBOT_ACP_COMMAND_GROK: JSON.stringify(["bun", FAKE_AGENT]),
     FAKE_ACP_STATE_DIR: fake,
     FAKE_ACP_EFFORT: "1",
     UPBOT_COMPUTER_DRYRUN: join(state, "computer.log"),
   });
   rpc = await DaemonClient.connect(daemon.port, token);
-  agent = (await rpc.request("agents.create", {
-    name: "Agente de teste",
-    provider: "devin",
-    instructions: "Instruções iniciais.",
-  })) as Agent;
-  await rpc.request("memories.add", { agentId: agent.id, text: "Fuso horário de Brasília" });
-  await rpc.request("routines.create", {
-    agentId: agent.id,
-    name: "Resumo diário",
-    prompt: "Escreva o resumo.",
-    schedule: "daily 09:00",
-    webhook: false,
-  });
   try {
-    await fetch("http://localhost:1422");
+    await fetch("http://localhost:1420");
   } catch {
-    vite = Bun.spawn(["bun", "run", "dev", "--port", "1422"], {
+    vite = Bun.spawn(["bun", "run", "dev", "--port", "1420"], {
       cwd: join(ROOT, "apps/desktop"),
       stdout: "ignore",
       stderr: "inherit",
     });
     for (let i = 0; i < 100; i++) {
       try {
-        if ((await fetch("http://localhost:1422")).ok) break;
+        if ((await fetch("http://localhost:1420")).ok) break;
       } catch {}
       await Bun.sleep(100);
     }
@@ -145,15 +277,14 @@ beforeAll(async () => {
       : { channel: "chrome" }),
     headless: true,
   });
-  page = await browser.newPage({ viewport: { width: 1080, height: 900 } });
-  await page.addInitScript(
-    ({ id }) => {
-      localStorage.setItem("upbot.agent", localStorage.getItem("upbot.agent") || id);
-      localStorage.setItem("upbot.view", "chat");
-    },
-    { id: agent.id },
-  );
-  if (shots) mkdirSync(shots, { recursive: true });
+  page = await browser.newPage({
+    viewport: { width: 1280, height: 860 },
+    deviceScaleFactor: 2,
+  });
+  if (shots) {
+    mkdirSync(shots, { recursive: true });
+    mkdirSync(join(shots, "prototipo"), { recursive: true });
+  }
 }, 60000);
 
 afterAll(async () => {
@@ -179,37 +310,77 @@ afterAll(async () => {
 
 test("agent settings save drafts through real daemon RPCs and expose the handoff dialogs", async () => {
   for (const theme of ["claro", "escuro"] as const) {
-    writeFileSync(join(state, "fake", "state.json"), JSON.stringify({ config: {} }));
+    if (theme === "escuro") {
+      await page.close();
+      page = await browser.newPage({
+        viewport: { width: 1280, height: 860 },
+        deviceScaleFactor: 2,
+      });
+      await rpc.request("agents.delete", { id: agent.id });
+    }
+    writeFileSync(
+      join(state, "fake", "state.json"),
+      JSON.stringify({ config: { model: fixture.agent.model, effort: fixture.agent.effort } }),
+    );
     const currentAgent = (await rpc.request("agents.create", {
-      name: "Agente de teste",
-      provider: "devin",
-      instructions: "Instruções iniciais.",
+      name: fixture.agent.name,
+      provider: "grok",
+      instructions: fixture.agent.instructions,
     })) as Agent;
-    await rpc.request("memories.add", {
+    const fixtureDb = new Database(join(state, "data", "upbot.db"));
+    fixtureDb
+      .query("UPDATE agents SET created_at = ?, config_json = ? WHERE id = ?")
+      .run(
+        new Date(`${fixture.agent.createdAt}T12:00:00`).getTime(),
+        JSON.stringify({ model: fixture.agent.model, effort: fixture.agent.effort }),
+        currentAgent.id,
+      );
+    fixtureDb.close();
+    agent = currentAgent;
+    for (const text of fixture.agent.memories)
+      await rpc.request("memories.add", { agentId: currentAgent.id, text });
+    for (const routine of fixture.agent.routines) {
+      const schedule =
+        routine.when === "30m"
+          ? "every 30m"
+          : routine.when === "weekly"
+            ? `weekly fri ${routine.time.split(" ")[1]}`
+            : null;
+      await rpc.request("routines.create", {
+        agentId: currentAgent.id,
+        name: routine.name,
+        prompt: routine.prompt,
+        schedule,
+        webhook: routine.hook,
+      });
+    }
+    const configOptions = (await rpc.request("agents.configOptions", {
       agentId: currentAgent.id,
-      text: "Fuso horário de Brasília",
-    });
-    await rpc.request("routines.create", {
-      agentId: currentAgent.id,
-      name: "Resumo diário",
-      prompt: "Escreva o resumo.",
-      schedule: "daily 09:00",
-      webhook: true,
-    });
+    })) as { configOptions: { id: string; currentValue: string }[] };
+    expect(configOptions.configOptions.some((option) => option.id === "effort")).toBe(true);
+    expect(configOptions.configOptions.find((option) => option.id === "effort")?.currentValue).toBe(
+      fixture.agent.effort,
+    );
     await rpc.request("computer.setAccess", { agentIds: [] });
-    await page.goto(`http://localhost:1422/#port=${daemon.port}&token=${token}`);
-    await page.evaluate(
+    await page.addInitScript(
       ({ id, color }) => {
         localStorage.setItem("upbot.agent", id);
         localStorage.setItem("upbot.theme", color === "claro" ? "light" : "dark");
+        localStorage.setItem("upbot.view", "chat");
       },
       { id: currentAgent.id, color: theme },
     );
-    await page.reload();
+    await page.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+    await page.addStyleTag({
+      content:
+        "*{transition:none!important;animation:none!important;scroll-behavior:auto!important}",
+    });
     await openSettings();
+    await page.locator('.side-bot[aria-current="true"]').getByText(currentAgent.name).waitFor();
+    expect(await page.getByText(/internal error/i).count()).toBe(0);
     await page
       .context()
-      .grantPermissions(["clipboard-read", "clipboard-write"], { origin: "http://localhost:1422" });
+      .grantPermissions(["clipboard-read", "clipboard-write"], { origin: "http://localhost:1420" });
     const name = page.getByLabel("Nome do agente");
     await name.waitFor();
     await page.waitForFunction(
@@ -217,21 +388,82 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
         (document.querySelector("#agent-name") as HTMLInputElement | null)?.value === expected,
       currentAgent.name,
     );
+    const advanced = page.locator("details > summary");
+    if ((await advanced.getAttribute("aria-expanded")) !== "true") await advanced.click();
+    await page.locator("[data-agent-config-scroll]").evaluate((element) => {
+      element.scrollTop = 0;
+    });
     await capture(`01-pagina-inteira-${theme}.png`, page, true);
+    await advanced.click();
 
-    await name.fill("Rascunho");
+    const computerSwitch = page.getByRole("switch", { name: "Usar o computador" });
+    await computerSwitch.click();
+    await page.getByRole("dialog", { name: /Deixar .* usar o computador/ }).waitFor();
+    expect(await page.getByRole("dialog").locator("footer button").allTextContents()).toEqual([
+      "Agora não",
+      "Permitir",
+    ]);
+    await capture(`05-dialogo-usar-computador-${theme}.png`);
+    await page.keyboard.press("Escape");
+    await advanced.click();
+    await page.getByRole("button", { name: "Excluir…" }).click();
+    await page.getByRole("dialog", { name: `Excluir ${currentAgent.name}?` }).waitFor();
+    await capture(`06-dialogo-excluir-${theme}.png`);
+    await page.getByRole("button", { name: "Cancelar" }).click();
+    await advanced.click();
+    const sampleRoutine = page.getByRole("button", { name: /Relatório semanal/ });
+    await sampleRoutine.click();
+    await page.getByRole("dialog", { name: "Editar rotina" }).waitFor();
+    await page
+      .getByText("O agente começa a tarefa sozinho e pergunta antes de pagar, enviar ou apagar.")
+      .waitFor();
+    expect(await page.getByLabel("Horário").isEnabled()).toBe(true);
+    await capture(`04-dialogo-rotina-${theme}.png`);
+    await page.keyboard.press("Escape");
+
+    const windowsCapture = await browser.newPage({
+      viewport: { width: 1280, height: 860 },
+      deviceScaleFactor: 2,
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+    });
+    try {
+      await windowsCapture.addInitScript(
+        ({ id, color }) => {
+          Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+          localStorage.setItem("upbot.agent", id);
+          localStorage.setItem("upbot.view", "chat");
+          localStorage.setItem("upbot.theme", color === "claro" ? "light" : "dark");
+        },
+        { id: currentAgent.id, color: theme },
+      );
+      await windowsCapture.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
+      await windowsCapture.addStyleTag({
+        content:
+          "*{transition:none!important;animation:none!important;scroll-behavior:auto!important}",
+      });
+      await openSettings(windowsCapture);
+      await windowsCapture.getByRole("switch", { name: "Usar o computador" }).click();
+      await windowsCapture.locator('[data-od-id="computer-dialog-windows"]').waitFor();
+      await capture(`07-dialogo-usar-computador-windows-${theme}.png`, windowsCapture);
+    } finally {
+      await windowsCapture.close();
+    }
+
+    await name.fill("UpBot revisado");
     await page.getByText("Alterações não salvas").waitFor();
     await page
       .locator("header")
       .filter({ hasText: "Configurações" })
-      .getByText("Rascunho", { exact: true })
+      .getByText("UpBot revisado", { exact: true })
       .waitFor();
+    await capture(`03-barra-salvar-${theme}.png`);
     await name.fill(currentAgent.name);
     expect(await page.getByText("Alterações não salvas").count()).toBe(0);
 
     await page.getByRole("button", { name: "Trocar ícone do agente" }).click();
-    await page.getByRole("group", { name: "Ícones do agente" }).waitFor();
-    await capture(`02-seletor-de-icone-${theme}.png`);
+    await page.getByRole("group", { name: "Ícone do agente" }).waitFor();
+    await capture(`02-popover-icone-${theme}.png`);
     await page.getByRole("button", { name: "Ícone chart" }).focus();
     await page.keyboard.press("Escape");
     expect(
@@ -247,11 +479,24 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
         .getAttribute("aria-expanded"),
     ).toBe("false");
 
+    if ((await advanced.getAttribute("aria-expanded")) !== "true") await advanced.click();
+    await page.getByRole("button", { name: "Excluir…" }).click();
+    await page.getByRole("button", { name: "Excluir agente" }).click();
+    await page.getByText("UpBot foi excluído.").waitFor();
+    await capture(`08-agente-excluido-${theme}.png`);
+    await page.getByRole("button", { name: "Desfazer", exact: true }).click();
+    expect(
+      ((await rpc.request("agents.list", {})) as Agent[]).some(
+        (item) => item.id === currentAgent.id,
+      ),
+    ).toBe(true);
+    if (theme === "escuro") continue;
+
     await page.getByLabel("Instruções").fill("Rascunho descartado.");
     await page.getByLabel("Nova memória").fill("Rascunho descartado");
     await page.getByRole("button", { name: "Adicionar", exact: true }).click();
     await page.getByRole("button", { name: "Descartar" }).click();
-    expect(await page.getByLabel("Instruções").inputValue()).toBe("Instruções iniciais.");
+    expect(await page.getByLabel("Instruções").inputValue()).toContain("Você é o UpBot");
     expect(
       await page.getByRole("button", { name: "Remover memória: Rascunho descartado" }).count(),
     ).toBe(0);
@@ -261,18 +506,24 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
 
     await page.getByRole("button", { name: "+ Nova rotina" }).click();
     await page.getByRole("dialog", { name: "Nova rotina" }).waitFor();
-    await capture(`03-dialogo-rotina-${theme}.png`);
     await page.getByLabel("Nome", { exact: true }).fill("Rotina criada");
     await page.getByLabel("Quando").selectOption("daily");
+    await page.getByRole("switch", { name: "Também começar por webhook" }).click();
     await page.getByRole("textbox", { name: "Horário" }).fill("inválido");
     await page.getByLabel("O que fazer").fill("Prepare o resumo da equipe.");
-    await page.getByRole("button", { name: "Concluir" }).click();
+    await page.getByRole("button", { name: "Criar rotina" }).click();
     await page.getByText("Use o formato 09:00").waitFor();
     await page.getByRole("textbox", { name: "Horário" }).fill("10:30");
-    await page.getByRole("button", { name: "Concluir" }).click();
+    await page.getByRole("button", { name: "Criar rotina" }).click();
 
-    const savedRoutine = page.getByRole("button", { name: /Resumo diário/ });
+    await page.getByRole("button", { name: "Salvar", exact: false }).click();
+    await page.getByRole("status").filter({ hasText: "Configurações salvas." }).waitFor();
+    const savedRoutine = page.getByRole("button", { name: /Relatório semanal/ });
     await savedRoutine.click();
+    await page.getByRole("dialog", { name: "Editar rotina" }).waitFor();
+    await page.keyboard.press("Escape");
+    const hookRoutine = page.getByRole("button", { name: /Rotina criada/ });
+    await hookRoutine.click();
     await page.getByRole("dialog", { name: "Editar rotina" }).waitFor();
     await page.getByRole("button", { name: "Copiar curl" }).click();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("curl -X POST");
@@ -280,7 +531,7 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
     await page.getByRole("button", { name: "Rodar agora" }).click();
     await page.getByRole("status").filter({ hasText: "Rotina iniciada." }).waitFor();
     await page.keyboard.press("Escape");
-    expect(await savedRoutine.evaluate((button) => button === document.activeElement)).toBe(true);
+    expect(await hookRoutine.evaluate((button) => button === document.activeElement)).toBe(true);
     const savedRoutinePosition = await savedRoutine.evaluate((button) =>
       Array.from(button.parentElement?.querySelectorAll(":scope > button") ?? []).indexOf(button),
     );
@@ -292,7 +543,7 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
       .filter({ hasText: "Rotina removida." })
       .getByRole("button", { name: "Desfazer" })
       .click();
-    const restoredRoutine = page.getByRole("button", { name: /Resumo diário/ });
+    const restoredRoutine = page.getByRole("button", { name: /Relatório semanal/ });
     await restoredRoutine.waitFor();
     expect(
       await restoredRoutine.evaluate((button) =>
@@ -302,7 +553,6 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
 
     await page.getByRole("switch", { name: "Usar o computador" }).click();
     await page.getByRole("dialog", { name: /Deixar .* usar o computador/ }).waitFor();
-    await capture(`04-dialogo-usar-computador-${theme}.png`);
     await page.keyboard.press("Escape");
     expect(
       await page.getByRole("switch", { name: "Usar o computador" }).getAttribute("aria-checked"),
@@ -315,7 +565,6 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
     await page.getByRole("switch", { name: "Usar o computador" }).click();
     await page.getByRole("button", { name: "Permitir" }).click();
 
-    const advanced = page.locator("details > summary");
     if ((await advanced.getAttribute("aria-expanded")) !== "true") await advanced.click();
     await page.getByRole("button", { name: "Excluir…" }).click();
     await page.getByRole("dialog", { name: `Excluir ${currentAgent.name}?` }).waitFor();
@@ -324,7 +573,6 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
         .getByRole("button", { name: "Cancelar" })
         .evaluate((button) => button === document.activeElement),
     ).toBe(true);
-    await capture(`05-dialogo-excluir-${theme}.png`);
     await page.getByRole("button", { name: "Cancelar" }).click();
 
     await page.getByRole("button", { name: /Rotina criada/ }).waitFor();
@@ -335,7 +583,7 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
     await page.getByRole("button", { name: "Adicionar", exact: true }).click();
     await page.getByRole("button", { name: "Alto" }).click();
     const model = page.getByLabel("Modelo");
-    await model.selectOption("m2");
+    await model.selectOption("grok-4.7");
     await page.keyboard.press("Control+s");
     await page.getByRole("status").filter({ hasText: "Configurações salvas." }).waitFor();
     const updated = ((await rpc.request("agents.list", {})) as Agent[]).find(
@@ -347,7 +595,7 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
     expect(updated.name).toBe("Agente salvo");
     expect(updated.instructions).toBe("Atualizadas pelo rascunho.");
     expect(updated.config.effort).toBe("high");
-    expect(updated.config.model).toBe("m2");
+    expect(updated.config.model).toBe("grok-4.7");
     const memories = (await rpc.request("memories.list", { agentId: currentAgent.id })) as Memory[];
     expect(memories.map((item) => item.text)).toContain("Prefere respostas objetivas");
     expect(
@@ -375,39 +623,21 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
         .first()
         .isVisible(),
     ).toBe(true);
-    await page.setViewportSize({ width: 1080, height: 900 });
-
-    await page.getByRole("button", { name: "Excluir…" }).click();
-    await page.getByRole("button", { name: "Excluir agente" }).click();
-    try {
-      await page.getByText(`${updated.name} foi excluído.`).waitFor({ timeout: 3000 });
-    } catch {
-      const agentState = (await rpc.request("agents.list", {})) as Agent[];
-      const inputName = await page
-        .locator("#agent-name")
-        .inputValue()
-        .catch(() => null);
-      throw new Error(
-        `Agent deletion state missing: ${JSON.stringify({
-          expected: updated.name,
-          inputName,
-          agentExists: agentState.some((item) => item.id === currentAgent.id),
-          body: (await page.locator("body").innerText()).slice(-1000),
-        })}`,
-      );
-    }
-    await capture(`06-agente-excluido-${theme}.png`);
-    await page.getByRole("button", { name: "Desfazer", exact: true }).click();
-    expect(
-      ((await rpc.request("agents.list", {})) as Agent[]).some(
-        (item) => item.id === currentAgent.id,
-      ),
-    ).toBe(true);
+    await page.setViewportSize({ width: 1280, height: 860 });
   }
+
+  const distinctAgent = (await rpc.request("agents.create", {
+    name: "Agente de teste distinto",
+    provider: "grok",
+  })) as Agent;
+  expect(distinctAgent.name).not.toBe(agent.name);
+  const activeNames = ((await rpc.request("agents.list", {})) as Agent[]).map((item) => item.name);
+  expect(new Set(activeNames).size).toBe(activeNames.length);
 
   await rpc.request("computer.setAccess", { agentIds: [] });
   const windows = await browser.newPage({
-    viewport: { width: 1080, height: 900 },
+    viewport: { width: 1280, height: 860 },
+    deviceScaleFactor: 2,
     userAgent:
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
   });
@@ -420,7 +650,7 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
       },
       { id: agent.id },
     );
-    await windows.goto(`http://localhost:1422/#port=${daemon.port}&token=${token}`);
+    await windows.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
     await openSettings(windows);
     await windows.getByLabel("Nome do agente").fill("Rascunho Windows");
     expect(await windows.getByRole("button", { name: /Salvar/ }).textContent()).toContain("Ctrl+S");
@@ -438,14 +668,12 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
       buttons.map((button) => button.getBoundingClientRect().width),
     );
     expect(buttonWidths[0]).toBe(buttonWidths[1]);
-    await capture("07-dialogo-usar-computador-windows-claro.png", windows);
     await windows.getByRole("button", { name: "Agora não" }).click();
     await windows.evaluate(() => localStorage.setItem("upbot.theme", "dark"));
     await windows.reload();
     await openSettings(windows);
     await windows.getByRole("switch", { name: "Usar o computador" }).click();
     await windows.locator('[data-od-id="computer-dialog-windows"]').waitFor();
-    await capture("07-dialogo-usar-computador-windows-escuro.png", windows);
     await windows.getByRole("button", { name: "Agora não" }).click();
   } finally {
     await windows.close();

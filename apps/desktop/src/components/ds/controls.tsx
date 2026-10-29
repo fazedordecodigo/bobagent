@@ -38,14 +38,19 @@ export function IconButton({
   return <button type="button" {...props} className={`${s.iconButton} ${className}`} />;
 }
 
-type FieldBase = { label: string; hint?: string; error?: string };
+type FieldBase = {
+  label: string;
+  hint?: string;
+  error?: string;
+  fieldClassName?: string | undefined;
+};
 type FieldProps = FieldBase &
   (
     | ({ multiline?: false } & InputHTMLAttributes<HTMLInputElement>)
     | ({ multiline: true } & TextareaHTMLAttributes<HTMLTextAreaElement>)
   );
 
-export function Field({ label, hint, error, ...props }: FieldProps) {
+export function Field({ label, hint, error, fieldClassName, ...props }: FieldProps) {
   const generatedId = useId();
   const id = props.id ?? generatedId;
   const description = error || hint;
@@ -66,7 +71,7 @@ export function Field({ label, hint, error, ...props }: FieldProps) {
     control = <input {...inputProps} {...shared} />;
   }
   return (
-    <div className={s.field}>
+    <div className={`${s.field} ${fieldClassName ?? ""}`}>
       <label htmlFor={id}>{label}</label>
       {control}
       {description && (

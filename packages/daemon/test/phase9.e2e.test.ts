@@ -183,7 +183,8 @@ describe("routines + attachments e2e", () => {
     await expect(c.request("routines.run", { id: r.id })).rejects.toMatchObject({
       code: "not_found",
     });
-    const response = await fetch(r.webhookUrl!, {
+    if (!r.webhookUrl) throw new Error("Expected a webhook URL");
+    const response = await fetch(r.webhookUrl, {
       method: "POST",
       headers: { authorization: `Bearer ${r.webhookToken}` },
     });

@@ -39,7 +39,6 @@ const ORIGIN_ALLOWLIST = new Set([
   "tauri://localhost",
   "http://tauri.localhost",
   "http://localhost:1420",
-  "http://localhost:1422",
 ]);
 
 function parseArgs(argv: string[]): { dataDir: string; agentsRoot: string } {

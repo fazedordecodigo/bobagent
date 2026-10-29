@@ -467,6 +467,7 @@ export default function App() {
   const appClass = [
     "app",
     `view-${appView}`,
+    view === "agent-settings" ? "agent-config-shell" : "",
     noPanel && view === "chat" ? "no-panel" : "",
     panelOpen && view === "chat" ? "panel-open" : "",
     sideOpen ? "side-open" : "",

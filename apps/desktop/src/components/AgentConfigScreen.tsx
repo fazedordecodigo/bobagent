@@ -30,10 +30,16 @@ import { Button, Field, SegmentedControl, Switch } from "./ds/controls";
 import {
   CalIcon,
   ChartIcon,
+  ChevIcon,
   ClockIcon,
+  CopyIcon,
+  CursorIcon,
+  EyeIcon,
+  HandIcon,
   HookIcon,
   MailIcon,
   PlaneIcon,
+  PlusIcon,
   ReceiptIcon,
   SheetIcon,
   UpbotSimboloCurrentcolorIcon,
@@ -203,28 +209,37 @@ export function AgentConfigScreen({
 
   const reload = useCallback(
     async (external = false) => {
-      const [memories, nextRoutines, access, config, nextAgent] = await Promise.all([
+      const [memories, nextRoutines, access, nextAgent] = await Promise.all([
         client.request("memories.list", { agentId }),
         client.request("routines.list", { agentId }),
         client.request("computer.access", {}),
-        client.request("agents.configOptions", { agentId }),
         client
           .request("agents.list", {})
           .then((items) => items.find((item) => item.id === agentId) ?? agentRef.current),
       ]);
+      let nextOptions: ConfigOption[] = [];
+      let nextOptionsError = "";
+      try {
+        const config = await client.request("agents.configOptions", { agentId });
+        nextOptions = config.configOptions;
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        nextOptionsError = `Não deu para carregar os modelos: ${message === "internal error" ? "erro interno" : message}`;
+      }
       const computerUse = access.agentIds.includes(agentId);
       const incoming = configFromServer(nextAgent, memories, nextRoutines, computerUse);
-      const modelOption = config.configOptions.find(
+      const modelOption = nextOptions.find(
         (option) => option.id === "model" || option.category === "model",
       );
-      const effortOption = config.configOptions.find((option) =>
+      const effortOption = nextOptions.find((option) =>
         /effort|reasoning|thought/i.test(`${option.id} ${option.name} ${option.category ?? ""}`),
       );
       incoming.model ??= modelOption?.currentValue || null;
       incoming.effort ??= effortOption?.currentValue || null;
       setRoutines(nextRoutines);
       setComputer(access);
-      setOptions(config.configOptions);
+      setOptions(nextOptions);
+      setOptionsError(nextOptionsError);
       setOptionsLoading(false);
       if (external) {
         setSaved((old) => {
@@ -248,9 +263,9 @@ export function AgentConfigScreen({
     let alive = true;
     setOptionsLoading(true);
     setOptionsError("");
-    void reload().catch((e: unknown) => {
+    void reload().catch(() => {
       if (alive) {
-        setOptionsError(e instanceof Error ? e.message : String(e));
+        setError("Não deu para carregar as configurações.");
         setOptionsLoading(false);
       }
     });
@@ -456,29 +471,40 @@ export function AgentConfigScreen({
 
   if (deleted) {
     return (
-      <section className={s.deleted}>
-        <h1>{agentName} foi excluído.</h1>
-        <p>As conversas continuam no histórico.</p>
-        <Button variant="primary" onClick={onHome}>
-          Voltar ao início
-        </Button>
-        {toast && (
-          <div role="status" className={s.toast}>
-            {toast.text}
-            {toast.undo && (
-              <button type="button" onClick={toast.undo}>
-                Desfazer
-              </button>
-            )}
-          </div>
-        )}
-      </section>
+      <div className={s.screen}>
+        <header className={s.top} data-agent-config-top="">
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label={`Voltar para ${agentName || "Sem nome"}`}
+          >
+            ‹ <span>{agentName || "Sem nome"}</span>
+          </button>
+          <span aria-hidden="true">/</span>
+          <strong>Configurações</strong>
+        </header>
+        <section className={s.deleted}>
+          <h1>{agentName} foi excluído.</h1>
+          <p>As conversas continuam no histórico.</p>
+          <Button onClick={onHome}>Voltar ao início</Button>
+          {toast && (
+            <div role="status" className={s.toast}>
+              {toast.text}
+              {toast.undo && (
+                <button type="button" onClick={toast.undo}>
+                  Desfazer
+                </button>
+              )}
+            </div>
+          )}
+        </section>
+      </div>
     );
   }
 
   return (
     <div className={s.screen}>
-      <header className={s.top}>
+      <header className={s.top} data-agent-config-top="">
         <button
           type="button"
           onClick={onBack}
@@ -489,7 +515,7 @@ export function AgentConfigScreen({
         <span aria-hidden="true">/</span>
         <strong>Configurações</strong>
       </header>
-      <div className={s.scroll}>
+      <div className={s.scroll} data-agent-config-scroll="">
         <main className={s.column}>
           <section className={s.identity}>
             <div className={s.avatarWrap}>
@@ -514,14 +540,16 @@ export function AgentConfigScreen({
                   ref={iconPopover}
                   className={s.popover}
                   id="agent-icons"
-                  aria-label="Ícones do agente"
+                  aria-label="Ícone do agente"
                   onKeyDown={(event) => {
                     if (event.key === "Escape") {
                       event.preventDefault();
                       setPopover(false);
+                      avatarButton.current?.focus();
                     }
                   }}
                 >
+                  <p className={s.popoverHint}>Ícone na lateral e nas notificações</p>
                   {ICONS.map((icon) => (
                     <button
                       key={icon}
@@ -531,9 +559,10 @@ export function AgentConfigScreen({
                       onClick={() => {
                         change({ icon: { icon } });
                         setPopover(false);
+                        avatarButton.current?.focus();
                       }}
                     >
-                      {<Mark icon={icon} />}
+                      <Mark icon={icon} />
                     </button>
                   ))}
                 </fieldset>
@@ -564,7 +593,8 @@ export function AgentConfigScreen({
               onChange={(event) => change({ instructions: event.target.value })}
             />
             <div className={s.counter}>
-              {draft.instructions.length.toLocaleString("pt-BR")} caracteres
+              <span>Escreva como falaria com alguém de confiança.</span>
+              <span>{draft.instructions.length.toLocaleString("pt-BR")} caracteres</span>
             </div>
           </section>
           <section className={s.section}>
@@ -612,7 +642,12 @@ export function AgentConfigScreen({
                   ))}
                 </select>
               </label>
-              {optionsError && <p className={s.error}>{optionsError}</p>}
+              {optionsError && (
+                <div className={`${s.row} ${s.modelErrorRow}`} role="status">
+                  <span />
+                  <p>{optionsError}</p>
+                </div>
+              )}
               {draft.provider === saved.provider &&
                 efforts &&
                 ["low", "medium", "high"].every((value) =>
@@ -621,7 +656,13 @@ export function AgentConfigScreen({
                   <div className={s.row}>
                     <div>
                       <b>Raciocínio</b>
-                      <p>Pensa mais antes de agir.</p>
+                      <p>
+                        {{
+                          low: "Responde mais rápido.",
+                          medium: "Equilíbrio entre tempo e cuidado.",
+                          high: "Pensa mais antes de agir.",
+                        }[draft.effort ?? ""] ?? ""}
+                      </p>
                     </div>
                     <SegmentedControl
                       label="Raciocínio"
@@ -693,6 +734,8 @@ export function AgentConfigScreen({
                 <p>Tarefas que o agente começa sozinho, num horário ou por webhook.</p>
               </div>
               <Button
+                small
+                aria-label="+ Nova rotina"
                 onClick={() => {
                   setRoutineDraft({
                     name: "",
@@ -706,7 +749,8 @@ export function AgentConfigScreen({
                   setDialog("routine");
                 }}
               >
-                + Nova rotina
+                <PlusIcon />
+                Nova rotina
               </Button>
             </div>
             <div className={s.box}>
@@ -738,7 +782,7 @@ export function AgentConfigScreen({
             <section className={s.section}>
               <h2>Acesso</h2>
               <div className={s.box}>
-                <div className={s.row}>
+                <div className={`${s.row} ${s.rowSplit}`}>
                   <div>
                     <b>Usar o computador</b>
                     <p>Ver a tela e controlar mouse e teclado. Pergunta antes de cada sessão.</p>
@@ -752,7 +796,7 @@ export function AgentConfigScreen({
                     }}
                   />
                 </div>
-                <div className={s.row}>
+                <div className={`${s.row} ${s.rowSplit}`}>
                   <div>
                     <b>Apps conectados</b>
                     <p>{appsText}</p>
@@ -765,21 +809,27 @@ export function AgentConfigScreen({
             </section>
           )}
           <details className={s.advanced}>
-            <summary>Avançado</summary>
+            <summary>
+              <ChevIcon aria-hidden="true" />
+              Avançado
+            </summary>
             <div className={s.box}>
               <div className={s.row}>
                 <b>Pasta de trabalho</b>
-                <code title={agent.workspacePath}>{abbreviatePath(agent.workspacePath)}</code>
-                <Button
-                  small
-                  onClick={() =>
-                    void navigator.clipboard
-                      .writeText(agent.workspacePath)
-                      .then(() => showToast("Caminho copiado."))
-                  }
-                >
-                  Copiar
-                </Button>
+                <div className={s.workdirControl}>
+                  <code title={agent.workspacePath}>{abbreviatePath(agent.workspacePath)}</code>
+                  <Button
+                    small
+                    aria-label="Copiar caminho"
+                    onClick={() =>
+                      void navigator.clipboard
+                        .writeText(agent.workspacePath)
+                        .then(() => showToast("Caminho copiado."))
+                    }
+                  >
+                    <CopyIcon />
+                  </Button>
+                </div>
               </div>
               {draft.provider === saved.provider &&
                 options
@@ -801,13 +851,17 @@ export function AgentConfigScreen({
                       </select>
                     </label>
                   ))}
-              <PermissionNotice provider={draft.provider} />
-              <div className={s.row}>
+              <div className={s.permissionNotice}>
+                <PermissionNotice provider={draft.provider} />
+              </div>
+              <div className={`${s.row} ${s.rowSplit}`}>
                 <div>
                   <b>Excluir agente</b>
                   <p>As rotinas param. As conversas continuam no histórico.</p>
                 </div>
-                <Button onClick={() => setDialog("delete")}>Excluir…</Button>
+                <Button className={s.deleteButton} onClick={() => setDialog("delete")}>
+                  Excluir…
+                </Button>
               </div>
             </div>
           </details>
@@ -826,6 +880,7 @@ export function AgentConfigScreen({
           </span>
           <Button
             variant="ghost"
+            small
             onClick={() => {
               setDraft(saved);
               setError("");
@@ -833,8 +888,8 @@ export function AgentConfigScreen({
           >
             Descartar
           </Button>
-          <Button variant="primary" disabled={!draft.name.trim()} onClick={() => void save()}>
-            Salvar {mod}S
+          <Button variant="primary" small disabled={!draft.name.trim()} onClick={() => void save()}>
+            Salvar <kbd>{mod}S</kbd>
           </Button>
         </div>
       )}
@@ -855,34 +910,67 @@ export function AgentConfigScreen({
           initialFocus='[data-action="allow"]'
           {...(isWindows ? { testId: "computer-dialog-windows" } : {})}
         >
-          <div className={s.dialogBody}>
-            <h2>Deixar {agent.name} usar o computador?</h2>
+          <div className={s.dialogHeader}>
+            <h2>Deixar {agentName} usar o computador?</h2>
             <p>Serve para tarefas em apps que não têm conexão direta.</p>
-            <ul>
-              <li>Vê a tela enquanto trabalha numa tarefa.</li>
-              <li>Move o mouse e digita. Você pode parar a qualquer momento com Esc.</li>
-              <li>Pergunta antes de cada sessão e antes de pagar, enviar ou apagar.</li>
+          </div>
+          <div className={s.computerBody}>
+            <ul className={s.computerItems}>
+              <li>
+                <EyeIcon />
+                <span>Vê a tela enquanto trabalha numa tarefa.</span>
+              </li>
+              <li>
+                <CursorIcon />
+                <span>
+                  Move o mouse e digita. Você pode parar a qualquer momento com <kbd>Esc</kbd>.
+                </span>
+              </li>
+              <li>
+                <HandIcon />
+                <span>Pergunta antes de cada sessão e antes de pagar, enviar ou apagar.</span>
+              </li>
             </ul>
-            <p>
+            <p className={s.computerNote}>
               {isWindows
                 ? "O Windows não pede permissão à parte. O agente não controla janelas abertas como administrador nem os avisos do Controle de Conta de Usuário."
                 : "Na primeira vez, o macOS pede as permissões de Gravação de Tela e Acessibilidade."}
             </p>
           </div>
           <footer className={isWindows ? s.windowsButtons : undefined}>
-            <Button
-              data-action="allow"
-              variant="primary"
-              onClick={() => {
-                change({ computerUse: true });
-                setDialog(null);
-              }}
-            >
-              Permitir
-            </Button>
-            <Button data-action="deny" onClick={() => setDialog(null)}>
-              Agora não
-            </Button>
+            {isWindows ? (
+              <>
+                <Button
+                  data-action="allow"
+                  variant="primary"
+                  onClick={() => {
+                    change({ computerUse: true });
+                    setDialog(null);
+                  }}
+                >
+                  Permitir
+                </Button>
+                <Button data-action="deny" onClick={() => setDialog(null)}>
+                  Agora não
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button data-action="deny" onClick={() => setDialog(null)}>
+                  Agora não
+                </Button>
+                <Button
+                  data-action="allow"
+                  variant="primary"
+                  onClick={() => {
+                    change({ computerUse: true });
+                    setDialog(null);
+                  }}
+                >
+                  Permitir
+                </Button>
+              </>
+            )}
           </footer>
         </LayerDialog>
       )}
@@ -937,7 +1025,7 @@ export function AgentConfigScreen({
         <LayerDialog
           title={routineDraft.id ? "Editar rotina" : "Nova rotina"}
           onClose={() => setDialog(null)}
-          initialFocus="h2"
+          initialFocus="input"
         >
           <RoutineEditor
             value={routineDraft}
@@ -978,9 +1066,17 @@ function Tag({ children }: { children: React.ReactNode }) {
 
 function createdDate(timestamp: number) {
   const date = new Date(timestamp);
-  const options: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
-  if (date.getFullYear() !== new Date().getFullYear()) options.year = "numeric";
-  return date.toLocaleDateString("pt-BR", options).replace(".", "");
+  const parts = new Intl.DateTimeFormat("pt-BR", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).formatToParts(date);
+  const day = parts.find((part) => part.type === "day")?.value;
+  const month = parts.find((part) => part.type === "month")?.value.replace(".", "");
+  const year = parts.find((part) => part.type === "year")?.value;
+  return [day, month, year !== String(new Date().getFullYear()) ? year : ""]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function RoutineEditor({
@@ -1018,15 +1114,19 @@ function RoutineEditor({
     <>
       <div className={s.dialogBody}>
         <h2 tabIndex={-1}>{value.id ? "Editar rotina" : "Nova rotina"}</h2>
+        <p className={s.dialogDescription}>
+          O agente começa a tarefa sozinho e pergunta antes de pagar, enviar ou apagar.
+        </p>
         <Field
           label="Nome"
+          fieldClassName={s.dialogField}
           maxLength={60}
           value={value.name}
           onChange={(event) => update({ name: event.target.value })}
         />
         <div className={s.formRow}>
           <label>
-            Quando
+            <span>Quando</span>
             <select
               value={value.when}
               onChange={(event) => update({ when: event.target.value as DraftRoutine["when"] })}
@@ -1040,28 +1140,33 @@ function RoutineEditor({
               )}
             </select>
           </label>
-          {["daily", "weekly"].includes(value.when) && (
-            <Field
-              label="Horário"
-              value={value.time}
-              placeholder={value.when === "weekly" ? "sex 17:00" : "09:00"}
-              error={
-                attempted && timeInvalid
-                  ? `Use o formato ${value.when === "weekly" ? "sex 17:00" : "09:00"}`
-                  : ""
-              }
-              onChange={(event) => update({ time: event.target.value })}
-            />
-          )}
+          <Field
+            label="Horário"
+            fieldClassName={s.dialogField}
+            className={s.monoInput}
+            disabled={!["daily", "weekly"].includes(value.when)}
+            value={value.time}
+            placeholder={value.when === "weekly" ? "sex 17:00" : "09:00"}
+            error={
+              attempted && timeInvalid
+                ? `Use o formato ${value.when === "weekly" ? "sex 17:00" : "09:00"}`
+                : ""
+            }
+            onChange={(event) => update({ time: event.target.value })}
+          />
         </div>
         <Field
           label="O que fazer"
+          fieldClassName={s.dialogField}
           multiline
           value={value.prompt}
           onChange={(event) => update({ prompt: event.target.value })}
         />
-        <div className={s.row}>
-          <span>Também começar por webhook</span>
+        <div className={s.webhookSwitch}>
+          <span>
+            Também começar por webhook
+            <small>Um endereço local que outro app pode chamar.</small>
+          </span>
           <Switch
             aria-label="Também começar por webhook"
             checked={value.hook}
@@ -1070,7 +1175,7 @@ function RoutineEditor({
         </div>
         {value.id && (
           <>
-            <div className={s.row}>
+            <div className={s.dialogSwitch}>
               <span>Ativa</span>
               <Switch
                 aria-label="Ativa"
@@ -1114,7 +1219,7 @@ function RoutineEditor({
       <footer>
         <span>
           {value.id && (
-            <Button variant="danger" onClick={onDelete}>
+            <Button variant="ghost" className={s.removeRoutine} onClick={onDelete}>
               Remover rotina
             </Button>
           )}
@@ -1128,7 +1233,7 @@ function RoutineEditor({
             if (!timeInvalid) onSave();
           }}
         >
-          Concluir
+          {value.id ? "Concluir" : "Criar rotina"}
         </Button>
       </footer>
     </>

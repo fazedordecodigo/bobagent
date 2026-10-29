@@ -102,12 +102,13 @@ export function fromRoutine(routine: Routine): DraftRoutine {
     };
   }
   const daily = /^daily\s+(\d{1,2}:\d{2})$/i.exec(schedule.trim());
-  if (daily) {
+  const dailyTime = daily?.[1];
+  if (dailyTime) {
     return {
       id: routine.id,
       name: routine.name,
       when: "daily",
-      time: daily[1]!,
+      time: dailyTime,
       schedule,
       prompt: routine.prompt,
       hook: routine.webhook,
@@ -117,13 +118,15 @@ export function fromRoutine(routine: Routine): DraftRoutine {
   const weekly = /^weekly\s+(sun|mon|tue|wed|thu|fri|sat)\s+(\d{1,2}:\d{2})$/i.exec(
     schedule.trim(),
   );
-  if (weekly) {
-    const day = EN_TO_PT[weekly[1]!.toLowerCase()]!;
+  const weeklyDay = weekly?.[1]?.toLowerCase();
+  const weeklyTime = weekly?.[2];
+  const day = weeklyDay ? EN_TO_PT[weeklyDay] : undefined;
+  if (weekly && day && weeklyTime) {
     return {
       id: routine.id,
       name: routine.name,
       when: "weekly",
-      time: `${day} ${weekly[2]}`,
+      time: `${day} ${weeklyTime}`,
       schedule,
       prompt: routine.prompt,
       hook: routine.webhook,
@@ -150,8 +153,9 @@ export function toRoutineSchedule(
   if (routine.when === "daily") return `daily ${routine.time}`;
   if (routine.when === "weekly") {
     const match = /^(dom|seg|ter|qua|qui|sex|sáb)\s+(\d{1,2}:\d{2})$/.exec(routine.time.trim());
+    const day = match?.[1];
     return match
-      ? `weekly ${PT_TO_EN[match[1]!] ?? match[1]} ${match[2]}`
+      ? `weekly ${PT_TO_EN[day ?? ""] ?? day ?? ""} ${match[2]}`
       : `weekly ${routine.time}`;
   }
   return routine.schedule;
@@ -177,7 +181,8 @@ export function routineWhenText(
 export function formatCustomSchedule(schedule: string | null): string {
   const interval = /^every\s+(\d+)\s*(m|h|d)$/i.exec(schedule?.trim() ?? "");
   if (!interval) return schedule ?? "Quando você pedir";
-  const unit = { m: "min", h: "h", d: "dias" }[interval[2]!.toLowerCase() as "m" | "h" | "d"];
+  const unitCode = interval[2]?.toLowerCase() as "m" | "h" | "d" | undefined;
+  const unit = unitCode ? { m: "min", h: "h", d: "dias" }[unitCode] : "";
   return `A cada ${interval[1]} ${unit}`;
 }
 
@@ -250,28 +255,36 @@ export function planMutations(saved: AgentConfig, draft: AgentConfig): AgentMuta
     }
   }
   const savedMemories = new Map(
-    saved.memories.filter((item) => item.id).map((item) => [item.id!, item]),
+    saved.memories
+      .filter((item): item is DraftMemory & { id: string } => !!item.id)
+      .map((item) => [item.id, item]),
   );
   const draftMemories = new Map(
-    draft.memories.filter((item) => item.id).map((item) => [item.id!, item]),
+    draft.memories
+      .filter((item): item is DraftMemory & { id: string } => !!item.id)
+      .map((item) => [item.id, item]),
   );
   for (const [id, item] of savedMemories) {
-    if (!draftMemories.has(id)) plan.push({ type: "memoryDelete", id });
-    else if (draftMemories.get(id)!.text !== item.text)
-      plan.push({ type: "memoryUpdate", id, text: draftMemories.get(id)!.text });
+    const next = draftMemories.get(id);
+    if (!next) plan.push({ type: "memoryDelete", id });
+    else if (next.text !== item.text) plan.push({ type: "memoryUpdate", id, text: next.text });
   }
   for (const item of draft.memories)
     if (!item.id) plan.push({ type: "memoryAdd", text: item.text });
   const savedRoutines = new Map(
-    saved.routines.filter((item) => item.id).map((item) => [item.id!, item]),
+    saved.routines
+      .filter((item): item is DraftRoutine & { id: string } => !!item.id)
+      .map((item) => [item.id, item]),
   );
   const draftRoutines = new Map(
-    draft.routines.filter((item) => item.id).map((item) => [item.id!, item]),
+    draft.routines
+      .filter((item): item is DraftRoutine & { id: string } => !!item.id)
+      .map((item) => [item.id, item]),
   );
   for (const [id, item] of savedRoutines) {
-    if (!draftRoutines.has(id)) plan.push({ type: "routineDelete", id });
+    const next = draftRoutines.get(id);
+    if (!next) plan.push({ type: "routineDelete", id });
     else {
-      const next = draftRoutines.get(id)!;
       if (!deepEqual({ ...item, id: undefined }, { ...next, id: undefined })) {
         plan.push({
           type: "routineUpdate",

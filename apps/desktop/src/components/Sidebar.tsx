@@ -187,7 +187,11 @@ export function Sidebar({
                 <button
                   type="button"
                   className="side-bot"
-                  aria-current={current === "chat" && selectedId === agent.id ? "true" : undefined}
+                  aria-current={
+                    (current === "chat" || current === "agent-settings") && selectedId === agent.id
+                      ? "true"
+                      : undefined
+                  }
                   onClick={() => onAgent(agent.id)}
                 >
                   <b>

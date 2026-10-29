@@ -37,7 +37,10 @@ function logRequest(method: string, params: unknown) {
 }
 
 const MODE_VALUES = ["ask-all", "default", "bypass", "accept-edits"];
-const MODEL_VALUES = ["m1", "m2"];
+const MODEL_VALUES =
+  process.env.FAKE_ACP_EFFORT === "1" ? ["grok-4.7-fast", "grok-4.7"] : ["m1", "m2"];
+const MODEL_NAMES =
+  process.env.FAKE_ACP_EFFORT === "1" ? ["Grok 4.7 Fast", "Grok 4.7"] : MODEL_VALUES;
 
 function configOptions() {
   return [
@@ -54,7 +57,7 @@ function configOptions() {
           {
             id: "effort",
             name: "Effort",
-            category: "effort",
+            category: "thought_level",
             type: "select",
             currentValue: state.config.effort ?? "medium",
             options: ["low", "medium", "high"].map((value) => ({ value, name: value })),
@@ -66,8 +69,11 @@ function configOptions() {
       name: "Model",
       category: "model",
       type: "select",
-      currentValue: state.config.model ?? "m1",
-      options: MODEL_VALUES.map((v) => ({ value: v, name: v })),
+      currentValue: state.config.model ?? MODEL_VALUES[0],
+      options: MODEL_VALUES.map((value, index) => ({
+        value,
+        name: MODEL_NAMES[index] ?? value,
+      })),
     },
   ];
 }
@@ -344,7 +350,7 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
   }
 
   if (text === "switchmodel") {
-    state.config.model = "m2";
+    state.config.model = MODEL_VALUES[1];
     saveState();
     await ctx.client.notify("session/update", {
       sessionId,
@@ -421,7 +427,7 @@ acp
   .onRequest("session/set_config_option", async (ctx) => {
     const params = ctx.params as { configId: string; value: string };
     logRequest("session/set_config_option", params);
-    if (params.configId === "mode" || params.configId === "model") {
+    if (params.configId === "mode" || params.configId === "model" || params.configId === "effort") {
       state.config[params.configId] = params.value;
       saveState();
     }
