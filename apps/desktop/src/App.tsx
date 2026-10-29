@@ -183,6 +183,9 @@ export default function App() {
       client.onReconnect(() => {
         void refreshAll().catch(() => {});
       }),
+      client.onFailure((e) => {
+        if (alive) setError(e.message);
+      }),
     ];
     return () => {
       alive = false;
