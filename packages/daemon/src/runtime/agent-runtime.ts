@@ -89,8 +89,8 @@ export class AgentRuntime {
   private sessionConfigApplied = false;
   private configOptions: ConfigOption[] = [];
   private openTextItem: { id: string; kind: "agent_message" | "agent_thought" } | null = null;
-  // toolCallId -> item id for the running turn; avoids a per-update lookup in items
-  private toolCallItems = new Map<string, string>();
+  // toolCallId -> cached item for the running turn; skips the items lookup entirely
+  private toolCallItems = new Map<string, ChatItem>();
   private pending = new Map<string, PendingEntry>();
   private cancelTimer: ReturnType<typeof setTimeout> | null = null;
   private draining = false;
@@ -681,23 +681,25 @@ export class AgentRuntime {
           status: u.status,
           detail: u.detail,
         });
-        this.toolCallItems.set(u.toolCallId, item.id);
+        this.toolCallItems.set(u.toolCallId, item);
         this.broadcast("item.created", item);
         break;
       }
       case "tool_call_update": {
-        const mappedId = this.toolCallItems.get(u.toolCallId);
-        const item = mappedId
-          ? this.store.getItem(mappedId)
-          : this.store.findToolCallItem(turn.id, u.toolCallId);
+        const item =
+          this.toolCallItems.get(u.toolCallId) ??
+          this.store.findToolCallItem(turn.id, u.toolCallId);
         if (item?.kind !== "tool_call") return;
-        const updated = this.store.updateItemData(item.id, {
+        const data = {
           toolCallId: item.toolCallId,
           title: u.title ?? item.title,
           toolKind: item.toolKind,
           status: u.status ?? item.status,
           detail: u.detail === undefined ? item.detail : u.detail,
-        });
+        };
+        this.store.writeItemData(item.id, data);
+        const updated = { ...item, ...data, updatedAt: Date.now() } as ChatItem;
+        this.toolCallItems.set(u.toolCallId, updated);
         this.broadcast("item.updated", updated);
         break;
       }

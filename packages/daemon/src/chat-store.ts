@@ -111,10 +111,14 @@ export class ChatStore {
     return r ? rowToItem(r) : null;
   }
 
-  updateItemData(id: string, data: object): ChatItem {
+  writeItemData(id: string, data: object): void {
     this.db
       .query("UPDATE items SET data_json = ?, updated_at = ? WHERE id = ?")
       .run(JSON.stringify(data), Date.now(), id);
+  }
+
+  updateItemData(id: string, data: object): ChatItem {
+    this.writeItemData(id, data);
     return this.getItem(id)!;
   }
 

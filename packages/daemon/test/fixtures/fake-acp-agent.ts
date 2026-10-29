@@ -9,6 +9,8 @@
 //   think:<t>      -> thought chunk then message chunk <t>
 //   tool           -> tool_call pending -> request_permission (4 options)
 //                     -> tool_call_update -> message "permission:<optionId|cancelled>"
+//   tools          -> tool_call tc-a + tc-b, interleaved tool_call_updates (incl. an
+//                     orphan update for tc-orphan) -> message "tools:done"
 //   slow           -> a chunk every 100ms; responds to session/cancel
 //   ignorecancel   -> streams forever, ignores session/cancel
 //   crash          -> one chunk then process.exit(1)
@@ -309,6 +311,39 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
       },
     });
     await say("agent_message_chunk", `permission:${selected ?? "cancelled"}`);
+    return { stopReason: "end_turn" };
+  }
+
+  if (text === "tools") {
+    const toolCall = (toolCallId: string, title: string) =>
+      ctx.client.notify("session/update", {
+        sessionId,
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId,
+          title,
+          kind: "execute",
+          status: "pending",
+        },
+      });
+    const toolUpdate = (toolCallId: string, status: string, title?: string) =>
+      ctx.client.notify("session/update", {
+        sessionId,
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId,
+          status,
+          ...(title === undefined ? {} : { title }),
+        },
+      });
+    await toolCall("tc-a", "Tool A");
+    await toolCall("tc-b", "Tool B");
+    await toolUpdate("tc-a", "in_progress");
+    await toolUpdate("tc-b", "completed");
+    // update for a toolCallId the daemon never saw: must be ignored
+    await toolUpdate("tc-orphan", "completed");
+    await toolUpdate("tc-a", "completed", "Tool A renamed");
+    await say("agent_message_chunk", "tools:done");
     return { stopReason: "end_turn" };
   }
 
