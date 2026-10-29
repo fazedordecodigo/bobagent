@@ -4,158 +4,9 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Agent } from "@upbot/protocol";
+import { DAEMON, DaemonClient, type DaemonHandle, ROOT, startDaemon, waitForExit } from "./helpers";
 
-const ROOT = join(import.meta.dir, "../../..");
-const DAEMON = join(ROOT, "packages/daemon/src/main.ts");
 const TOKEN = `test-token-${crypto.randomUUID()}`;
-
-type Pending = { resolve: (v: unknown) => void; reject: (e: unknown) => void };
-
-class DaemonClient {
-  ws: WebSocket;
-  private pending = new Map<string, Pending>();
-  private eventWaiters: { event: string; resolve: (d: unknown) => void }[] = [];
-  events: { event: string; data: unknown }[] = [];
-
-  private constructor(ws: WebSocket) {
-    this.ws = ws;
-    ws.addEventListener("message", (ev) => {
-      const msg = JSON.parse(String(ev.data));
-      if ("event" in msg) {
-        this.events.push(msg);
-        const idx = this.eventWaiters.findIndex((w) => w.event === msg.event);
-        if (idx >= 0) this.eventWaiters.splice(idx, 1)[0]?.resolve(msg.data);
-      } else if ("id" in msg) {
-        const p = this.pending.get(msg.id);
-        if (p) {
-          this.pending.delete(msg.id);
-          if ("error" in msg)
-            p.reject(Object.assign(new Error(msg.error.message), { code: msg.error.code }));
-          else p.resolve(msg.result);
-        }
-      }
-    });
-  }
-
-  static connect(port: number, token: string): Promise<DaemonClient> {
-    return new Promise((resolve, reject) => {
-      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${encodeURIComponent(token)}`);
-      const timer = setTimeout(() => reject(new Error("ws connect timeout")), 5000);
-      ws.addEventListener("open", () => {
-        clearTimeout(timer);
-        resolve(new DaemonClient(ws));
-      });
-      ws.addEventListener("error", () => {
-        clearTimeout(timer);
-        reject(new Error("ws connect failed"));
-      });
-    });
-  }
-
-  static connectExpectFail(port: number, token: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${encodeURIComponent(token)}`);
-      const timer = setTimeout(() => reject(new Error("ws unexpectedly hung")), 5000);
-      ws.addEventListener("open", () => {
-        clearTimeout(timer);
-        reject(new Error("ws connected but should have been rejected"));
-      });
-      ws.addEventListener("error", () => {
-        clearTimeout(timer);
-        resolve();
-      });
-      ws.addEventListener("close", () => {
-        clearTimeout(timer);
-        resolve();
-      });
-    });
-  }
-
-  request(method: string, params: unknown = {}): Promise<unknown> {
-    const id = crypto.randomUUID();
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.ws.send(JSON.stringify({ id, method, params }));
-      setTimeout(() => {
-        if (this.pending.delete(id)) reject(new Error(`request ${method} timed out`));
-      }, 5000);
-    });
-  }
-
-  waitForEvent(event: string, timeoutMs = 5000): Promise<unknown> {
-    const existing = this.events.find((e) => e.event === event);
-    if (existing) return Promise.resolve(existing.data);
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`event ${event} timeout`)), timeoutMs);
-      this.eventWaiters.push({
-        event,
-        resolve: (d) => {
-          clearTimeout(timer);
-          resolve(d);
-        },
-      });
-    });
-  }
-
-  close() {
-    this.ws.close();
-  }
-}
-
-type DaemonHandle = {
-  proc: ReturnType<typeof Bun.spawn>;
-  port: number;
-};
-
-async function startDaemon(dataDir: string, agentsRoot: string): Promise<DaemonHandle> {
-  const proc = Bun.spawn(["bun", DAEMON, "--data-dir", dataDir, "--agents-root", agentsRoot], {
-    env: { ...process.env },
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    cwd: ROOT,
-  });
-  (proc.stdin as { write: (s: string) => void; flush: () => void }).write(`${TOKEN}\n`);
-  (proc.stdin as { flush: () => void }).flush();
-  const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  const port = await new Promise<number>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("daemon did not print READY")), 15000);
-    const pump = async () => {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) {
-          reject(new Error("daemon stdout closed before READY"));
-          return;
-        }
-        buf += decoder.decode(value);
-        const idx = buf.indexOf("\n");
-        if (idx >= 0) {
-          const line = buf.slice(0, idx);
-          buf = buf.slice(idx + 1);
-          if (line.startsWith("UPBOT_READY ")) {
-            clearTimeout(timer);
-            resolve(JSON.parse(line.slice("UPBOT_READY ".length)).port);
-            return;
-          }
-        }
-      }
-    };
-    pump().catch(reject);
-  });
-  reader.releaseLock();
-  return { proc, port };
-}
-
-function waitForExit(proc: ReturnType<typeof Bun.spawn>, ms: number): Promise<number> {
-  return Promise.race([
-    proc.exited,
-    new Promise<number>((_, reject) =>
-      setTimeout(() => reject(new Error("process did not exit")), ms),
-    ),
-  ]);
-}
 
 describe("daemon e2e", () => {
   let dataDir: string;
@@ -166,7 +17,7 @@ describe("daemon e2e", () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), "upbotd-data-"));
     agentsRoot = mkdtempSync(join(tmpdir(), "upbotd-agents-"));
-    daemon = await startDaemon(dataDir, agentsRoot);
+    daemon = await startDaemon(dataDir, agentsRoot, TOKEN);
   });
 
   afterAll(async () => {
@@ -282,7 +133,7 @@ describe("daemon e2e", () => {
     daemon.proc.kill("SIGTERM");
     await waitForExit(daemon.proc, 5000);
 
-    const daemon2 = await startDaemon(dataDir, agentsRoot);
+    const daemon2 = await startDaemon(dataDir, agentsRoot, TOKEN);
     try {
       const c2 = await DaemonClient.connect(daemon2.port, TOKEN);
       const list = (await c2.request("agents.list", {})) as Agent[];
@@ -315,6 +166,7 @@ describe("daemon e2e", () => {
     const d = await startDaemon(
       mkdtempSync(join(tmpdir(), "upbotd-data2-")),
       mkdtempSync(join(tmpdir(), "upbotd-agents2-")),
+      TOKEN,
     );
     (d.proc.stdin as { end: () => void }).end();
     await waitForExit(d.proc, 5000);
