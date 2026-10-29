@@ -15,6 +15,11 @@ export function logVersion(version: string | undefined): string | undefined {
   return SEMVER_CORE.test(version) ? version : "invalid";
 }
 
+/** Only an update that a check just returned is installed; any error re-checks, as before. */
+export function pendingUpdate<U>(state: string, update: U | null): U | null {
+  return state === "available" ? update : null;
+}
+
 export async function runUpdater<U extends UpdateLike>(
   pending: U | null,
   check: () => Promise<U | null>,

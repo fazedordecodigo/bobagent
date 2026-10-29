@@ -1,7 +1,7 @@
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useState } from "react";
 import { errorMessage } from "../lib/log";
-import { runUpdater, type UpdaterPhase } from "../lib/updater";
+import { pendingUpdate, runUpdater, type UpdaterPhase } from "../lib/updater";
 
 export function UpdateButton() {
   const [state, setState] = useState<
@@ -14,8 +14,7 @@ export function UpdateButton() {
   const run = async () => {
     setError(null);
     setFailedPhase(null);
-    const pending =
-      state === "available" || (state === "error" && failedPhase === "install") ? update : null;
+    const pending = pendingUpdate(state, update);
     setState(pending ? "installing" : "checking");
     const outcome = await runUpdater(pending, () => check());
     if (outcome.kind === "installed") {

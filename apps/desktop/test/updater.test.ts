@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { logVersion, runUpdater, type UpdateLike } from "../src/lib/updater";
+import { logVersion, pendingUpdate, runUpdater, type UpdateLike } from "../src/lib/updater";
 
 function fakeUpdate(downloadAndInstall: () => Promise<void> = async () => {}) {
   return { version: "2.10.1", downloadAndInstall } satisfies UpdateLike;
@@ -93,4 +93,12 @@ test("remote version is logged only as plain x.y.z", async () => {
   expect(logVersion("2.10.1")).toBe("2.10.1");
   expect(logVersion("2.10.1\nforged")).toBe("invalid");
   expect(logVersion(undefined)).toBeUndefined();
+});
+
+test("only a freshly checked update is installed; errors re-check", () => {
+  const update = fakeUpdate();
+  expect(pendingUpdate("available", update)).toBe(update);
+  expect(pendingUpdate("error", update)).toBeNull();
+  expect(pendingUpdate("none", null)).toBeNull();
+  expect(pendingUpdate("idle", update)).toBeNull();
 });
