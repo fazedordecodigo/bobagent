@@ -29,6 +29,25 @@ import type { Voice } from "./voice";
 
 export type Broadcast = (event: string, data: unknown) => void;
 
+type ErrorDiagnostics = { type: string; code?: string; cause?: ErrorDiagnostics };
+const IDENT = /^[A-Za-z_$][\w$]{0,63}$/;
+const CODE = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
+
+// Messages and stacks are omitted because they can embed URLs or tokens.
+function errorDiagnostics(e: unknown, depth = 0): ErrorDiagnostics {
+  if (typeof e !== "object" || e === null) return { type: typeof e };
+  const error = e as { constructor?: { name?: unknown }; code?: unknown; cause?: unknown };
+  const type =
+    typeof error.constructor?.name === "string" && IDENT.test(error.constructor.name)
+      ? error.constructor.name
+      : "unknown";
+  const diagnostics: ErrorDiagnostics = { type };
+  if (typeof error.code === "string" && CODE.test(error.code)) diagnostics.code = error.code;
+  if (error.cause !== undefined && depth < 3)
+    diagnostics.cause = errorDiagnostics(error.cause, depth + 1);
+  return diagnostics;
+}
+
 export class Rpc {
   constructor(
     private agents: AgentStore,
@@ -94,15 +113,24 @@ export class Rpc {
       const durationMs = Math.round(performance.now() - startedAt);
       if (e instanceof RpcError) {
         if (e.code === "internal" || e.code === "busy" || e.cause !== undefined) {
-          console.error("[upbotd] rpc failed", { method, code: e.code, durationMs, error: e });
+          console.error(
+            "[upbotd] rpc failed",
+            JSON.stringify({ method, code: e.code, durationMs, error: errorDiagnostics(e) }),
+          );
         }
         return JSON.stringify({ id, error: { code: e.code, message: e.message } });
       }
       if (e instanceof ProviderError) {
-        console.error("[upbotd] rpc failed", { method, code: e.code, durationMs, error: e });
+        console.error(
+          "[upbotd] rpc failed",
+          JSON.stringify({ method, code: e.code, durationMs, error: errorDiagnostics(e) }),
+        );
         return JSON.stringify({ id, error: { code: e.code, message: e.message } });
       }
-      console.error("[upbotd] handler error", { method, durationMs, error: e });
+      console.error(
+        "[upbotd] handler error",
+        JSON.stringify({ method, durationMs, error: errorDiagnostics(e) }),
+      );
       return JSON.stringify({ id, error: { code: "internal", message: "internal error" } });
     }
   }
