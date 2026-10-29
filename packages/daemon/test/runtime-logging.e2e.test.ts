@@ -103,6 +103,7 @@ describe("runtime turn-lifecycle logging", () => {
     expect(entry).toContain(`agent=${agent.id}`);
     expect(entry).toContain("provider=devin");
     expect(entry).toContain("errorType=");
+    expect(entry).toMatch(/code=(-?\d+|[a-z_]{1,32})/);
     expect(stderrText.includes(secret)).toBe(false);
   });
 
@@ -138,6 +139,13 @@ describe("runtime turn-lifecycle logging", () => {
     expect(entry).toContain(`agent=${agent.id}`);
     expect(entry).toContain("exit=");
     expect(entry).toContain("detail=yes");
+    expect(stderrText.includes(secret)).toBe(false);
+
+    // onProcessExit ends the turn before the in-flight prompt rejects, so the
+    // drain catch also reports the runTurn rejection as an unexpected failure.
+    const unexpected = await waitForLog("turn failed unexpectedly:", turn.id);
+    expect(unexpected).toContain(`agent=${agent.id}`);
+    expect(unexpected).toContain("errorType=");
     expect(stderrText.includes(secret)).toBe(false);
   });
 

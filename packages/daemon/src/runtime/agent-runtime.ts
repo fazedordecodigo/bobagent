@@ -83,12 +83,17 @@ export function errorFields(e: unknown): string {
   let code: string | undefined;
   try {
     if (e instanceof RpcError) {
-      if (/^[a-z_]{1,32}$/.test(e.code)) code = e.code;
+      const c = e.code as unknown;
+      // Numeric ACP/JSON-RPC codes are bounded metadata, never free text.
+      if (typeof c === "number" && Number.isInteger(c)) code = String(c);
+      else if (typeof c === "string" && (/^[a-z_]{1,32}$/.test(c) || /^-?\d{1,10}$/.test(c)))
+        code = c;
     } else if (e instanceof ProviderError) {
       code = e.code;
     } else {
       const c = (e as { code?: unknown } | null)?.code;
-      if (typeof c === "string" && ERRNO_RE.test(c)) code = c;
+      if (typeof c === "number" && Number.isInteger(c)) code = String(c);
+      else if (typeof c === "string" && ERRNO_RE.test(c)) code = c;
     }
   } catch {}
   return code ? `errorType=${type} code=${code}` : `errorType=${type}`;
