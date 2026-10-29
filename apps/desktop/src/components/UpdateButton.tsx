@@ -1,6 +1,7 @@
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useState } from "react";
-import { errorMessage, logError, logInfo } from "../lib/log";
+import { errorMessage } from "../lib/log";
+import { runUpdater, type UpdaterPhase } from "../lib/updater";
 
 export function UpdateButton() {
   const [state, setState] = useState<
@@ -8,31 +9,28 @@ export function UpdateButton() {
   >("idle");
   const [update, setUpdate] = useState<Update | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [failedPhase, setFailedPhase] = useState<UpdaterPhase | null>(null);
   if (!("__TAURI_INTERNALS__" in window)) return null;
   const run = async () => {
     setError(null);
-    try {
-      if (state === "available" && update) {
-        setState("installing");
-        await update.downloadAndInstall();
-        logInfo("updater.installed", { version: update.version });
-        setState("done");
-        return;
-      }
-      setState("checking");
-      const u = await check();
-      setUpdate(u);
-      setState(u ? "available" : "none");
-    } catch (e) {
-      const message = errorMessage(e);
-      logError("updater.failed", {
-        phase: state === "installing" ? "install" : "check",
-        version: update?.version,
-        error: message,
-      });
-      setError(message);
-      setState("error");
+    setFailedPhase(null);
+    const pending =
+      state === "available" || (state === "error" && failedPhase === "install") ? update : null;
+    setState(pending ? "installing" : "checking");
+    const outcome = await runUpdater(pending, () => check());
+    if (outcome.kind === "installed") {
+      setState("done");
+      return;
     }
+    if (outcome.kind === "checked") {
+      setUpdate(outcome.update);
+      setState(outcome.update ? "available" : "none");
+      return;
+    }
+    setUpdate(outcome.update);
+    setFailedPhase(outcome.phase);
+    setError(errorMessage(outcome.error));
+    setState("error");
   };
   const label = {
     idle: "Check for updates",
@@ -41,7 +39,7 @@ export function UpdateButton() {
     available: `Install ${update?.version ?? "update"}`,
     installing: "Installing…",
     done: "Restart UpBot to finish",
-    error: "Update check failed",
+    error: failedPhase === "install" ? "Update install failed" : "Update check failed",
   }[state];
   return (
     <button
