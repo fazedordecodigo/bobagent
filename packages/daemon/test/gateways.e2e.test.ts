@@ -4,7 +4,13 @@ setDefaultTimeout(30000);
 
 import { rmSync } from "node:fs";
 import type { Agent, ChatItem, Gateway, VaultEntry } from "@upbot/protocol";
-import { splitText } from "../src/gateways/common";
+import {
+  INITIAL_BACKOFF_MS,
+  MAX_BACKOFF_MS,
+  ReconnectBackoff,
+  STABLE_CONNECTION_MS,
+  splitText,
+} from "../src/gateways/common";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -36,6 +42,20 @@ test("splitText keeps chunks under the limit", () => {
   expect(splitText("x".repeat(95), 40).map((p) => p.length)).toEqual([40, 40, 15]);
 });
 
+test("ReconnectBackoff resets only after a connection stayed healthy", () => {
+  let now = 0;
+  const b = new ReconnectBackoff(() => now);
+  expect([b.next(), b.next(), b.next()]).toEqual([1000, 2000, 4000]);
+  b.markHealthy();
+  now += STABLE_CONNECTION_MS - 1;
+  expect(b.next()).toBe(8000);
+  b.markHealthy();
+  now += STABLE_CONNECTION_MS;
+  expect(b.next()).toBe(INITIAL_BACKOFF_MS);
+  for (let i = 0; i < 10; i++) b.next();
+  expect(b.next()).toBe(MAX_BACKOFF_MS);
+});
+
 describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
   let dataDir: string;
   let agentsRoot: string;
@@ -54,6 +74,9 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
   const slackEnvelopes: Json[] = [];
   const discordSent: { channel: string; body: Json }[] = [];
   let discordIdentify: Json | null = null;
+  let badIdentifies = 0;
+  const slackFlapOpens: number[] = [];
+  const discordFlapIdentifies: number[] = [];
   let updateId = 1;
   let tg2FailSend = false;
   let tg2FailPoll = false;
@@ -66,7 +89,8 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
         const u = new URL(req.url);
         const port = server.port;
         if (u.pathname === "/slack-ws" || u.pathname === "/discord-ws") {
-          return server.upgrade(req, { data: { kind: u.pathname } })
+          const flap = u.searchParams.has("flap");
+          return server.upgrade(req, { data: { kind: u.pathname, flap } })
             ? undefined
             : new Response("no", { status: 400 });
         }
@@ -106,9 +130,10 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
           if (method === "auth.test")
             return Response.json({ ok: auth === "Bearer xoxb-1", user_id: "UBOT" });
           if (method === "apps.connections.open") {
+            const flap = auth === "Bearer xapp-flap";
             return Response.json({
-              ok: auth === "Bearer xapp-1",
-              url: `ws://127.0.0.1:${port}/slack-ws`,
+              ok: auth === "Bearer xapp-1" || flap,
+              url: `ws://127.0.0.1:${port}/slack-ws${flap ? "?flap=1" : ""}`,
             });
           }
           if (method === "chat.postMessage") {
@@ -127,8 +152,12 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
       },
       websocket: {
         open(ws) {
-          const kind = (ws.data as { kind: string }).kind;
-          if (kind === "/slack-ws") {
+          const { kind, flap } = ws.data as { kind: string; flap: boolean };
+          if (kind === "/slack-ws" && flap) {
+            slackFlapOpens.push(Date.now());
+            ws.send(JSON.stringify({ type: "hello" }));
+            ws.close(1011, "flap");
+          } else if (kind === "/slack-ws") {
             ws.send(JSON.stringify({ type: "hello" }));
             for (const e of slackEnvelopes.splice(0)) ws.send(JSON.stringify(e));
           } else {
@@ -142,9 +171,21 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
             return;
           }
           if (msg.op !== 2) return;
-          discordIdentify = msg.d as Json;
+          const d = msg.d as Json;
+          if (d.token === "DC-BAD") {
+            badIdentifies++;
+            ws.close(4004, "Authentication failed");
+            return;
+          }
           const dispatch = (s: number, t: string, d: Json) =>
             ws.send(JSON.stringify({ op: 0, s, t, d }));
+          if (d.token === "DC-FLAP") {
+            discordFlapIdentifies.push(Date.now());
+            dispatch(1, "READY", { user: { id: "FLAPBOT" } });
+            ws.close(4000, "flap");
+            return;
+          }
+          discordIdentify = d;
           dispatch(1, "READY", { user: { id: "BOTID" } });
           const author = { id: "D1", username: "dana" };
           dispatch(2, "MESSAGE_CREATE", {
@@ -447,5 +488,62 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
       tg2FailPoll = false;
       if (gatewayId) await c.request("gateways.delete", { id: gatewayId }).catch(() => {});
     }
+  });
+
+  test("discord: a fatal close code reports error and stops reconnecting", async () => {
+    const g = (await c.request("gateways.create", {
+      kind: "discord",
+      name: "DiscordBad",
+      agentId: a.id,
+      tokens: { botToken: "DC-BAD" },
+    })) as Gateway;
+    let gw: Gateway | undefined;
+    for (let i = 0; i < 100 && gw?.status !== "error"; i++) {
+      gw = ((await c.request("gateways.list", {})) as Gateway[]).find((x) => x.id === g.id);
+      await Bun.sleep(50);
+    }
+    expect(gw?.status).toBe("error");
+    expect(gw?.error).toContain("4004");
+    await Bun.sleep(1500);
+    expect(badIdentifies).toBe(1);
+    await c.request("gateways.delete", { id: g.id });
+  });
+
+  // Sockets that open (Slack) or reach READY (Discord) and then close right away must keep
+  // backing off: 1 s, 2 s, 4 s between reconnects instead of a fixed 1 s loop.
+  const expectBackoffGaps = (times: number[]) => {
+    const gaps = times.slice(1).map((t, i) => t - (times[i] ?? t));
+    expect(gaps[0]).toBeGreaterThanOrEqual(900);
+    expect(gaps[1]).toBeGreaterThanOrEqual(1800);
+    expect(gaps[2]).toBeGreaterThanOrEqual(3600);
+  };
+
+  test("slack: sockets that open and promptly close reconnect with exponential backoff", async () => {
+    const g = (await c.request("gateways.create", {
+      kind: "slack",
+      name: "SlackFlap",
+      agentId: a.id,
+      tokens: { botToken: "xoxb-1", appToken: "xapp-flap" },
+    })) as Gateway;
+    await waitFor(() => (slackFlapOpens.length >= 4 ? true : undefined), 20000);
+    await c.request("gateways.delete", { id: g.id });
+    expectBackoffGaps(slackFlapOpens);
+    const gw = ((await c.request("gateways.list", {})) as Gateway[]).find((x) => x.id === g.id);
+    expect(gw).toBeUndefined();
+  });
+
+  test("discord: nonfatal closes right after READY reconnect with exponential backoff", async () => {
+    const g = (await c.request("gateways.create", {
+      kind: "discord",
+      name: "DiscordFlap",
+      agentId: a.id,
+      tokens: { botToken: "DC-FLAP" },
+    })) as Gateway;
+    await waitFor(() => (discordFlapIdentifies.length >= 2 ? true : undefined), 20000);
+    const gw = ((await c.request("gateways.list", {})) as Gateway[]).find((x) => x.id === g.id);
+    expect(gw?.status).not.toBe("error");
+    await waitFor(() => (discordFlapIdentifies.length >= 4 ? true : undefined), 20000);
+    await c.request("gateways.delete", { id: g.id });
+    expectBackoffGaps(discordFlapIdentifies);
   });
 });
