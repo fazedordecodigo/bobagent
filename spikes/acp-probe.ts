@@ -6,13 +6,12 @@
 // Usage: bun spikes/acp-probe.ts <name> -- <cmd...>
 // Writes spikes/out/acp-<name>.json
 
-import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { Readable, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import * as acp from "@agentclientprotocol/sdk";
+import { type AcpProcess, fmtErr, spawnAcp, withTimeout } from "./acp-util";
 
 const STEP_TIMEOUT_MS = 120_000;
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -56,79 +55,12 @@ function redactSecrets(s: string): string {
     .replace(/\b[A-Za-z0-9_-]{48,}\b/g, (m) => (m.length >= 48 ? "<redacted>" : m));
 }
 
-function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout after ${ms}ms in ${label}`)), ms);
-    p.then(
-      (v) => {
-        clearTimeout(t);
-        resolve(v);
-      },
-      (e) => {
-        clearTimeout(t);
-        reject(e);
-      },
-    );
-  });
-}
-
-function fmtErr(e: unknown): string {
-  if (e instanceof Error) {
-    const anyE = e as { code?: unknown; data?: unknown };
-    return `${e.name}: ${e.message}${anyE.code !== undefined ? ` (code ${String(anyE.code)})` : ""}${anyE.data !== undefined ? ` data=${JSON.stringify(anyE.data)}` : ""}`;
-  }
-  return String(e);
-}
-
-class ProcHandle {
-  child: ChildProcess;
-  stderrLines: string[] = [];
-  firstStdoutBytes = "";
-  stdout: ReadableStream<Uint8Array>;
-  stdin: WritableStream<Uint8Array>;
-
-  constructor(cmd: string[], cwd: string) {
-    this.child = spawn(cmd[0]!, cmd.slice(1), {
-      cwd,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, NO_COLOR: "1" },
-    });
-    this.child.stderr?.on("data", (d: Buffer) => {
-      const lines = d.toString("utf8").split("\n");
-      for (const line of lines) this.stderrLines.push(line);
-      if (this.stderrLines.length > 200) this.stderrLines = this.stderrLines.slice(-200);
-    });
-    const stdoutNode = this.child.stdout!;
-    const self = this;
-    let captured = 0;
-    const tap = new TransformStream<Uint8Array, Uint8Array>({
-      transform(chunk, controller) {
-        if (captured < 4096) {
-          self.firstStdoutBytes += Buffer.from(chunk).toString("utf8");
-          captured += chunk.length;
-        }
-        controller.enqueue(chunk);
-      },
-    });
-    const webOut = Readable.toWeb(stdoutNode) as ReadableStream<Uint8Array>;
-    this.stdout = webOut.pipeThrough(tap);
-    this.stdin = Writable.toWeb(this.child.stdin!) as WritableStream<Uint8Array>;
-  }
-
-  kill() {
-    try {
-      this.child.kill("SIGKILL");
-    } catch {}
-  }
-}
-
 type Client = {
   conn: acp.ClientConnection;
   agent: acp.ClientContext;
 };
 
-async function connect(proc: ProcHandle): Promise<Client> {
-  const stream = acp.ndJsonStream(proc.stdin, proc.stdout);
+async function connect(proc: AcpProcess): Promise<Client> {
   const app = acp
     .client({ name: "acp-probe" })
     .onRequest("session/request_permission", async (ctx) => {
@@ -157,7 +89,7 @@ async function connect(proc: ProcHandle): Promise<Client> {
         report.agentText = (report.agentText as string) + update.content.text;
       }
     });
-  const conn = app.connect(stream);
+  const conn = app.connect(proc.stream);
   return { conn, agent: conn.agent };
 }
 
@@ -197,7 +129,7 @@ async function main() {
   const cwd = mkdtempSync(join(tmpdir(), `acp-probe-${name}-`));
   report.cwd = cwd;
 
-  let proc = new ProcHandle(cmd, cwd);
+  let proc = spawnAcp(cmd, cwd);
   let client: Client | null = null;
   let sessionId: string | null = null;
 
@@ -285,9 +217,8 @@ async function main() {
       proc.kill();
       // wait briefly for process exit
       await new Promise((r) => setTimeout(r, 500));
-      proc = new ProcHandle(cmd, cwd);
+      proc = spawnAcp(cmd, cwd);
       const replayKinds: string[] = [];
-      const stream = acp.ndJsonStream(proc.stdin, proc.stdout);
       const app2 = acp
         .client({ name: "acp-probe-load" })
         .onRequest(
@@ -298,7 +229,7 @@ async function main() {
           const update = (ctx.params as { update: { sessionUpdate: string } }).update;
           replayKinds.push(update?.sessionUpdate ?? "unknown");
         });
-      const conn2 = app2.connect(stream);
+      const conn2 = app2.connect(proc.stream);
       await initialize(conn2.agent);
       const t0 = Date.now();
       await withTimeout(
