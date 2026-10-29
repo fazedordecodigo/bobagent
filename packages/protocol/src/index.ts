@@ -566,6 +566,61 @@ export const defaultAppPermissions: AppPermissions = {
 export function isSensitivePermission(kind: AppPermissionKind): boolean {
   return kind !== "read" && kind !== "write";
 }
+
+const appToolOperations: [AppPermissionKind, RegExp][] = [
+  ["del", /^(delete|remove|destroy|trash)$/],
+  ["pay", /^(pay|charge|refund|transfer|payout|purchase)$/],
+  ["book", /^(book|reserve)$/],
+  [
+    "send",
+    /^(send|post|publish|invite|reply|forward|mail|email|message|dispatch|deliver|notify|broadcast|sms|text|chat|push|share|comment|dm|tweet)$/,
+  ],
+  [
+    "write",
+    /^(create|update|merge|write|edit|archive|cancel|move|rename|upload|patch|put|set|add|insert|close)$/,
+  ],
+  [
+    "read",
+    /^(get|list|search|read|query|fetch|retrieve|find|describe|lookup|view|show|count|check|status)$/,
+  ],
+];
+
+/** Operation tokens of an app tool name (`<slug>-<operation>`): underscores, hyphens and camelCase. */
+export function toolOperationTokens(tool: string): string[] {
+  return tool
+    .slice(tool.indexOf("-") + 1)
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1_$2")
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+    .split(/[_-]+/)
+    .filter(Boolean);
+}
+
+/** Kind of a single operation verb; null when it is not a known verb. */
+export function classifyToolVerb(verb: string): AppPermissionKind | null {
+  return appToolOperations.find(([, pattern]) => pattern.test(verb))?.[0] ?? null;
+}
+
+/**
+ * Kind of an app tool's operation (`<slug>-<operation>`): the leading verb
+ * decides, and verbs after and/or/then can escalate it
+ * (del > pay > book > send > write > read). A naming heuristic, not argument
+ * or semantic inspection. Null when no known verb appears.
+ */
+export function classifyToolOperation(tool: string): AppPermissionKind | null {
+  const tokens = toolOperationTokens(tool);
+  const verbs = classifyToolVerb(tokens[0] ?? "")
+    ? tokens.filter((_, index) => index === 0 || /^(and|or|then)$/.test(tokens[index - 1] ?? ""))
+    : tokens;
+  return (
+    appToolOperations.find(([, pattern]) => verbs.some((verb) => pattern.test(verb)))?.[0] ?? null
+  );
+}
+
+/** Permission kind of an app tool, failing closed to "write" on unknown verbs. */
+export function classifyAppTool(tool: string): AppPermissionKind {
+  return classifyToolOperation(tool) ?? "write";
+}
 export const ApprovalDecision = z.enum(["approve", "always", "task", "deny", "done"]);
 export type ApprovalDecision = z.infer<typeof ApprovalDecision>;
 export const Approval = z.object({

@@ -43,7 +43,8 @@ The bridge appends app tools to `tools/list` as `<slug>-<tool>` and routes calls
 Migration 19 adds `permissions_json`: `read | write | send | pay | book | del` map to
 `off | ask | allow`. New and migrated apps default to read=allow and all others=ask.
 Sensitive kinds (send/pay/book/del) reject allow in both protocol schemas and AppsService.
-`apps.connect/update` accept partial permissions. `src/app-permissions.ts` classifies the
+`apps.connect/update` accept partial permissions. `classifyAppTool` in `@upbot/protocol`
+(shared with the desktop UI) classifies the
 operation after `<slug>-` on underscores, hyphens and camelCase. The leading verb determines
 the kind; verbs after and/or/then can escalate it (del > pay > book > send > write > read).
 Read-object nouns do not escalate. An unknown leading token falls back to known verbs
