@@ -81,6 +81,9 @@ const cancelGraceMs = () =>
 /** How often the in-memory streamed text is flushed to SQLite mid-stream. */
 const TEXT_FLUSH_MS = 150;
 
+/** Pending streamed text that triggers an immediate flush (bounds crash loss). */
+const TEXT_FLUSH_MAX_PENDING = 8 * 1024;
+
 export class AgentRuntime {
   status: AgentStatus = "idle";
   statusError: string | null = null;
@@ -96,7 +99,8 @@ export class AgentRuntime {
     kind: "agent_message" | "agent_thought";
     /** Accumulated text; the in-memory source of truth until flushed. */
     text: string;
-    dirty: boolean;
+    /** Bytes appended since the last successful flush. */
+    pendingChars: number;
   } | null = null;
   private textFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private pending = new Map<string, PendingEntry>();
@@ -715,22 +719,31 @@ export class AgentRuntime {
     if (this.openTextItem && this.openTextItem.kind === kind) {
       const item = this.openTextItem;
       item.text += text;
-      item.dirty = true;
-      this.scheduleTextFlush();
+      item.pendingChars += text.length;
+      if (item.pendingChars >= TEXT_FLUSH_MAX_PENDING) {
+        this.tryFlushTextItem();
+      } else {
+        this.scheduleTextFlush();
+      }
       this.broadcast("item.delta", { agentId: this.agent.id, itemId: item.id, text });
     } else {
       this.closeTextItem();
       const item = this.store.createItem(this.agent.id, turn.id, kind, { text });
-      this.openTextItem = { id: item.id, kind, text, dirty: false };
+      this.openTextItem = { id: item.id, kind, text, pendingChars: 0 };
       this.broadcast("item.created", item);
     }
+  }
+
+  /** Writes any pending streamed text now (e.g. before a history read). */
+  flushStreamText(): void {
+    this.flushTextItem();
   }
 
   private scheduleTextFlush(): void {
     if (this.textFlushTimer) return;
     this.textFlushTimer = setTimeout(() => {
       this.textFlushTimer = null;
-      this.flushTextItem();
+      this.tryFlushTextItem();
     }, TEXT_FLUSH_MS);
     this.textFlushTimer.unref?.();
   }
@@ -738,9 +751,34 @@ export class AgentRuntime {
   /** Persists the open streaming item's accumulated text, if chunks are pending. */
   private flushTextItem(): void {
     const item = this.openTextItem;
-    if (!item?.dirty) return;
+    if (!item || item.pendingChars === 0) return;
     this.store.setItemText(item.id, item.text);
-    item.dirty = false;
+    item.pendingChars = 0;
+  }
+
+  private tryFlushTextItem(): void {
+    try {
+      this.flushTextItem();
+    } catch (e) {
+      this.onStoreError(e);
+    }
+  }
+
+  /** A background flush failure: fail the turn instead of killing the daemon. */
+  private onStoreError(e: unknown): void {
+    const message = e instanceof Error ? e.message : String(e);
+    const turn = this.turn;
+    if (!turn || this.status === "error") return;
+    // don't retry the failing write while closing the item/turn
+    if (this.openTextItem) this.openTextItem.pendingChars = 0;
+    try {
+      const errItem = this.store.createItem(this.agent.id, turn.id, "error", { message });
+      this.broadcast("item.created", errItem);
+    } catch {}
+    try {
+      this.finishTurn(turn, "failed", null, message);
+    } catch {}
+    this.setStatus("error", message);
   }
 
   /** Flushes and closes the open streaming item (kind change, tool call, turn end, dispose). */
@@ -749,7 +787,11 @@ export class AgentRuntime {
       clearTimeout(this.textFlushTimer);
       this.textFlushTimer = null;
     }
-    this.flushTextItem();
+    try {
+      this.flushTextItem();
+    } catch (e) {
+      console.error("[upbotd] failed to persist streamed text:", (e as Error).message);
+    }
     this.openTextItem = null;
   }
 
