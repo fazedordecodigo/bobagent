@@ -5,7 +5,8 @@ import {
   type ApprovalRule,
   isSensitivePermission,
 } from "@upbot/protocol";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import { permissionActions, permissionLabels } from "../lib/app-permissions";
 import { approvalAction, decideApproval } from "../lib/approval-decisions";
 import {
@@ -20,20 +21,10 @@ import s from "./Approvals.module.css";
 import { Button, Field, StatusPill } from "./ds/controls";
 
 function useApprovals(client: DaemonClient, agentId?: string) {
-  const [items, setItems] = useState<Approval[]>([]);
-  const load = useCallback(() => {
-    client
-      .request("approvals.list", agentId ? { agentId } : {})
-      .then(setItems)
-      .catch(() => {});
-  }, [client, agentId]);
-  useEffect(() => {
-    load();
-    return client.on("approval.updated", (a) => {
-      if (!agentId || a.agentId === agentId) load();
-    });
-  }, [client, agentId, load]);
-  return items;
+  const { data } = useDaemonQuery(client, "approvals.list", agentId ? { agentId } : {}, {
+    events: { "approval.updated": (a) => !agentId || a.agentId === agentId },
+  });
+  return data ?? [];
 }
 
 function Countdown({ until }: { until: number }) {
@@ -279,23 +270,19 @@ export function AppApprovalCards({
 
 export function ApprovalsView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
   const items = useApprovals(client);
-  const [rules, setRules] = useState<ApprovalRule[]>([]);
+  const { data: rules = [], error: rulesLoadError } = useDaemonQuery(
+    client,
+    "approvals.rules",
+    {},
+    {
+      events: { "approvals.rulesChanged": true },
+    },
+  );
   const [form, setForm] = useState({ pattern: "", action: "ask" as "ask" | "allow", agentId: "" });
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("approvals.rules", {})
-      .then(setRules)
-      .catch(() => {});
-  }, [client]);
-  useEffect(() => {
-    load();
-    return client.on("approvals.rulesChanged", load);
-  }, [client, load]);
   const save = (next: ApprovalRule[]) =>
     client
       .request("approvals.setRules", { rules: next })
-      .then(setRules)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   const nameOf = (id: string | null) =>
     id ? (agents.find((a) => a.id === id)?.name ?? "Bot removido") : "Todos os bots";
@@ -379,7 +366,9 @@ export function ApprovalsView({ client, agents }: { client: DaemonClient; agents
           Adicionar
         </button>
       </form>
-      {error && <div className="text-xs text-red-400">{error}</div>}
+      {(error || rulesLoadError) && (
+        <div className="text-xs text-red-400">{error ?? rulesLoadError}</div>
+      )}
       <h3 className="text-sm font-semibold text-zinc-300">Pedidos</h3>
       <div className="space-y-2">
         {items.map((a) => (

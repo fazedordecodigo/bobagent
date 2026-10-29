@@ -1,5 +1,5 @@
-import type { Agent, Routine } from "@upbot/protocol";
-import { useEffect, useState } from "react";
+import type { Agent } from "@upbot/protocol";
+import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { DaemonClient } from "../lib/daemon";
 
 export function ScheduledView({
@@ -11,38 +11,18 @@ export function ScheduledView({
   agents: Agent[];
   onOpen: (id: string) => void;
 }) {
-  const [routines, setRoutines] = useState<Routine[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [retry, setRetry] = useState(0);
-  useEffect(() => {
-    let alive = true;
-    if (retry > 0) {
-      setError(null);
-      setRoutines(null);
-    }
-    const refresh = () =>
-      void client
-        .request("routines.list", {})
-        .then((items) => {
-          if (alive) {
-            setRoutines(items);
-            setError(null);
-          }
-        })
-        .catch((e: unknown) => {
-          if (alive) setError(e instanceof Error ? e.message : String(e));
-        });
-    refresh();
-    const offs = [
-      client.on("routine.updated", refresh),
-      client.on("routine.deleted", refresh),
-      client.onReconnect(refresh),
-    ];
-    return () => {
-      alive = false;
-      for (const off of offs) off();
-    };
-  }, [client, retry]);
+  const {
+    data: routines,
+    error,
+    reload,
+  } = useDaemonQuery(
+    client,
+    "routines.list",
+    {},
+    {
+      events: { "routine.updated": true, "routine.deleted": true },
+    },
+  );
   return (
     <section className="view on">
       <div className="page">
@@ -56,15 +36,11 @@ export function ScheduledView({
           {error ? (
             <div role="alert">
               <p>Não foi possível carregar as rotinas: {error}</p>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setRetry((value) => value + 1)}
-              >
+              <button type="button" className="btn btn-secondary" onClick={() => reload()}>
                 Tentar novamente
               </button>
             </div>
-          ) : routines === null ? (
+          ) : routines === undefined ? (
             <p role="status">Carregando rotinas…</p>
           ) : routines.length === 0 ? (
             <p>Nenhuma rotina ainda. Abra as configurações de um bot para criar uma.</p>

@@ -1,5 +1,6 @@
-import type { Agent, Page } from "@upbot/protocol";
-import { useCallback, useEffect, useState } from "react";
+import type { Agent } from "@upbot/protocol";
+import { useState } from "react";
+import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { DaemonClient } from "../lib/daemon";
 import { btnCls } from "./AgentSettings";
 
@@ -12,24 +13,26 @@ export function PagesView({
   agents: Agent[];
   onOpenBot: (id: string) => void;
 }) {
-  const [pages, setPages] = useState<Page[]>([]);
+  const { data: pages = [], error: loadError } = useDaemonQuery(
+    client,
+    "pages.list",
+    {},
+    {
+      events: { "pages.changed": true },
+    },
+  );
   const [selected, setSelected] = useState<string | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("pages.list", {})
-      .then(setPages)
-      .catch(() => {});
-  }, [client]);
-  useEffect(() => {
-    load();
-    return client.on("pages.changed", load);
-  }, [client, load]);
+  const [error, setError] = useState<string | null>(null);
+  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
   const page = pages.find((p) => p.id === selected) ?? pages[0] ?? null;
   const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? "bot removido";
   return (
     <div className="flex h-full">
       <ul className="w-64 shrink-0 overflow-y-auto border-r border-zinc-800">
         <li className="px-4 py-3 text-sm font-semibold">Páginas</li>
+        {(error || loadError) && (
+          <li className="px-4 py-2 text-xs text-red-400">{error ?? loadError}</li>
+        )}
         {pages.map((p) => (
           <li key={p.id}>
             <button
@@ -72,7 +75,7 @@ export function PagesView({
             <button
               type="button"
               className={`${btnCls} bg-zinc-800 hover:bg-red-900`}
-              onClick={() => client.request("pages.delete", { id: page.id }).catch(() => {})}
+              onClick={() => client.request("pages.delete", { id: page.id }).catch(fail)}
             >
               Excluir
             </button>
