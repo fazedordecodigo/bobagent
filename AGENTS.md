@@ -256,7 +256,7 @@ spawns the real bridge and calls the tool).
 
 `src/channels.ts` (`ChannelService`, migration 6: `channels`, `channel_members`,
 `channel_messages`, `queue.channel_id` + `queue.prompt`). RPC `channels.list/create/
-history/post/stop/resume/archive/restore/reassign/setMembers`; events `channel.created`,
+history/post/stop/resume/archive/restore/reassign`; events `channel.created`,
 `channel.updated`, `channel.message`. A user post goes to the owner (default: first
 member) as a queue item whose provider prompt (`queue.prompt`) carries a
 `<channel_context>` block with role and recent transcript. When a channel turn ends

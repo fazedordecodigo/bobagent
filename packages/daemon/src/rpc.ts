@@ -220,20 +220,6 @@ export class Rpc {
         queueMicrotask(() => this.broadcast("hosts.changed", {}));
         return h;
       }
-      case "hosts.update": {
-        const h = this.extras.hosts.update(
-          params as {
-            id: string;
-            name?: string;
-            target?: string;
-            port?: number;
-            identityFile?: string | null;
-          },
-        );
-        if (!h) throw new RpcError("not_found", "host not found");
-        queueMicrotask(() => this.broadcast("hosts.changed", {}));
-        return h;
-      }
       case "hosts.delete": {
         if (!this.extras.hosts.delete((params as { id: string }).id))
           throw new RpcError("not_found", "host not found");
@@ -424,9 +410,6 @@ export class Rpc {
           throw new RpcError("bad_request", (e as Error).message);
         }
         return { ok: true };
-      case "voice.stop":
-        this.extras.voice.stop();
-        return { ok: true };
       case "voice.transcribe": {
         const p = params as { audioBase64: string; mime: string };
         try {
@@ -475,13 +458,6 @@ export class Rpc {
         if (!this.agents.get(p.agentId)) throw new RpcError("not_found", "agent not found");
         const m = this.memories.add(p.agentId, p.text);
         this.broadcast("memories.changed", { agentId: p.agentId });
-        return m;
-      }
-      case "memories.update": {
-        const p = params as { id: string; text: string };
-        const m = this.memories.update(p.id, p.text);
-        if (!m) throw new RpcError("not_found", "memory not found");
-        this.broadcast("memories.changed", { agentId: m.agentId });
         return m;
       }
       case "memories.delete": {
@@ -537,10 +513,6 @@ export class Rpc {
       case "channels.reassign": {
         const p = params as { channelId: string; ownerId: string };
         return this.channels.reassign(p.channelId, p.ownerId);
-      }
-      case "channels.setMembers": {
-        const p = params as { channelId: string; memberIds: string[] };
-        return this.channels.setMembers(p.channelId, p.memberIds);
       }
     }
   }
