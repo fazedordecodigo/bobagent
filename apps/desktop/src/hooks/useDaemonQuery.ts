@@ -1,12 +1,8 @@
-import type {
-  DaemonEventMap,
-  DaemonEventName,
-  MethodName,
-  MethodParams,
-  MethodResult,
-} from "@upbot/protocol";
+import type { DaemonEventMap, MethodName, MethodParams, MethodResult } from "@upbot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
+
+type DaemonEventName = keyof DaemonEventMap;
 
 export type DaemonEventSpec =
   | DaemonEventName
