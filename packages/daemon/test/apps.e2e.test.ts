@@ -7,6 +7,7 @@ import {
   DaemonClient,
   type DaemonHandle,
   FAKE_AGENT,
+  pidAlive,
   ROOT,
   startDaemon,
   stopTestChildren,
@@ -283,6 +284,83 @@ process.stdin.on("data", (chunk) => {
       expect(JSON.stringify(list)).not.toContain(newToken);
     } finally {
       await c.request("apps.delete", { id: rotating.id });
+    }
+  });
+
+  test("includes pending stderr on startup timeout and redacts its credential prefix", async () => {
+    const timeoutDataDir = tmp("apps-timeout-data-");
+    const timeoutAgentsRoot = tmp("apps-timeout-agents-");
+    const timeoutStateDir = tmp("apps-timeout-state-");
+    const timeoutToken = `apps-timeout-${crypto.randomUUID()}`;
+    const timeoutDaemon = await startDaemon(
+      timeoutDataDir,
+      timeoutAgentsRoot,
+      timeoutToken,
+      {
+        UPBOT_APP_START_TIMEOUT_MS: "1500",
+        UPBOT_VAULT_KEY: "ef".repeat(32),
+      },
+    );
+    const timeoutClient = await DaemonClient.connect(timeoutDaemon.port, timeoutToken);
+    const stderrReader = (timeoutDaemon.proc.stderr as ReadableStream<Uint8Array>).getReader();
+    let timeoutStderr = "";
+    const stderrPump = (async () => {
+      const decoder = new TextDecoder();
+      for (;;) {
+        const { done, value } = await stderrReader.read();
+        if (done) break;
+        timeoutStderr += decoder.decode(value, { stream: true });
+      }
+    })();
+    const secret = `hangcred-${crypto.randomUUID().replaceAll("-", "")}`;
+    const pidFile = join(timeoutStateDir, "pids.txt");
+    let hungPid: number | undefined;
+    let bad: ConnectedApp | undefined;
+    try {
+      bad = (await timeoutClient.request("apps.connect", {
+        catalogId: "custom-stdio",
+        name: "Hanging App",
+        command: [
+          "bun",
+          "-e",
+          `const {appendFileSync}=require("node:fs"); appendFileSync(${JSON.stringify(pidFile)},process.pid+"\\n"); process.stderr.write("hang-marker tok="+process.env.HANG_TOKEN.slice(0,12)); setInterval(()=>{},1000);`,
+        ],
+        secrets: { HANG_TOKEN: secret },
+      })) as ConnectedApp;
+      let failed: ConnectedApp | undefined;
+      for (let i = 0; i < 100; i++) {
+        const list = (await timeoutClient.request("apps.list", {})) as ConnectedApp[];
+        failed = list.find((x) => x.id === bad!.id);
+        if (failed?.status === "error") break;
+        await Bun.sleep(100);
+      }
+      for (let i = 0; i < 20 && !timeoutStderr.includes("app start failed"); i++)
+        await Bun.sleep(50);
+      hungPid = Number(readFileSync(pidFile, "utf8").trim());
+      const list = (await timeoutClient.request("apps.list", {})) as ConnectedApp[];
+      expect(failed?.status).toBe("error");
+      expect(timeoutStderr).toContain("app start failed");
+      expect(failed?.error).toContain("hang-marker");
+      expect(failed?.error).toContain("tok=[redacted]");
+      const listed = JSON.stringify(list);
+      for (let length = 4; length <= 12; length++) {
+        expect(listed).not.toContain(secret.slice(0, length));
+        expect(timeoutStderr).not.toContain(secret.slice(0, length));
+      }
+      await timeoutClient.request("apps.delete", { id: bad.id });
+      for (let i = 0; i < 20 && pidAlive(hungPid); i++) await Bun.sleep(50);
+      expect(pidAlive(hungPid)).toBe(false);
+    } finally {
+      if (bad) await timeoutClient.request("apps.delete", { id: bad.id }).catch(() => {});
+      timeoutClient.close();
+      try {
+        timeoutDaemon.proc.kill("SIGKILL");
+      } catch {}
+      await timeoutDaemon.proc.exited;
+      await stderrPump;
+      await stopTestChildren(timeoutStateDir);
+      for (const dir of [timeoutDataDir, timeoutAgentsRoot, timeoutStateDir])
+        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 

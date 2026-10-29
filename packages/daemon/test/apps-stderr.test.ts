@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { boundedAppError, redactValues, stderrLineBuffer } from "../src/apps";
+import {
+  boundedAppError,
+  redactTrailingPrefix,
+  redactValues,
+  stderrLineBuffer,
+} from "../src/apps";
 
 describe("app stderr helpers", () => {
   test("joins a secret split across Buffer chunks into one line", () => {
@@ -26,6 +31,16 @@ describe("app stderr helpers", () => {
     expect(buffer.lines()).toEqual(["first", "second"]);
   });
 
+  test("returns a safe pending line without a trailing carriage return or dropped fragment", () => {
+    const buffer = stderrLineBuffer(10, 5);
+    buffer.push("a\r");
+    expect(buffer.pending()).toBe("a");
+    buffer.push("\n");
+    expect(buffer.pending()).toBe("");
+    buffer.push("123456");
+    expect(buffer.pending()).toBe("");
+  });
+
   test("replaces over-long lines with one marker and drops their fragments", () => {
     const buffer = stderrLineBuffer(10, 5);
     buffer.push("abcdef");
@@ -47,6 +62,21 @@ describe("app stderr helpers", () => {
         "prefix\n  secret-line  \nanother-secret-line\nsuffix",
       ]),
     ).toBe("[redacted] [redacted]\n[redacted]\n[redacted]");
+  });
+
+  test("redacts a matching trailing secret prefix", () => {
+    expect(redactTrailingPrefix("tok=abcd", ["abcdefgh"])).toBe("tok=[redacted]");
+    expect(redactTrailingPrefix("tok=abc", ["abcdefgh"])).toBe("tok=abc");
+  });
+
+  test("redacts the longest matching secret prefix", () => {
+    expect(redactTrailingPrefix("tok=abcde", ["abcdef", "bcde123"])).toBe("tok=[redacted]");
+  });
+
+  test("redacts trailing prefixes of multiline secret parts", () => {
+    expect(redactTrailingPrefix("tok=longsec", ["prefix\nlongsecret\nsuffix"])).toBe(
+      "tok=[redacted]",
+    );
   });
 
   test("keeps the stderr tail when the startup message exceeds the bound", () => {

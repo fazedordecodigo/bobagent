@@ -178,7 +178,7 @@ export function boundedAppError(message: string, tail: string, max = 500): strin
   return `${message.slice(0, max - 1 - tailPart.length)}\n${tailPart}`;
 }
 
-export function redactValues(text: string, values: Iterable<string>): string {
+function secretNeedles(values: Iterable<string>): Set<string> {
   const needles = new Set<string>();
   for (const value of values) {
     if (!value) continue;
@@ -190,9 +190,30 @@ export function redactValues(text: string, values: Iterable<string>): string {
       }
     }
   }
-  return [...needles]
+  return needles;
+}
+
+export function redactValues(text: string, values: Iterable<string>): string {
+  return [...secretNeedles(values)]
     .sort((a, b) => b.length - a.length)
     .reduce((result, value) => result.split(value).join("[redacted]"), text);
+}
+
+export function redactTrailingPrefix(
+  text: string,
+  values: Iterable<string>,
+  min = 4,
+): string {
+  let longest = 0;
+  for (const needle of secretNeedles(values)) {
+    for (let length = Math.min(text.length, needle.length); length >= min && length > longest; length--) {
+      if (text.endsWith(needle.slice(0, length))) {
+        longest = length;
+        break;
+      }
+    }
+  }
+  return longest ? `${text.slice(0, -longest)}[redacted]` : text;
 }
 
 export function stderrLineBuffer(
@@ -202,6 +223,7 @@ export function stderrLineBuffer(
   push(chunk: Buffer | string): void;
   end(): void;
   lines(): string[];
+  pending(): string;
 } {
   const decoder = new StringDecoder("utf8");
   const stored: string[] = [];
@@ -244,6 +266,9 @@ export function stderrLineBuffer(
     },
     lines() {
       return stored.slice(-maxLines);
+    },
+    pending() {
+      return dropping ? "" : pending.replace(/\r$/, "");
     },
   };
 }
@@ -468,8 +493,17 @@ export class AppsService {
     const startedAt = Date.now();
     let secretValues: string[] = [];
     const stderr = stderrLineBuffer();
-    const stderrTail = () =>
-      this.redact(id, redactSecrets(stderr.lines().join("\n")), secretValues).trim();
+    const stderrTail = () => {
+      const pending = stderr.pending();
+      const raw = [...stderr.lines(), ...(pending ? [pending] : [])].join("\n");
+      let redacted = this.redact(id, redactSecrets(raw), secretValues);
+      if (pending)
+        redacted = redactTrailingPrefix(redacted, [
+          ...secretValues,
+          ...this.currentSecretValues(id),
+        ]);
+      return redacted.trim();
+    };
     let ctx: { catalogId: string; transport: Config["transport"] } | null = null;
     l.starting = (async () => {
       const r = this.row(id);
@@ -554,13 +588,17 @@ export class AppsService {
     return l.starting;
   }
 
-  private redact(id: string, text: string, extra: readonly string[] = []): string {
-    let current: string[] = [];
+  private currentSecretValues(id: string): string[] {
     try {
       const c = this.config(this.row(id));
-      current = Object.values(this.secrets(id, c));
-    } catch {}
-    return redactValues(text, [...extra, ...current]);
+      return Object.values(this.secrets(id, c));
+    } catch {
+      return [];
+    }
+  }
+
+  private redact(id: string, text: string, extra: readonly string[] = []): string {
+    return redactValues(text, [...extra, ...this.currentSecretValues(id)]);
   }
 
   private appsFor(agentId: string): Row[] {
