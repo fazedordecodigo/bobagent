@@ -12,9 +12,14 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Agent, ChatItem, PendingPermission, Turn } from "@upbot/protocol";
+import { daemonTarget } from "../packages/daemon/src/target";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const BINARY = join(ROOT, "apps/desktop/src-tauri/binaries/upbotd-aarch64-apple-darwin");
+const BINARY = join(
+  ROOT,
+  "apps/desktop/src-tauri/binaries",
+  `upbotd-${daemonTarget(process.platform, process.arch).rustTriple}`,
+);
 const TOKEN = `smoke-${crypto.randomUUID()}`;
 const TURN_TIMEOUT_MS = 180_000;
 const PROVIDERS = ["devin", "cursor", "grok", "opencode"] as const;
