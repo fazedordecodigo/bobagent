@@ -664,9 +664,9 @@ export default function App() {
                   onUpdate={updateAgent}
                   onDelete={deleteAgent}
                 />
-                <MemoriesPanel client={client} agentId={selected.id} />
-                <RoutinesPanel client={client} agentId={selected.id} />
-                <ComputerUsePanel client={client} agentId={selected.id} />
+                <MemoriesPanel key={selected.id} client={client} agentId={selected.id} />
+                <RoutinesPanel key={selected.id} client={client} agentId={selected.id} />
+                <ComputerUsePanel key={selected.id} client={client} agentId={selected.id} />
               </div>
             </div>
           </section>
