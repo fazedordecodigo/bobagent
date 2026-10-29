@@ -62,11 +62,23 @@ export class ApprovalService {
     const nextIds = new Set(rules.map((r) => r.id));
     const addedRuleIds = rules.filter((r) => !previousIds.has(r.id)).map((r) => r.id);
     const removedRuleIds = previous.filter((r) => !nextIds.has(r.id)).map((r) => r.id);
+    const previousById = new Map(previous.map((r) => [r.id, r]));
+    const changedRuleIds = rules
+      .filter((r) => {
+        const old = previousById.get(r.id);
+        return (
+          old !== undefined &&
+          (old.pattern !== r.pattern || old.action !== r.action || old.agentId !== r.agentId)
+        );
+      })
+      .map((r) => r.id);
     this.audit("approval.rules_changed", {
       addedCount: addedRuleIds.length,
       removedCount: removedRuleIds.length,
+      changedCount: changedRuleIds.length,
       addedRuleIds,
       removedRuleIds,
+      changedRuleIds,
     });
     this.broadcast("approvals.rulesChanged", {});
     return rules;

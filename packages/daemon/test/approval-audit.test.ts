@@ -187,8 +187,27 @@ test("approval.rules_changed records added and removed rule ids", async () => {
     expect(changes[1]).toMatchObject({
       addedCount: 1,
       removedCount: 1,
+      changedCount: 0,
       addedRuleIds: ["r3"],
       removedRuleIds: ["r1"],
+      changedRuleIds: [],
+    });
+    approvals.setRules([
+      { id: "r2", pattern: "b*", action: "allow", agentId: "bot" },
+      { id: "r3", pattern: "c*", action: "ask", agentId: null },
+    ]);
+    approvals.setRules([
+      { id: "r2", pattern: "b-updated*", action: "ask", agentId: "bot" },
+      { id: "r3", pattern: "c*", action: "ask", agentId: null },
+    ]);
+    const edited = rows(db, "approval.rules_changed").map(json)[3]!;
+    expect(edited).toMatchObject({
+      addedCount: 0,
+      removedCount: 0,
+      changedCount: 1,
+      addedRuleIds: [],
+      removedRuleIds: [],
+      changedRuleIds: ["r2"],
     });
   });
 });
