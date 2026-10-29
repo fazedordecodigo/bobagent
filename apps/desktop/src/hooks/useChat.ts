@@ -1,7 +1,8 @@
 import type { AgentStatusInfo, ChatItem, QueueState, Turn } from "@upbot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
-import { errorFields, errorMessage, logWarn } from "../lib/log";
+import { errorMessage } from "../lib/errors";
+import { errorFields, logWarn } from "../lib/log";
 
 export type ChatState = {
   queue: QueueState | null;

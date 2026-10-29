@@ -14,7 +14,8 @@ import {
   requiresFullReview,
 } from "../lib/approval-description";
 import type { DaemonClient } from "../lib/daemon";
-import { errorFields, errorMessage, logWarn } from "../lib/log";
+import { errorMessage } from "../lib/errors";
+import { errorFields, logWarn } from "../lib/log";
 import { btnCls, inputCls } from "./AgentSettings";
 import { useApprovalFeedback } from "./ApprovalFeedback";
 import s from "./Approvals.module.css";
@@ -80,7 +81,7 @@ export function ApprovalCard({
     try {
       feedback(await decideApproval(client, a, decision, v));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -323,7 +324,7 @@ export function ApprovalsView({ client, agents }: { client: DaemonClient; agents
     client
       .request("approvals.setRules", { rules: next })
       .then(setRules)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e) => setError(errorMessage(e)));
   const nameOf = (id: string | null) =>
     id ? (agents.find((a) => a.id === id)?.name ?? "Bot removido") : "Todos os bots";
   return (

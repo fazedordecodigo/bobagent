@@ -7,6 +7,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { permissionDescriptions, permissionLabels } from "../lib/app-permissions";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 import s from "./AppPermissionsDialog.module.css";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Button, IconButton, SegmentedControl } from "./ds/controls";
@@ -35,7 +36,7 @@ export function AppPermissionsDialog({
     try {
       await client.request("apps.update", { id: app.id, permissions });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -112,7 +113,7 @@ export function AppPermissionsDialog({
               .request("apps.delete", { id: app.id })
               .then(onClose)
               .catch((e) => {
-                setError(e instanceof Error ? e.message : String(e));
+                setError(errorMessage(e));
               })
               .finally(() => setBusy(false));
           }}

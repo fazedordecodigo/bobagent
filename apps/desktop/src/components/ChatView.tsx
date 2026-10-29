@@ -3,8 +3,9 @@ import { useEffect, useState } from "react";
 import { useChat } from "../hooks/useChat";
 import type { AgentOverview } from "../hooks/useOverview";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 import { moveControlFocus } from "../lib/keyboard";
-import { errorFields, errorMessage, logWarn } from "../lib/log";
+import { errorFields, logWarn } from "../lib/log";
 import { MonoAv, Pill, role } from "../lib/ui";
 import { PermissionNotice } from "./AgentSettings";
 import { ApprovalCards } from "./ApprovalsView";
@@ -83,7 +84,7 @@ export function ChatView({
     try {
       await client.request("agents.setConfig", { agentId: agent.id, configId: "mode", value });
     } catch (e) {
-      setModeError(e instanceof Error ? e.message : String(e));
+      setModeError(errorMessage(e));
     }
   };
 
@@ -100,7 +101,7 @@ export function ChatView({
         ...(attachments.length ? { attachments } : {}),
       });
     } catch (e) {
-      setSendError(e instanceof Error ? e.message : String(e));
+      setSendError(errorMessage(e));
       throw e;
     } finally {
       setSendBusy(false);
@@ -187,7 +188,7 @@ export function ChatView({
         }
         onPermissionRespond={(requestId, optionId) => {
           void client.request("permissions.respond", { requestId, optionId }).catch((e) => {
-            setSendError(e instanceof Error ? e.message : String(e));
+            setSendError(errorMessage(e));
           });
         }}
         onSpeak={

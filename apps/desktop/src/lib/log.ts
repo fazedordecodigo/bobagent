@@ -1,4 +1,5 @@
 import { error as logError_, info as logInfo_, warn as logWarn_ } from "@tauri-apps/plugin-log";
+import { errorMessage } from "./errors";
 
 export type LogFields = Record<string, unknown>;
 
@@ -40,10 +41,6 @@ export function logError(scope: string, fields?: LogFields) {
 
 export function logInfo(scope: string, fields?: LogFields) {
   send("info", scope, fields);
-}
-
-export function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /** Returns safe error fields without including untrusted error messages. */

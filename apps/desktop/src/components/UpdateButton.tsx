@@ -1,6 +1,6 @@
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useState } from "react";
-import { errorMessage } from "../lib/log";
+import { errorMessage } from "../lib/errors";
 import { pendingUpdate, runUpdater, type UpdaterPhase } from "../lib/updater";
 
 export function UpdateButton() {
