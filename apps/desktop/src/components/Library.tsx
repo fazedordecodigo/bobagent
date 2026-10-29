@@ -93,6 +93,8 @@ export function AvatarEditor({
 export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agentId: string }) {
   const [items, setItems] = useState<Memory[]>([]);
   const [text, setText] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
   const load = useCallback(() => {
     client
       .request("memories.list", { agentId })
@@ -116,7 +118,7 @@ export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agent
             <button
               type="button"
               className="text-xs text-zinc-500 hover:text-red-400"
-              onClick={() => client.request("memories.delete", { id: m.id }).catch(() => {})}
+              onClick={() => client.request("memories.delete", { id: m.id }).catch(fail)}
             >
               Delete
             </button>
@@ -129,10 +131,11 @@ export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agent
         onSubmit={(e) => {
           e.preventDefault();
           if (!text.trim()) return;
+          setError(null);
           client
             .request("memories.add", { agentId, text })
             .then(() => setText(""))
-            .catch(() => {});
+            .catch(fail);
         }}
       >
         <input
@@ -145,6 +148,7 @@ export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agent
           Add
         </button>
       </form>
+      {error && <p className="text-xs text-red-400">{error}</p>}
     </section>
   );
 }
@@ -155,6 +159,7 @@ export function SkillsView({ client }: { client: DaemonClient }) {
     null,
   );
   const [error, setError] = useState<string | null>(null);
+  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
   const load = useCallback(() => {
     client
       .request("skills.list", {})
@@ -176,7 +181,7 @@ export function SkillsView({ client }: { client: DaemonClient }) {
           client
             .request("skills.save", edit)
             .then(() => setEdit(null))
-            .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+            .catch(fail);
         }}
       >
         <h2 className="text-lg font-semibold">Skill</h2>
@@ -246,7 +251,7 @@ export function SkillsView({ client }: { client: DaemonClient }) {
               <button
                 type="button"
                 className="text-xs text-zinc-500 hover:text-red-400"
-                onClick={() => client.request("skills.delete", { name: s.name }).catch(() => {})}
+                onClick={() => client.request("skills.delete", { name: s.name }).catch(fail)}
               >
                 Delete
               </button>
@@ -256,6 +261,7 @@ export function SkillsView({ client }: { client: DaemonClient }) {
         ))}
         {skills.length === 0 && <li className="text-sm text-zinc-500">No skills yet.</li>}
       </ul>
+      {error && <p className="text-sm text-red-400">{error}</p>}
     </div>
   );
 }
@@ -396,6 +402,8 @@ export function RoutinesPanel({ client, agentId }: { client: DaemonClient; agent
 
 export function BrowserView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
   const [state, setState] = useState<BrowserState | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
   const load = useCallback(() => {
     client
       .request("browser.status", {})
@@ -416,7 +424,7 @@ export function BrowserView({ client, agents }: { client: DaemonClient; agents: 
           <button
             type="button"
             className={`${btnCls} ml-auto bg-zinc-700 hover:bg-zinc-600`}
-            onClick={() => client.request("browser.close", {}).catch(() => {})}
+            onClick={() => client.request("browser.close", {}).catch(fail)}
           >
             Close browser
           </button>
@@ -441,9 +449,7 @@ export function BrowserView({ client, agents }: { client: DaemonClient; agents: 
             <button
               type="button"
               className="text-xs text-zinc-500 hover:text-red-400"
-              onClick={() =>
-                client.request("browser.closeTab", { agentId: t.agentId }).catch(() => {})
-              }
+              onClick={() => client.request("browser.closeTab", { agentId: t.agentId }).catch(fail)}
             >
               Close tab
             </button>
@@ -451,6 +457,7 @@ export function BrowserView({ client, agents }: { client: DaemonClient; agents: 
         ))}
         {state.tabs.length === 0 && <li className="text-sm text-zinc-500">No open tabs.</li>}
       </ul>
+      {error && <p className="text-xs text-red-400">{error}</p>}
     </div>
   );
 }
@@ -592,6 +599,8 @@ export function VaultView({ client, agents }: { client: DaemonClient; agents: Ag
 
 export function ComputerUsePanel({ client, agentId }: { client: DaemonClient; agentId: string }) {
   const [state, setState] = useState<{ available: boolean; agentIds: string[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
   const load = useCallback(() => {
     client
       .request("computer.access", {})
@@ -618,7 +627,7 @@ export function ComputerUsePanel({ client, agentId }: { client: DaemonClient; ag
                   ? state.agentIds.filter((x) => x !== agentId)
                   : [...state.agentIds, agentId],
               })
-              .catch(() => {})
+              .catch(fail)
           }
         />
         Let this bot see the screen and control the mouse and keyboard
@@ -626,6 +635,7 @@ export function ComputerUsePanel({ client, agentId }: { client: DaemonClient; ag
       <p className="text-xs text-zinc-500">
         macOS asks for Screen Recording and Accessibility permission the first time.
       </p>
+      {error && <p className="text-xs text-red-400">{error}</p>}
     </section>
   );
 }
