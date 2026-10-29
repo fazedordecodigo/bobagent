@@ -4,7 +4,7 @@ import type { AgentStore } from "./agents";
 import { MAX_HOPS } from "./bridge";
 import type { ChatStore } from "./chat-store";
 import type { Broadcast } from "./rpc";
-import { RpcError } from "./runtime/agent-runtime";
+import { RpcError, xmlAttr } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
 
 // Channels: a shared conversation between the user and several agents. User posts go
@@ -45,10 +45,6 @@ function rowToMessage(r: MessageRow): ChannelMessage {
     createdAt: r.created_at,
     replyTo: r.reply_to ?? null,
   };
-}
-
-function xmlAttr(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
 
 export class ChannelService {

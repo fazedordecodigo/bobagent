@@ -40,7 +40,7 @@ function compactTimeoutMs(): number {
   return Number.isFinite(n) && n > 0 ? n : 180_000;
 }
 
-function xmlAttr(s: string): string {
+export function xmlAttr(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
 
