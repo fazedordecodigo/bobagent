@@ -3,9 +3,11 @@
 // Fake Claude Code CLI for daemon e2e tests: speaks the stream-json stdio protocol
 // (control_request/control_response + user/assistant/result lines). Logs argv and
 // every stdin message to $FAKE_CLAUDE_STATE_DIR/log.jsonl, its pid to pids.txt.
+// A $FAKE_CLAUDE_STATE_DIR/fail-start file makes every launch exit transiently.
 //
 // Prompt behaviors (by text prefix, after any <conversation_history>/<agent_instructions>):
 //   echo:<t>    -> streamed text deltas + full assistant message, result success
+//   split:<t>   -> assistant message split inside a multi-byte UTF-8 character, result success
 //   think:<t>   -> thinking delta, then text <t>
 //   tool        -> tool_use Bash + can_use_tool -> tool_result -> "permission:<behavior>"
 //   whoami      -> "mode=<m> model=<m> session=<id>"
@@ -13,7 +15,7 @@
 //   authfail    -> synthetic "Not logged in" error result
 //   crash       -> process.exit(1)
 
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const STATE_DIR = process.env.FAKE_CLAUDE_STATE_DIR ?? join(process.cwd(), ".fake-claude-state");
@@ -26,6 +28,10 @@ function log(method: string, params: unknown) {
   appendFileSync(LOG, `${JSON.stringify({ ts: Date.now(), method, params })}\n`);
 }
 log("argv", process.argv.slice(2));
+if (existsSync(join(STATE_DIR, "fail-start"))) {
+  process.stderr.write("transient start failure\n");
+  process.exit(1);
+}
 
 const argv = process.argv.slice(2);
 const argOf = (flag: string) => {
@@ -54,6 +60,14 @@ let pendingPermission: ((r: Record<string, unknown>) => void) | null = null;
 
 const send = (m: unknown) => process.stdout.write(`${JSON.stringify(m)}\n`);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function sendSplit(m: unknown) {
+  const line = Buffer.from(`${JSON.stringify(m)}\n`);
+  const splitAt = line.findIndex((byte) => byte >= 0xc0) + 1;
+  process.stdout.write(line.subarray(0, splitAt));
+  await sleep(50);
+  process.stdout.write(line.subarray(splitAt));
+}
 
 function streamText(msgId: string, text: string, kind: "text" | "thinking" = "text") {
   send({ type: "stream_event", event: { type: "message_start", message: { id: msgId } } });
@@ -110,6 +124,18 @@ async function runPrompt(raw: string) {
   interrupted = false;
   if (text.startsWith("echo:")) {
     streamText(`msg-${Date.now()}`, text.slice(5));
+    result();
+  } else if (text.startsWith("split:")) {
+    await sendSplit({
+      type: "assistant",
+      session_id: sessionId,
+      message: {
+        id: `msg-${Date.now()}`,
+        model: "fake",
+        role: "assistant",
+        content: [{ type: "text", text: text.slice(6) }],
+      },
+    });
     result();
   } else if (text.startsWith("think:")) {
     streamText(`th-${Date.now()}`, "pondering", "thinking");

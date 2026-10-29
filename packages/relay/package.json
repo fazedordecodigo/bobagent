@@ -5,6 +5,9 @@
   "private": true,
   "type": "module",
   "main": "./src/main.ts",
+  "dependencies": {
+    "@upbot/protocol": "workspace:*"
+  },
   "devDependencies": {
     "@types/bun": "1.4.3"
   }

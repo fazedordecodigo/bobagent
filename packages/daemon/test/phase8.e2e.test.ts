@@ -86,9 +86,102 @@ describe("avatars, memories, skills, agent creation e2e", () => {
     expect(x.avatar).toEqual({ emoji: "🦊", color: "#ff8800" });
     const y = (await c.request("agents.update", { id: x.id, avatar: null })) as Agent;
     expect(y.avatar).toBeNull();
+    const icon = (await c.request("agents.update", {
+      id: x.id,
+      avatar: { icon: "sheet" },
+    })) as Agent;
+    expect(icon.avatar).toEqual({ icon: "sheet" });
     await expect(
       c.request("agents.update", { id: x.id, avatar: { emoji: "x", color: "red" } }),
     ).rejects.toMatchObject({ code: "bad_request" });
+    await expect(
+      c.request("agents.update", { id: x.id, avatar: { icon: "calendar" } }),
+    ).rejects.toMatchObject({ code: "bad_request" });
+  });
+
+  test("soft-deleted agents can be restored and icon avatars survive list round-trips", async () => {
+    const deleted = await newAgent("Restaurar");
+    await c.request("agents.update", { id: deleted.id, avatar: { icon: "chart" } });
+    await c.request("agents.delete", { id: deleted.id });
+    expect(
+      ((await c.request("agents.list")) as Agent[]).some((item) => item.id === deleted.id),
+    ).toBe(false);
+    const created = c.waitForEventWhere(
+      "agent.created",
+      (item) => (item as Agent).id === deleted.id,
+    );
+    const restored = (await c.request("agents.restore", { id: deleted.id })) as Agent;
+    expect(restored.avatar).toEqual({ icon: "chart" });
+    await created;
+    expect(
+      ((await c.request("agents.list")) as Agent[]).some((item) => item.id === deleted.id),
+    ).toBe(true);
+    await expect(c.request("agents.restore", { id: deleted.id })).rejects.toMatchObject({
+      code: "not_found",
+    });
+  });
+
+  test("memories enforce the configuration screen character limit", async () => {
+    const accepted = (await c.request("memories.add", {
+      agentId: a.id,
+      text: "x".repeat(2_000),
+    })) as Memory;
+    expect(accepted.text).toHaveLength(2_000);
+    await c.request("memories.delete", { id: accepted.id });
+    await expect(
+      c.request("memories.add", { agentId: a.id, text: "x".repeat(2_001) }),
+    ).rejects.toMatchObject({ code: "bad_request" });
+  });
+
+  test("memories.update edits text, emits memories.changed and rejects unknown ids", async () => {
+    const m = (await c.request("memories.add", {
+      agentId: a.id,
+      text: "before the edit",
+    })) as Memory;
+    const changed = c.waitForEventWhere(
+      "memories.changed",
+      (d) => (d as { agentId: string }).agentId === a.id,
+    );
+    const updated = (await c.request("memories.update", {
+      id: m.id,
+      text: "  after the edit  ",
+    })) as Memory;
+    expect(updated.id).toBe(m.id);
+    expect(updated.text).toBe("after the edit");
+    expect(updated.updatedAt).toBeGreaterThanOrEqual(updated.createdAt);
+    await changed;
+    const list = (await c.request("memories.list", { agentId: a.id })) as Memory[];
+    expect(list.find((x) => x.id === m.id)?.text).toBe("after the edit");
+    await expect(
+      c.request("memories.update", { id: "mem-missing", text: "x" }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await c.request("memories.delete", { id: m.id });
+  });
+
+  test("memories.update enforces edit limits without changing stored memory on invalid edits", async () => {
+    const memory = (await c.request("memories.add", {
+      agentId: a.id,
+      text: "Original memory",
+    })) as Memory;
+    for (const text of ["", "   ", "x".repeat(2_001)]) {
+      await expect(c.request("memories.update", { id: memory.id, text })).rejects.toMatchObject({
+        code: "bad_request",
+      });
+    }
+    expect(await c.request("memories.list", { agentId: a.id })).toContainEqual(memory);
+    const atLimit = (await c.request("memories.update", {
+      id: memory.id,
+      text: "x".repeat(2_000),
+    })) as Memory;
+    expect(atLimit).toMatchObject({
+      id: memory.id,
+      agentId: memory.agentId,
+      createdAt: memory.createdAt,
+      text: "x".repeat(2_000),
+    });
+    expect(atLimit.updatedAt).toBeGreaterThanOrEqual(memory.updatedAt);
+    expect(await c.request("memories.list", { agentId: a.id })).toContainEqual(atLimit);
+    await c.request("memories.delete", { id: memory.id });
   });
 
   test("memories via RPC are injected into the first prompt of a session", async () => {
@@ -168,7 +261,7 @@ describe("avatars, memories, skills, agent creation e2e", () => {
     expect(out).toContain("tool-ok:created agent Scribe");
     const ag = (await created) as Agent;
     expect(ag.provider).toBe("devin");
-    expect(ag.avatar?.emoji).toBe("✍️");
+    expect(ag.avatar && "emoji" in ag.avatar ? ag.avatar.emoji : undefined).toBe("✍️");
     expect(
       await turn(a.id, 'mcp:create_agent {"name":"X","instructions":"y","provider":"nope"}'),
     ).toContain("tool-error:unknown provider");
