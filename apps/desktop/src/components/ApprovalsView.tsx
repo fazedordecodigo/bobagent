@@ -282,9 +282,7 @@ export function ApprovalsView({ client, agents }: { client: DaemonClient; agents
   const [form, setForm] = useState({ pattern: "", action: "ask" as "ask" | "allow", agentId: "" });
   const [error, setError] = useState<string | null>(null);
   const save = (next: ApprovalRule[]) =>
-    client
-      .request("approvals.setRules", { rules: next })
-      .catch((e) => setError(errorMessage(e)));
+    client.request("approvals.setRules", { rules: next }).catch((e) => setError(errorMessage(e)));
   const nameOf = (id: string | null) =>
     id ? (agents.find((a) => a.id === id)?.name ?? "Bot removido") : "Todos os bots";
   return (
