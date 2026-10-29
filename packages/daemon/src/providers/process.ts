@@ -2,7 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import type { ProviderId } from "@upbot/protocol";
 import { resolveCommand, spawnEnv } from "../env/login-path";
 import { spawnChild, waitForChildSpawn } from "../env/spawn";
-import { ProviderError, type ProviderHooks, type RemoteLaunch } from "./types";
+import { ProviderError, type RemoteLaunch } from "./types";
 
 export const STDERR_TAIL_LINES = 50;
 

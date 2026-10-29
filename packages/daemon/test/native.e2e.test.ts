@@ -89,11 +89,12 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
   function persistedSessionId(agentId: string): string | null {
     const db = new Database(join(dataDir, "upbot.db"), { readonly: true });
     try {
-      return (
-        db.query("SELECT session_id FROM agent_sessions WHERE agent_id = ?").get(agentId) as {
-          session_id: string;
-        } | null
-      )?.session_id ?? null;
+      const row = db
+        .query("SELECT session_id FROM agent_sessions WHERE agent_id = ?")
+        .get(agentId) as {
+        session_id: string;
+      } | null;
+      return row?.session_id ?? null;
     } finally {
       db.close();
     }
@@ -292,15 +293,16 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
       const last = argvs[argvs.length - 1]!;
       expect(last).toContain("--session-id");
       expect(last).not.toContain("--resume");
-      freshSessionId = last[last.indexOf("--session-id") + 1]!;
+      freshSessionId = last[last.indexOf("--session-id") + 1] ?? "";
     } else {
       const resumes = log
         .filter((l) => l.method === "thread/resume")
         .map((l) => (l.params as { params: { threadId: string } }).params.threadId);
       expect(resumes.filter((id) => id === oldSessionId)).toHaveLength(1);
       expect(log.filter((l) => l.method === "thread/start").length).toBeGreaterThan(0);
-      freshSessionId = who.match(/thread=([^\s]+)/)?.[1]!;
+      freshSessionId = who.match(/thread=([^\s]+)/)?.[1] ?? "";
     }
+    expect(freshSessionId).toBeTruthy();
     expect(persistedSessionId(a.id)).not.toBe(oldSessionId);
     expect(persistedSessionId(a.id)).toBe(freshSessionId);
     const deadline = Date.now() + 5000;
@@ -316,7 +318,8 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
   test("transient resume failure keeps the saved session until a fresh launch succeeds", async () => {
     const a = await newAgent("TransientResumeFail");
     await turn(a.id, "echo:first");
-    const oldSessionId = persistedSessionId(a.id)!;
+    const oldSessionId = persistedSessionId(a.id);
+    if (!oldSessionId) throw new Error("agent session was not persisted");
     writeFileSync(join(stateDir, "fail-start"), "");
     const stderrChunks = await restartDaemon();
 
