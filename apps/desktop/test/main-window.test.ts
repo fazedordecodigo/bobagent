@@ -1188,6 +1188,8 @@ test("earlier-history failure is shown", async () => {
   await seedEchoHistory(agent.id, echo);
   const target = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   target.setDefaultTimeout(5000);
+  const consoleText: string[] = [];
+  target.on("console", (message) => consoleText.push(message.text()));
   await target.addInitScript((id) => {
     localStorage.setItem("upbot.agent", id);
     localStorage.setItem("upbot.view", "chat");
@@ -1221,11 +1223,20 @@ test("earlier-history failure is shown", async () => {
     await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
     const chat = target.locator('[data-od-id="chat-view"]');
     await chat.getByText(echo, { exact: true }).waitFor();
+    const earlierLog = target.waitForEvent("console", {
+      predicate: (message) => message.text().includes("[desktop] chat.history_earlier_failed"),
+    });
     await chat.getByRole("button", { name: "Carregar anteriores", exact: true }).click();
     await chat
       .getByRole("alert")
       .filter({ hasText: "Não foi possível carregar mensagens anteriores: Falha de teste" })
       .waitFor();
+    const logLine = (await earlierLog).text();
+    expect(logLine).toContain(agent.id);
+    expect(logLine).toContain('"code":"internal"');
+    const logs = consoleText.filter((line) => line.includes("[desktop]")).join("\n");
+    expect(logs).not.toContain("Falha de teste");
+    expect(logs).not.toContain(echo);
   } finally {
     await target.close();
   }

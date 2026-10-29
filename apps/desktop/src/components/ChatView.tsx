@@ -130,10 +130,8 @@ export function ChatView({
   );
 
   const loadEarlierItems = useCallback(() => {
-    void loadEarlier().catch((e: unknown) =>
-      logWarn("chat.history_earlier_failed", { agentId: agent.id, ...errorFields(e) }),
-    );
-  }, [agent.id, loadEarlier]);
+    void loadEarlier();
+  }, [loadEarlier]);
   const displayStatus = overview?.status ?? "idle";
   const isAsking = supportsModes && safeMode;
   const placeholder = isAsking

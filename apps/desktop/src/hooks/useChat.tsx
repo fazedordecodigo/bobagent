@@ -212,6 +212,7 @@ export function useChat(client: DaemonClient, agentId: string | null) {
       setError("earlier", null);
     } catch (e) {
       if (activeAgent.current !== forAgent) return;
+      logWarn("chat.history_earlier_failed", { agentId: forAgent, ...errorFields(e) });
       setError("earlier", `Não foi possível carregar mensagens anteriores: ${describe(e)}`);
     }
   }, [client, agentId, setError]);
