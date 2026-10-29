@@ -347,6 +347,31 @@ test("real chat, approval once/always/undo, details, palette, settings and drawe
 
 test("RunPanel switch tracks contain their knobs on and off in both themes", async () => {
   const previous = (await rpc.request("approvals.rules", {})) as ApprovalRule[];
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  page.setDefaultTimeout(5000);
+  await page.addInitScript((id) => {
+    localStorage.setItem("upbot.agent", id);
+    localStorage.setItem("upbot.view", "chat");
+  }, bot.id);
+  await page.routeWebSocket(`ws://127.0.0.1:${daemon.port}/ws?*`, (socket) => {
+    const server = socket.connectToServer();
+    const delayed = new Set<string>();
+    let closed = false;
+    socket.onMessage((message) => {
+      const request = JSON.parse(String(message));
+      if (request.method === "agents.list") delayed.add(request.id);
+      server.send(message);
+    });
+    server.onMessage(async (message) => {
+      const response = JSON.parse(String(message));
+      if (delayed.delete(response.id)) await Bun.sleep(500);
+      if (!closed) socket.send(message);
+    });
+    socket.onClose(() => {
+      closed = true;
+      server.close();
+    });
+  });
   try {
     for (const theme of ["light", "dark"]) {
       await rpc.request("approvals.setRules", {
@@ -363,11 +388,7 @@ test("RunPanel switch tracks contain their knobs on and off in both themes", asy
       await page.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
       await page.evaluate((value) => localStorage.setItem("upbot.theme", value), theme);
       await page.reload();
-      await page.locator(".side").waitFor();
-      await page.keyboard.press("Meta+1");
-      if (!(await page.locator(".panel").isVisible())) {
-        await page.getByRole("button", { name: "Alternar painel de execução" }).click();
-      }
+      await page.locator(".panel").waitFor();
       const permissions = page.locator('[data-od-id="panel-perms"]');
       for (const name of ["Agir sem perguntar", "switch_geometry_check"]) {
         const control = permissions.getByRole("switch", { name, exact: true });
@@ -389,6 +410,7 @@ test("RunPanel switch tracks contain their knobs on and off in both themes", asy
       if (out) await permissions.screenshot({ path: join(out, `switch-runpanel-${theme}.png`) });
     }
   } finally {
+    await page.close();
     await rpc.request("approvals.setRules", { rules: previous });
   }
 }, 30000);
