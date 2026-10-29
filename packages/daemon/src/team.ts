@@ -34,7 +34,7 @@ const logId = (v: unknown) =>
 // dropped it because we were offline) fails after this TTL; a late reply still overwrites it.
 const REPLY_TTL_MS = (() => {
   const v = Number(process.env.UPBOT_TEAM_REPLY_TTL_MS);
-  return v > 0 ? v : 30 * 60_000;
+  return Number.isFinite(v) && v > 0 ? v : 30 * 60_000;
 })();
 const EXPIRED_REPLY = "No reply from the teammate in time; the relay may have dropped it.";
 

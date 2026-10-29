@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
@@ -360,6 +361,39 @@ describe("teams via relay e2e", () => {
         reply: "No reply from the teammate in time; the relay may have dropped it.",
       });
     });
+  });
+
+  test("requests left pending past the TTL fail on daemon start, before any relay connect", async () => {
+    const [d, a, s] = [tmp("tm-data-"), tmp("tm-agents-"), tmp("tm-fake-")];
+    dirs.push(d, a, s);
+    const env = { FAKE_ACP_STATE_DIR: s, UPBOT_VAULT_KEY: "ef".repeat(32) };
+    const first = await startDaemon(d, a, `tm-${crypto.randomUUID()}`, env);
+    first.proc.kill("SIGTERM");
+    await first.proc.exited;
+    const db = new Database(join(d, "upbot.db"));
+    const insert = db.query(
+      `INSERT INTO team_messages (id, request_id, direction, member_id, member_name, agent_id, agent_name, text, status, created_at)
+       VALUES (?, ?, ?, 'm1', 'Ana', 'a1', 'Helper', 'hi', 'pending', ?)`,
+    );
+    insert.run("old-out", "req-old-out", "out", Date.now() - 120_000);
+    insert.run("new-out", "req-new-out", "out", Date.now());
+    insert.run("old-in", "req-old-in", "in", Date.now() - 120_000);
+    db.close();
+    const token = `tm-${crypto.randomUUID()}`;
+    // The periodic check runs every 30 s for this TTL, so only the startup pass can expire it in time.
+    const h = await startDaemon(d, a, token, { ...env, UPBOT_TEAM_REPLY_TTL_MS: "60000" });
+    daemons.push(h);
+    const c = await DaemonClient.connect(h.port, token);
+    clients.push(c);
+    const byId = new Map(
+      ((await c.request("team.messages", {})) as TeamMessage[]).map((m) => [m.requestId, m]),
+    );
+    expect(byId.get("req-old-out")).toMatchObject({
+      status: "failed",
+      reply: "No reply from the teammate in time; the relay may have dropped it.",
+    });
+    expect(byId.get("req-new-out")?.status).toBe("pending");
+    expect(byId.get("req-old-in")?.status).toBe("pending");
   });
 
   test("removed members are disconnected", async () => {
