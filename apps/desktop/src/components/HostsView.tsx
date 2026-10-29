@@ -63,7 +63,7 @@ function VmCredentials({
   } = useDaemonQuery(client, "vmCredentials.list", {}, { events: { "hosts.changed": true } });
   const creds = credsData ?? [];
   useEffect(() => {
-    if (credsError) onError(credsError);
+    onError(credsError);
   }, [credsError, onError]);
   const [form, setForm] = useState<{
     provider: VmCredentialProvider;
@@ -163,7 +163,7 @@ export function HostsView({ client, agents }: { client: DaemonClient; agents: Ag
   const [form, setForm] = useState({ name: "", target: "", port: "22", identityFile: "" });
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const fail = useCallback((e: unknown) => setError(errorMessage(e)), []);
+  const fail = useCallback((e: unknown) => setError(e === null ? null : errorMessage(e)), []);
 
   const reload = useCallback(() => {
     client.request("hosts.list", {}).then(setHosts).catch(fail);
