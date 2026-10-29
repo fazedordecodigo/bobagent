@@ -112,8 +112,11 @@ export function useChat(client: DaemonClient, agentId: string | null) {
     });
     seqCursor.current = null;
     if (!agentId) return;
-    void load();
-    refreshStatus();
+    const sync = () => {
+      void load();
+      refreshStatus();
+    };
+    sync();
 
     const matches = (id: string | undefined | null) => id === agentId;
     const offs = [
@@ -179,10 +182,7 @@ export function useChat(client: DaemonClient, agentId: string | null) {
         if (!matches(q.agentId)) return;
         setState((s) => ({ ...s, queue: q, errors: { ...s.errors, queue: null } }));
       }),
-      client.onReconnect(() => {
-        void load();
-        refreshStatus();
-      }),
+      client.onReconnect(sync),
     ];
     return () => {
       for (const off of offs) off();
@@ -197,7 +197,7 @@ export function useChat(client: DaemonClient, agentId: string | null) {
         agentId: forAgent,
         beforeSeq: seqCursor.current,
       });
-      if (activeAgent.current !== forAgent) return;
+      if (activeAgent.current !== forAgent) return; // stale load after switching agents
       if (res.items.length > 0) seqCursor.current = res.items[0]?.seq ?? null;
       setState((s) => ({
         ...s,

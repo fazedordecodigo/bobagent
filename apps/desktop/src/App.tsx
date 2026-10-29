@@ -32,6 +32,7 @@ import { moveControlFocus } from "./lib/keyboard";
 import { nativeCommand } from "./lib/native";
 import { useNativeNotifications } from "./lib/native-notifications";
 import { mod } from "./lib/platform";
+import { readStorage, writeStorage } from "./lib/storage";
 import { useThemePref } from "./lib/theme";
 import { MonoAv, Pill, role, type UiStatus } from "./lib/ui";
 
@@ -74,20 +75,6 @@ const STATUS_NOTES = {
   ok: "Entregue",
   err: "Falhou",
 };
-
-function readStorage(key: string) {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeStorage(key: string, value: string) {
-  try {
-    localStorage.setItem(key, value);
-  } catch {}
-}
 
 function readView(): RailView {
   const stored = readStorage("upbot.view");
@@ -196,6 +183,9 @@ export default function App() {
       client.onReconnect(() => {
         void refreshAll().catch(() => {});
       }),
+      client.onFailure((e) => {
+        if (alive) setError(e.message);
+      }),
     ];
     return () => {
       alive = false;
@@ -240,7 +230,7 @@ export default function App() {
         navigate("agent-settings");
       } catch (e) {
         showAgentUndoToast(
-          `Não deu para desfazer: ${e instanceof Error ? e.message : String(e)}`,
+          `Não deu para desfazer: ${errorMessage(e)}`,
           () => void restoreDeletedAgent(agentId),
         );
       }

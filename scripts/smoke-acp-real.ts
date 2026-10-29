@@ -12,9 +12,14 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Agent, ChatItem, PendingPermission, Turn } from "@upbot/protocol";
+import { daemonTarget } from "../packages/daemon/src/target";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const BINARY = join(ROOT, "apps/desktop/src-tauri/binaries/upbotd-aarch64-apple-darwin");
+const BINARY = join(
+  ROOT,
+  "apps/desktop/src-tauri/binaries",
+  `upbotd-${daemonTarget(process.platform, process.arch).rustTriple}`,
+);
 const TOKEN = `smoke-${crypto.randomUUID()}`;
 const TURN_TIMEOUT_MS = 180_000;
 const PROVIDERS = ["devin", "cursor", "grok", "opencode"] as const;
@@ -185,11 +190,17 @@ async function main() {
         )
         .then(async (p) => {
           const perm = p as PendingPermission;
-          rec.permissionRequest = { title: perm.title, answered: "reject_once" };
-          await c.request("permissions.respond", {
-            requestId: perm.requestId,
-            optionId: "reject_once",
-          });
+          const pr: Record<string, unknown> = { title: perm.title };
+          rec.permissionRequest = pr;
+          try {
+            await c.request("permissions.respond", {
+              requestId: perm.requestId,
+              optionId: "reject_once",
+            });
+            pr.answered = "reject_once";
+          } catch (e) {
+            rec.permissionRespondError = String(e);
+          }
         })
         .catch(() => {});
       void permWatch;
