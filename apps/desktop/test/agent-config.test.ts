@@ -766,7 +766,7 @@ test("existing memories are editable inline and only persist on Save", async () 
   })) as Agent;
   const first = (await rpc.request("memories.add", {
     agentId: subject.id,
-    text: "Gosta de café",
+    text: "Gosta de café\ncom açúcar",
   })) as Memory;
   const second = (await rpc.request("memories.add", {
     agentId: subject.id,
@@ -784,20 +784,20 @@ test("existing memories are editable inline and only persist on Save", async () 
 
     const edit = target.getByLabel("Memória 1");
     await edit.waitFor();
-    expect(await edit.inputValue()).toBe("Gosta de café");
+    expect(await edit.inputValue()).toBe("Gosta de café\ncom açúcar");
     expect(await target.getByLabel("Memória 2").inputValue()).toBe("Evita spoilers");
 
-    await edit.fill("Gosta de chá");
+    await edit.fill("Gosta de chá\ne café");
     await target.getByText("Alterações não salvas").waitFor();
 
     let stored = (await rpc.request("memories.list", { agentId: subject.id })) as Memory[];
-    expect(stored.find((item) => item.id === first.id)?.text).toBe("Gosta de café");
+    expect(stored.find((item) => item.id === first.id)?.text).toBe("Gosta de café\ncom açúcar");
 
     await target.getByRole("button", { name: "Salvar", exact: false }).click();
     await target.getByRole("status").filter({ hasText: "Configurações salvas." }).waitFor();
 
     stored = (await rpc.request("memories.list", { agentId: subject.id })) as Memory[];
-    expect(stored.find((item) => item.id === first.id)?.text).toBe("Gosta de chá");
+    expect(stored.find((item) => item.id === first.id)?.text).toBe("Gosta de chá\ne café");
     expect(stored.find((item) => item.id === second.id)?.text).toBe("Evita spoilers");
     expect(stored).toHaveLength(2);
 
@@ -808,7 +808,7 @@ test("existing memories are editable inline and only persist on Save", async () 
     await target.getByRole("button", { name: "Salvar", exact: false }).click();
     await target.getByRole("status").filter({ hasText: "Não deu para salvar:" }).waitFor();
     stored = (await rpc.request("memories.list", { agentId: subject.id })) as Memory[];
-    expect(stored.find((item) => item.id === first.id)?.text).toBe("Gosta de chá");
+    expect(stored.find((item) => item.id === first.id)?.text).toBe("Gosta de chá\ne café");
     expect(stored.find((item) => item.id === second.id)?.text).toBe("Evita spoilers");
     expect(await target.getByLabel("Memória 1").inputValue()).toBe("");
   } finally {
