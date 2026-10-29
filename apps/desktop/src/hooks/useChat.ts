@@ -10,7 +10,10 @@ export type ChatState = {
   runningTurn: Turn | null;
   status: AgentStatusInfo;
   loaded: boolean;
+  error: string | null;
 };
+
+const describe = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export function useChat(client: DaemonClient, agentId: string | null) {
   const [state, setState] = useState<ChatState>({
@@ -20,6 +23,7 @@ export function useChat(client: DaemonClient, agentId: string | null) {
     runningTurn: null,
     status: { status: "idle", error: null },
     loaded: false,
+    error: null,
     queue: null as QueueState | null,
   });
   const seqCursor = useRef<number | null>(null);
@@ -29,21 +33,54 @@ export function useChat(client: DaemonClient, agentId: string | null) {
   const load = useCallback(async () => {
     if (!agentId) return;
     const forAgent = agentId;
-    const res = await client.request("chat.history", { agentId: forAgent });
-    if (activeAgent.current !== forAgent) return; // stale load after switching agents
-    seqCursor.current = res.items[0]?.seq ?? null;
-    const running = res.turns.find((t) => t.status === "running") ?? null;
-    const queue = await client.request("queue.get", { agentId: forAgent }).catch(() => null);
-    if (activeAgent.current !== forAgent) return;
-    setState((s) => ({
-      ...s,
-      items: res.items,
-      turns: new Map(res.turns.map((t) => [t.id, t])),
-      hasMore: res.hasMore,
-      runningTurn: running,
-      queue,
-      loaded: true,
-    }));
+    try {
+      const res = await client.request("chat.history", { agentId: forAgent });
+      if (activeAgent.current !== forAgent) return; // stale load after switching agents
+      seqCursor.current = res.items[0]?.seq ?? null;
+      const running = res.turns.find((t) => t.status === "running") ?? null;
+      let queueError: string | null = null;
+      const queue = await client.request("queue.get", { agentId: forAgent }).catch((e: unknown) => {
+        queueError = `Não foi possível carregar a fila: ${describe(e)}`;
+        return null;
+      });
+      if (activeAgent.current !== forAgent) return;
+      setState((s) => ({
+        ...s,
+        items: res.items,
+        turns: new Map(res.turns.map((t) => [t.id, t])),
+        hasMore: res.hasMore,
+        runningTurn: running,
+        queue,
+        loaded: true,
+        error: queueError,
+      }));
+    } catch (e) {
+      if (activeAgent.current !== forAgent) return;
+      setState((s) => ({
+        ...s,
+        loaded: true,
+        error: `Não foi possível carregar o histórico: ${describe(e)}`,
+      }));
+    }
+  }, [client, agentId]);
+
+  const refreshStatus = useCallback(() => {
+    if (!agentId) return;
+    const forAgent = agentId;
+    client
+      .request("agents.statuses", {})
+      .then((st) => {
+        if (activeAgent.current !== forAgent) return;
+        const info = st[forAgent];
+        if (info) setState((s) => ({ ...s, status: info }));
+      })
+      .catch((e: unknown) => {
+        if (activeAgent.current !== forAgent) return;
+        setState((s) => ({
+          ...s,
+          error: `Não foi possível carregar o status: ${describe(e)}`,
+        }));
+      });
   }, [client, agentId]);
 
   useEffect(() => {
@@ -55,17 +92,12 @@ export function useChat(client: DaemonClient, agentId: string | null) {
       runningTurn: null,
       status: { status: "idle", error: null },
       loaded: false,
+      error: null,
     });
     seqCursor.current = null;
     if (!agentId) return;
-    load().catch(() => {});
-    client
-      .request("agents.statuses", {})
-      .then((st) => {
-        const info = st[agentId];
-        if (info) setState((s) => ({ ...s, status: info }));
-      })
-      .catch(() => {});
+    void load();
+    refreshStatus();
 
     const matches = (id: string | undefined | null) => id === agentId;
     const offs = [
@@ -118,20 +150,14 @@ export function useChat(client: DaemonClient, agentId: string | null) {
         setState((s) => ({ ...s, queue: q }));
       }),
       client.onReconnect(() => {
-        load().catch(() => {});
-        client
-          .request("agents.statuses", {})
-          .then((st) => {
-            const info = st[agentId];
-            if (info) setState((s) => ({ ...s, status: info }));
-          })
-          .catch(() => {});
+        void load();
+        refreshStatus();
       }),
     ];
     return () => {
       for (const off of offs) off();
     };
-  }, [client, agentId, load]);
+  }, [client, agentId, load, refreshStatus]);
 
   const loadEarlier = useCallback(async () => {
     if (!agentId || seqCursor.current === null) return;
@@ -148,15 +174,32 @@ export function useChat(client: DaemonClient, agentId: string | null) {
     }));
   }, [client, agentId]);
 
-  const queuePause = useCallback(() => {
-    if (agentId) client.request("queue.pause", { agentId }).catch(() => {});
+  const queuePause = useCallback(async () => {
+    if (!agentId) return;
+    try {
+      await client.request("queue.pause", { agentId });
+      setState((s) => ({ ...s, error: null }));
+    } catch (e) {
+      setState((s) => ({ ...s, error: `Não foi possível pausar a fila: ${describe(e)}` }));
+    }
   }, [client, agentId]);
-  const queueResume = useCallback(() => {
-    if (agentId) client.request("queue.resume", { agentId }).catch(() => {});
+  const queueResume = useCallback(async () => {
+    if (!agentId) return;
+    try {
+      await client.request("queue.resume", { agentId });
+      setState((s) => ({ ...s, error: null }));
+    } catch (e) {
+      setState((s) => ({ ...s, error: `Não foi possível retomar a fila: ${describe(e)}` }));
+    }
   }, [client, agentId]);
   const queueRemove = useCallback(
-    (queueId: string) => {
-      client.request("queue.remove", { queueId }).catch(() => {});
+    async (queueId: string) => {
+      try {
+        await client.request("queue.remove", { queueId });
+        setState((s) => ({ ...s, error: null }));
+      } catch (e) {
+        setState((s) => ({ ...s, error: `Não foi possível remover da fila: ${describe(e)}` }));
+      }
     },
     [client],
   );

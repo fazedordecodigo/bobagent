@@ -35,6 +35,7 @@ export function ChatView({
     runningTurn,
     loaded,
     queue,
+    error,
     loadEarlier,
     queuePause,
     queueResume,
@@ -169,6 +170,11 @@ export function ChatView({
         </button>
       </header>
       {modeError && <div className="notice is-err">{modeError}</div>}
+      {error && (
+        <div className="notice is-err" role="alert">
+          {error}
+        </div>
+      )}
       <MessageList
         agent={agent}
         status={displayStatus}
@@ -228,18 +234,26 @@ export function ChatView({
                 <button
                   type="button"
                   aria-label="Remover da fila"
-                  onClick={() => queueRemove(item.id)}
+                  onClick={() => void queueRemove(item.id)}
                 >
                   ×
                 </button>
               </span>
             ))}
             {queue.paused ? (
-              <button type="button" className="btn btn-ghost btn-sm" onClick={queueResume}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => void queueResume()}
+              >
                 Retomar fila
               </button>
             ) : (
-              <button type="button" className="btn btn-ghost btn-sm" onClick={queuePause}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => void queuePause()}
+              >
                 Pausar fila
               </button>
             )}
