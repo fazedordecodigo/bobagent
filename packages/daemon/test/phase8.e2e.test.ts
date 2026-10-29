@@ -133,6 +133,20 @@ describe("avatars, memories, skills, agent creation e2e", () => {
     ).rejects.toMatchObject({ code: "bad_request" });
   });
 
+  test("memories.update edits text and bumps updated_at", async () => {
+    const m = (await c.request("memories.add", { agentId: a.id, text: "draft" })) as Memory;
+    const updated = (await c.request("memories.update", { id: m.id, text: "final" })) as Memory;
+    expect(updated.text).toBe("final");
+    expect(updated.updatedAt).toBeGreaterThanOrEqual(m.updatedAt);
+    await expect(
+      c.request("memories.update", { id: "nope", text: "x" }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      c.request("memories.update", { id: m.id, text: "x".repeat(2_001) }),
+    ).rejects.toMatchObject({ code: "bad_request" });
+    await c.request("memories.delete", { id: m.id });
+  });
+
   test("memories via RPC are injected into the first prompt of a session", async () => {
     const m = (await c.request("memories.add", {
       agentId: a.id,
