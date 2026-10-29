@@ -111,17 +111,26 @@ export class ChatStore {
     return r ? rowToItem(r) : null;
   }
 
-  updateItemData(id: string, data: object): ChatItem {
+  writeItemData(id: string, data: object): number {
+    const now = Date.now();
     this.db
       .query("UPDATE items SET data_json = ?, updated_at = ? WHERE id = ?")
-      .run(JSON.stringify(data), Date.now(), id);
+      .run(JSON.stringify(data), now, id);
+    return now;
+  }
+
+  updateItemData(id: string, data: object): ChatItem {
+    this.writeItemData(id, data);
     return this.getItem(id)!;
   }
 
-  appendItemText(id: string, chunk: string): ChatItem {
-    const item = this.getItem(id)!;
-    const text = ((item as { text?: string }).text ?? "") + chunk;
-    return this.updateItemData(id, { ...stripBase(item), text });
+  /** Overwrites the `text` field of an item's data_json without re-reading the row. */
+  setItemText(id: string, text: string): void {
+    this.db
+      .query(
+        "UPDATE items SET data_json = json_set(data_json, '$.text', ?), updated_at = ? WHERE id = ?",
+      )
+      .run(text, Date.now(), id);
   }
 
   findToolCallItem(turnId: string, toolCallId: string): ChatItem | null {
@@ -254,14 +263,6 @@ export class ChatStore {
       )
       .run(agentId, provider, sessionId, now, now);
   }
-}
-
-function stripBase(item: ChatItem): Record<string, unknown> {
-  const data = { ...(item as unknown as Record<string, unknown>) };
-  for (const key of ["id", "seq", "agentId", "turnId", "createdAt", "updatedAt", "kind"]) {
-    delete data[key];
-  }
-  return data;
 }
 
 // ---- Queue ----

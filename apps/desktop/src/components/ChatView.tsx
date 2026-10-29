@@ -1,8 +1,9 @@
 import type { Agent } from "@upbot/protocol";
-import { useEffect, useState } from "react";
-import { useChat } from "../hooks/useChat";
+import { useCallback, useEffect, useState } from "react";
+import { useChatApi } from "../hooks/useChat";
 import type { AgentOverview } from "../hooks/useOverview";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 import { moveControlFocus } from "../lib/keyboard";
 import { MonoAv, Pill, role } from "../lib/ui";
 import { PermissionNotice } from "./AgentSettings";
@@ -39,7 +40,7 @@ export function ChatView({
     queuePause,
     queueResume,
     queueRemove,
-  } = useChat(client, agent.id);
+  } = useChatApi();
   const [sendBusy, setSendBusy] = useState(false);
   const [voice, setVoice] = useState({ tts: false, stt: false });
   const [composerText, setComposerText] = useState("");
@@ -81,33 +82,51 @@ export function ChatView({
     try {
       await client.request("agents.setConfig", { agentId: agent.id, configId: "mode", value });
     } catch (e) {
-      setModeError(e instanceof Error ? e.message : String(e));
+      setModeError(errorMessage(e));
     }
   };
 
-  const send = async (
-    text: string,
-    attachments: { name: string; mime: string; dataBase64: string }[],
-  ) => {
-    setSendBusy(true);
-    setSendError(null);
-    try {
-      await client.request("chat.send", {
-        agentId: agent.id,
-        text,
-        ...(attachments.length ? { attachments } : {}),
-      });
-    } catch (e) {
-      setSendError(e instanceof Error ? e.message : String(e));
-      throw e;
-    } finally {
-      setSendBusy(false);
-    }
-  };
+  const send = useCallback(
+    async (text: string, attachments: { name: string; mime: string; dataBase64: string }[]) => {
+      setSendBusy(true);
+      setSendError(null);
+      try {
+        await client.request("chat.send", {
+          agentId: agent.id,
+          text,
+          ...(attachments.length ? { attachments } : {}),
+        });
+      } catch (e) {
+        setSendError(errorMessage(e));
+        throw e;
+      } finally {
+        setSendBusy(false);
+      }
+    },
+    [client, agent.id],
+  );
 
-  const retry = () => {
+  const retry = useCallback(() => {
     if (latestUser?.kind === "user_message") void send(latestUser.text, []);
-  };
+  }, [latestUser, send]);
+
+  const respondPermission = useCallback(
+    (requestId: string, optionId: string | null) => {
+      void client.request("permissions.respond", { requestId, optionId }).catch((e) => {
+        setSendError(errorMessage(e));
+      });
+    },
+    [client],
+  );
+
+  const speak = useCallback(
+    (text: string) => void client.request("voice.speak", { text }).catch(() => {}),
+    [client],
+  );
+
+  const loadEarlierItems = useCallback(() => {
+    void loadEarlier().catch(() => {});
+  }, [loadEarlier]);
   const displayStatus = overview?.status ?? "idle";
   const isAsking = supportsModes && safeMode;
   const placeholder = isAsking
@@ -177,17 +196,9 @@ export function ChatView({
         loaded={loaded}
         emptyNotice={<PermissionNotice provider={agent.provider} />}
         running={runningTurn !== null || displayStatus === "run"}
-        onLoadEarlier={() => void loadEarlier().catch(() => {})}
-        onPermissionRespond={(requestId, optionId) => {
-          void client.request("permissions.respond", { requestId, optionId }).catch((e) => {
-            setSendError(e instanceof Error ? e.message : String(e));
-          });
-        }}
-        onSpeak={
-          voice.tts
-            ? (text) => void client.request("voice.speak", { text }).catch(() => {})
-            : undefined
-        }
+        onLoadEarlier={loadEarlierItems}
+        onPermissionRespond={respondPermission}
+        onSpeak={voice.tts ? speak : undefined}
         onRetry={retry}
         canRetry={canRetry}
         retryHasAttachments={retryHasAttachments}
