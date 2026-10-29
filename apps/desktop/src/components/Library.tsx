@@ -110,7 +110,10 @@ export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agent
             <button
               type="button"
               className="text-xs text-zinc-500 hover:text-red-400"
-              onClick={() => client.request("memories.delete", { id: m.id }).catch(fail)}
+              onClick={() => {
+                setError(null);
+                client.request("memories.delete", { id: m.id }).catch(fail);
+              }}
             >
               Delete
             </button>
@@ -124,6 +127,7 @@ export function MemoriesPanel({ client, agentId }: { client: DaemonClient; agent
         onSubmit={(e) => {
           e.preventDefault();
           if (!text.trim()) return;
+          setError(null);
           client
             .request("memories.add", { agentId, text })
             .then(() => setText(""))
@@ -169,7 +173,7 @@ export function SkillsView({ client }: { client: DaemonClient }) {
           client
             .request("skills.save", edit)
             .then(() => setEdit(null))
-            .catch((err) => setError(errorMessage(err)));
+            .catch(fail);
         }}
       >
         <h2 className="text-lg font-semibold">Skill</h2>
@@ -200,7 +204,10 @@ export function SkillsView({ client }: { client: DaemonClient }) {
           <button
             type="button"
             className={`${btnCls} bg-zinc-700 hover:bg-zinc-600`}
-            onClick={() => setEdit(null)}
+            onClick={() => {
+              setError(null);
+              setEdit(null);
+            }}
           >
             Cancel
           </button>
@@ -215,7 +222,10 @@ export function SkillsView({ client }: { client: DaemonClient }) {
         <button
           type="button"
           className={`${btnCls} ml-auto bg-sky-600 hover:bg-sky-500`}
-          onClick={() => setEdit({ name: "", description: "", body: "" })}
+          onClick={() => {
+            setError(null);
+            setEdit({ name: "", description: "", body: "" });
+          }}
         >
           New skill
         </button>
@@ -232,14 +242,20 @@ export function SkillsView({ client }: { client: DaemonClient }) {
               <button
                 type="button"
                 className="ml-auto text-xs text-sky-400 hover:text-sky-300"
-                onClick={() => setEdit({ name: s.name, description: s.description, body: s.body })}
+                onClick={() => {
+                  setError(null);
+                  setEdit({ name: s.name, description: s.description, body: s.body });
+                }}
               >
                 Edit
               </button>
               <button
                 type="button"
                 className="text-xs text-zinc-500 hover:text-red-400"
-                onClick={() => client.request("skills.delete", { name: s.name }).catch(fail)}
+                onClick={() => {
+                  setError(null);
+                  client.request("skills.delete", { name: s.name }).catch(fail);
+                }}
               >
                 Delete
               </button>
@@ -409,7 +425,10 @@ export function BrowserView({ client, agents }: { client: DaemonClient; agents: 
           <button
             type="button"
             className={`${btnCls} ml-auto bg-zinc-700 hover:bg-zinc-600`}
-            onClick={() => client.request("browser.close", {}).catch(fail)}
+            onClick={() => {
+              setError(null);
+              client.request("browser.close", {}).catch(fail);
+            }}
           >
             Close browser
           </button>
@@ -434,7 +453,10 @@ export function BrowserView({ client, agents }: { client: DaemonClient; agents: 
             <button
               type="button"
               className="text-xs text-zinc-500 hover:text-red-400"
-              onClick={() => client.request("browser.closeTab", { agentId: t.agentId }).catch(fail)}
+              onClick={() => {
+                setError(null);
+                client.request("browser.closeTab", { agentId: t.agentId }).catch(fail);
+              }}
             >
               Close tab
             </button>
@@ -601,15 +623,16 @@ export function ComputerUsePanel({ client, agentId }: { client: DaemonClient; ag
         <input
           type="checkbox"
           checked={on}
-          onChange={() =>
+          onChange={() => {
+            setError(null);
             client
               .request("computer.setAccess", {
                 agentIds: on
                   ? state.agentIds.filter((x) => x !== agentId)
                   : [...state.agentIds, agentId],
               })
-              .catch(fail)
-          }
+              .catch(fail);
+          }}
         />
         Let this bot see the screen and control the mouse and keyboard
       </label>
