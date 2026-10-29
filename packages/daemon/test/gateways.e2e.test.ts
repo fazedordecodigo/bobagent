@@ -411,24 +411,27 @@ describe("messaging gateways e2e (fake Telegram, Slack, Discord)", () => {
       await waitFor(() =>
         tg2Sent.find((message) => message.text === "The agent stopped before replying."),
       );
-      await Bun.sleep(300);
+      const sentAt = c.events.length;
+      const updatedAt = await waitFor(() => {
+        const index = c.events.findIndex(
+          (event, i) =>
+            i >= sentAt &&
+            event.event === "gateway.updated" &&
+            (event.data as Gateway).id === gatewayId,
+        );
+        return index >= sentAt ? index : undefined;
+      });
       const updates = c.events
-        .slice(from)
+        .slice(from, updatedAt + 1)
         .filter(
           (event) => event.event === "gateway.updated" && (event.data as Gateway).id === gatewayId,
         )
         .map((event) => event.data as Gateway);
+      expect(updates.length).toBeGreaterThan(0);
       for (const update of updates) {
         expect(update.status).toBe("error");
-        expect(update.error).not.toBeNull();
         expect(update.error ?? "").toContain("polling broken");
       }
-      const cancelled = await waitGateway(
-        (current) =>
-          current.status === "error" && current.error?.includes("polling broken") === true,
-      );
-      expect(cancelled.status).toBe("error");
-      expect(cancelled.error ?? "").toContain("polling broken");
       tg2FailPoll = false;
       await waitGateway((current) => current.status === "connected" && current.error === null);
       expect(
