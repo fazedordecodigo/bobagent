@@ -94,6 +94,28 @@ export function errorFields(e: unknown): string {
   return code ? `errorType=${type} code=${code}` : `errorType=${type}`;
 }
 
+/**
+ * Runs `fn` and converts a thrown `Error` into `RpcError("bad_request", e.message)`.
+ * `RpcError`/`ProviderError` and non-`Error` throws pass through untouched so
+ * `Rpc.handle` can still mask unexpected failures as `internal`.
+ */
+export function asBadRequest<T>(fn: () => Promise<T>): Promise<T>;
+export function asBadRequest<T>(fn: () => T): T;
+export function asBadRequest<T>(fn: () => T | Promise<T>): T | Promise<T> {
+  const rethrow = (e: unknown): never => {
+    if (e instanceof Error && !(e instanceof RpcError) && !(e instanceof ProviderError)) {
+      throw new RpcError("bad_request", e.message, { cause: e });
+    }
+    throw e;
+  };
+  try {
+    const result = fn();
+    return result instanceof Promise ? result.catch(rethrow) : result;
+  } catch (e) {
+    return rethrow(e);
+  }
+}
+
 type PendingEntry = {
   requestId: string;
   turnId: string;
