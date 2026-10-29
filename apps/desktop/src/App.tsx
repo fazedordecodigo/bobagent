@@ -239,7 +239,7 @@ export default function App() {
         navigate("agent-settings");
       } catch (e) {
         showAgentUndoToast(
-          `Não deu para desfazer: ${e instanceof Error ? e.message : String(e)}`,
+          `Não deu para desfazer: ${errorMessage(e)}`,
           () => void restoreDeletedAgent(agentId),
         );
       }
