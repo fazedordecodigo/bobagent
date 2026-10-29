@@ -194,31 +194,41 @@ export function MessageList({
                       </div>
                     </div>
                   ))}
+                  <time
+                    className="message-time meta num"
+                    dateTime={new Date(item.createdAt).toISOString()}
+                  >
+                    {new Date(item.createdAt).toLocaleTimeString("pt-BR", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </time>
                 </div>
               ) : item.kind === "agent_message" ? (
                 <div className="msg-agent">
                   <div className="body">
-                    <div className="who">
-                      <span className="meta">
-                        {new Date(item.createdAt).toLocaleTimeString("pt-BR", {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </span>
-                      <div className="msg-actions">
-                        <CopyButton text={item.text} />
-                        {onSpeak && (
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => onSpeak(item.text)}
-                          >
-                            Ouvir
-                          </button>
-                        )}
-                      </div>
-                    </div>
                     <Markdown text={item.text} />
+                    <time
+                      className="message-time meta num"
+                      dateTime={new Date(item.createdAt).toISOString()}
+                    >
+                      {new Date(item.createdAt).toLocaleTimeString("pt-BR", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </time>
+                    <div className="msg-actions">
+                      <CopyButton text={item.text} />
+                      {onSpeak && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => onSpeak(item.text)}
+                        >
+                          Ouvir
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               ) : item.kind === "agent_thought" ? (

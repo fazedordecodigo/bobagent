@@ -131,7 +131,10 @@
     .msg-user { justify-self: end; max-width: 78%; overflow-wrap: anywhere; background: var(--fg-soft); padding: 10px 14px; border-radius: 14px 14px 4px 14px; }
     .thread-message { display: grid; min-width: 0; }
     .msg-agent { justify-self: start; width: 100%; max-width: 90%; min-width: 0; }
-    .msg-agent .body { display: grid; gap: 10px; min-width: 0; padding: 12px 14px; border-radius: 14px 14px 14px 4px; background: var(--fg-softer); overflow-wrap: anywhere; }
+    .msg-agent .body { position: relative; display: grid; gap: 4px; min-width: 0; padding: 10px 14px; border-radius: 14px 14px 14px 4px; background: var(--fg-softer); overflow-wrap: anywhere; }
+    .message-time { display: block; margin-top: 4px; font-weight: 400; }
+    .msg-agent .body > .message-time { margin-top: 0; }
+    .msg-agent .body > .msg-actions { position: absolute; top: 0; right: 0; transform: translateY(-100%); background: var(--surface); border-radius: var(--radius-sm); }
     .msg-agent .who { font-weight: 600; font-size: 13px; }
     .msg-agent .who .meta { font-weight: 400; margin-left: 6px; }
 
@@ -183,7 +186,8 @@
     /* compositor */
     .composer-wrap { padding: 8px 24px 20px; flex: none; }
     .composer { max-width: 720px; margin: 0 auto; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: none; transition: border-color var(--dur-fast) var(--ease); }
-    .composer:focus-within { border-color: color-mix(in oklch, var(--fg) 60%, var(--border)); }
+    .composer:focus-within { outline: 2px solid var(--focus); outline-offset: 3px; }
+    .composer textarea:focus { outline: 0 !important; }
     .composer textarea { flex: 1; min-width: 0; border: 0; resize: none; padding: 11px 8px; min-height: 44px; max-height: 160px; background: transparent; font-size: 14px; line-height: 1.5; }
     .composer-row { display: flex; align-items: flex-end; gap: 4px; padding: 8px; }
     .composer-row > button { flex: none; min-width: 44px; min-height: 44px; }

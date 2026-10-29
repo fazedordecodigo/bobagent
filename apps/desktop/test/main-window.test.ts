@@ -756,6 +756,12 @@ test("chat uses a single composer row and anonymous left/right bubbles in both t
       const prompt = target.getByRole("textbox", { name: "Mensagem para o bot", exact: true });
       await prompt.waitFor();
       const composer = target.locator("form.composer");
+      expect(await target.locator(".side-settings svg").innerHTML()).toBe(
+        await target
+          .locator(".main-head button svg")
+          .filter({ has: target.locator('path[d^="M19.4 15"]') })
+          .innerHTML(),
+      );
       const send = composer.getByRole("button", { name: "Enviar", exact: true });
       expect(await send.isDisabled()).toBe(true);
       expect(await composer.locator(".ctx, #ctxChip, .composer-bar").count()).toBe(0);
@@ -788,6 +794,30 @@ test("chat uses a single composer row and anonymous left/right bubbles in both t
       expect(reply).not.toBeNull();
       if (!user || !reply) throw new Error("Mensagens não visíveis");
       expect(user.x).toBeGreaterThan(reply.x);
+      expect(await target.locator(".thread .msg-agent .who").count()).toBe(0);
+      for (const bubble of [
+        target.locator(".msg-user").last(),
+        target.locator(".msg-agent .body").last(),
+      ]) {
+        const details = await bubble.evaluate((element) => {
+          const time = element.querySelector("time");
+          const text = element.querySelector("p");
+          if (!time || !text) throw new Error("Mensagem sem texto ou horário");
+          const style = getComputedStyle(time);
+          return {
+            below: time.getBoundingClientRect().top >= text.getBoundingClientRect().bottom,
+            numeric: style.fontVariantNumeric,
+            font: style.fontFamily,
+            color: style.color,
+            muted: getComputedStyle(element).getPropertyValue("--muted").trim(),
+            padding: getComputedStyle(element).padding,
+          };
+        });
+        expect(details.below).toBe(true);
+        expect(details.numeric).toBe("tabular-nums");
+        expect(details.font).toContain("monospace");
+        expect(details.padding).toBe("10px 14px");
+      }
       const checkRow = async () => {
         const boxes = await Promise.all([
           attach.boundingBox(),
@@ -810,10 +840,17 @@ test("chat uses a single composer row and anonymous left/right bubbles in both t
       await checkRow();
       await prompt.focus();
       expect(await prompt.evaluate((element) => getComputedStyle(element).outlineWidth)).toBe(
+        "0px",
+      );
+      expect(await composer.evaluate((element) => getComputedStyle(element).outlineWidth)).toBe(
         "2px",
+      );
+      expect(await composer.evaluate((element) => getComputedStyle(element).outlineOffset)).toBe(
+        "3px",
       );
       await capture(`chat-${theme}`, target);
       await prompt.fill("");
+      await capture(`chat-empty-${theme}`, target);
       await target.setViewportSize({ width: 700, height: 900 });
       await checkRow();
       await target.setViewportSize({ width: 1568, height: 1089 });

@@ -8,7 +8,6 @@ import { useThemePref } from "../lib/theme";
 import { fmtTime } from "../lib/ui";
 import {
   ClockIcon,
-  GearIcon,
   HomeIcon,
   MoonIcon,
   PlugIcon,
@@ -260,7 +259,7 @@ export function Sidebar({
           aria-label="Configurações"
           onClick={onSettings}
         >
-          <GearIcon />
+          <Icon name="gear" />
         </button>
       </footer>
     </aside>
