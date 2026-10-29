@@ -210,6 +210,8 @@ describe("daemon e2e", () => {
         rmSync(authAgentsRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
       }
     }
+    expect(existsSync(authDataDir)).toBe(false);
+    expect(existsSync(authAgentsRoot)).toBe(false);
   });
 
   test("fresh install seeds the default UpBot bot once, not again after delete + restart", async () => {
