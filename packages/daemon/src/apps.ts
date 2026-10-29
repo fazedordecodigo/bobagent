@@ -170,6 +170,12 @@ export function appToolNames(slug: string, tools: Tool[]): Map<string, Tool> {
   return new Map(named);
 }
 
+export function boundedAppError(message: string, tail: string, max = 500): string {
+  if (!tail) return message.slice(0, max);
+  const tailPart = tail.slice(-Math.max(max - 1 - message.length, Math.floor(max / 2)));
+  return `${message.slice(0, max - 1 - tailPart.length)}\n${tailPart}`;
+}
+
 export class AppsService {
   private live = new Map<string, Live>();
 
@@ -453,9 +459,7 @@ export class AppsService {
       .catch((e) => {
         const tail = stderrTail();
         l.status = "error";
-        l.error = this.redact(id, (e as Error).message);
-        if (tail) l.error += `\n${tail}`;
-        l.error = l.error.slice(0, 500);
+        l.error = boundedAppError(this.redact(id, (e as Error).message), tail);
         console.error("[upbotd] app start failed", {
           appId: id,
           catalogId: ctx?.catalogId ?? null,

@@ -23,6 +23,7 @@ describe("connected apps (MCP) e2e", () => {
   let stateDir: string;
   let daemon: DaemonHandle;
   let c: DaemonClient;
+  let daemonStderr = "";
   let a: Agent;
   let b: Agent;
   let app: ConnectedApp;
@@ -53,6 +54,15 @@ describe("connected apps (MCP) e2e", () => {
       FAKE_ACP_STATE_DIR: stateDir,
       UPBOT_VAULT_KEY: "ef".repeat(32),
     });
+    const stderrReader = (daemon.proc.stderr as ReadableStream<Uint8Array>).getReader();
+    const stderrDecoder = new TextDecoder();
+    void (async () => {
+      for (;;) {
+        const { done, value } = await stderrReader.read();
+        if (done) break;
+        daemonStderr += stderrDecoder.decode(value, { stream: true });
+      }
+    })().catch(() => {});
     c = await DaemonClient.connect(daemon.port, TOKEN);
     a = (await c.request("agents.create", {
       name: "A",
@@ -155,6 +165,53 @@ describe("connected apps (MCP) e2e", () => {
     expect(failed?.status).toBe("error");
     expect(failed?.error).toContain("boom-stderr-marker");
     await c.request("apps.delete", { id: bad.id });
+  });
+
+  test("a long startup error retains the stderr tail within the error bound", async () => {
+    const bad = (await c.request("apps.connect", {
+      catalogId: "custom-stdio",
+      name: "Long Error App",
+      command: [
+        "bun",
+        "-e",
+        String.raw`
+console.error("long-stderr-marker");
+let input = "";
+process.stdin.on("data", (chunk) => {
+  input += chunk;
+  const i = input.indexOf("\n");
+  if (i < 0) return;
+  const req = JSON.parse(input.slice(0, i));
+  if (req.method !== "initialize") return;
+  setTimeout(() => {
+    process.stdout.write(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: req.id,
+        error: { code: -32000, message: "x".repeat(800) },
+      }) + "\n",
+    );
+    setTimeout(() => process.exit(0), 25);
+  }, 200);
+});
+`,
+      ],
+      secrets: {},
+    })) as ConnectedApp;
+    try {
+      let failed: ConnectedApp | undefined;
+      for (let i = 0; i < 100; i++) {
+        const list = (await c.request("apps.list", {})) as ConnectedApp[];
+        failed = list.find((x) => x.id === bad.id);
+        if (failed?.status === "error") break;
+        await Bun.sleep(100);
+      }
+      expect(failed?.status).toBe("error");
+      expect(failed?.error).toContain("long-stderr-marker");
+      expect(failed!.error!.length).toBeLessThanOrEqual(500);
+    } finally {
+      await c.request("apps.delete", { id: bad.id });
+    }
   });
 
   test("disable and delete", async () => {
