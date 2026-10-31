@@ -151,12 +151,44 @@ export function appToolNames(slug: string, tools: Tool[]): Map<string, Tool> {
     counts.set(base, (counts.get(base) ?? 0) + 1);
     return { base, tool };
   });
+  const assigned = new Map<number, string>();
+  const taken = new Set<string>();
+
+  for (const [index, { base, tool }] of entries.entries()) {
+    if (base === `${slug}-${tool.name}`) {
+      assigned.set(index, base);
+      taken.add(base);
+    }
+  }
+  for (const [index, { base }] of entries.entries()) {
+    if (!assigned.has(index) && counts.get(base) === 1 && !taken.has(base)) {
+      assigned.set(index, base);
+      taken.add(base);
+    }
+  }
+
+  const pending = entries
+    .map((entry, index) => ({ ...entry, index }))
+    .filter(({ index }) => !assigned.has(index))
+    .sort((a, b) => (a.tool.name < b.tool.name ? -1 : a.tool.name > b.tool.name ? 1 : 0));
+  for (const { base, tool, index } of pending) {
+    const prefix = base.slice(0, 64 - 7).replace(/_+$/, "");
+    for (let attempt = 0; ; attempt++) {
+      const source = attempt === 0 ? tool.name : `${tool.name}#${attempt}`;
+      const hash = createHash("sha256").update(source).digest("hex").slice(0, 6);
+      const name = `${prefix}_${hash}`;
+      if (taken.has(name)) continue;
+      assigned.set(index, name);
+      taken.add(name);
+      break;
+    }
+  }
+
   const named = entries
-    .map(({ base, tool }) => {
-      if (base === `${slug}-${tool.name}` || counts.get(base) === 1) return [base, tool] as const;
-      const prefix = base.slice(0, 64 - 7).replace(/_+$/, "");
-      const hash = createHash("sha256").update(tool.name).digest("hex").slice(0, 6);
-      return [`${prefix}_${hash}`, tool] as const;
+    .map(({ tool }, index) => {
+      const name = assigned.get(index);
+      if (name === undefined) throw new Error(`missing name for app tool ${tool.name}`);
+      return [name, tool] as const;
     })
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   return new Map(named);
