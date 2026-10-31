@@ -4,9 +4,11 @@ import App from "./App";
 import { ApprovalFeedback } from "./components/ApprovalFeedback";
 import Kit from "./components/ds/Kit";
 import MenuBar from "./components/MenuBar";
+import { migrateLegacyStorage } from "./lib/storage";
 import { initializeTheme } from "./lib/theme";
 import "./index.css";
 
+migrateLegacyStorage();
 initializeTheme();
 
 const root = document.getElementById("root");

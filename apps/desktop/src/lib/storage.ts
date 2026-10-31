@@ -1,3 +1,16 @@
+export function migrateLegacyStorage() {
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const legacyKey = localStorage.key(i);
+      if (!legacyKey?.startsWith("upbot.")) continue;
+      const key = `boto.${legacyKey.slice("upbot.".length)}`;
+      const value = localStorage.getItem(legacyKey);
+      if (value !== null && localStorage.getItem(key) === null) localStorage.setItem(key, value);
+      localStorage.removeItem(legacyKey);
+    }
+  } catch {}
+}
+
 export function readStorage(key: string) {
   try {
     const value = localStorage.getItem(key);
