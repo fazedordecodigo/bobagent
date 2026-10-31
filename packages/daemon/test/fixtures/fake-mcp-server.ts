@@ -52,6 +52,11 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             : []),
           { name: "foo__bar", description: "Double underscore", inputSchema: { type: "object" } },
           { name: "foo_bar", description: "Single underscore", inputSchema: { type: "object" } },
+          {
+            name: "foo_bar_a3a759",
+            description: "Hash suffix collision",
+            inputSchema: { type: "object" },
+          },
         ],
       },
     });
@@ -77,7 +82,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
               ? "double-underscore"
               : p.name === "foo_bar"
                 ? "single-underscore"
-                : `token-present:${Boolean(process.env.FAKE_APP_TOKEN)} token:${process.env.FAKE_APP_TOKEN}`;
+                : p.name === "foo_bar_a3a759"
+                  ? "suffix-collision"
+                  : `token-present:${Boolean(process.env.FAKE_APP_TOKEN)} token:${process.env.FAKE_APP_TOKEN}`;
     return send({ jsonrpc: "2.0", id: m.id, result: { content: [{ type: "text", text }] } });
   }
   send({ jsonrpc: "2.0", id: m.id, error: { code: -32601, message: "method not found" } });

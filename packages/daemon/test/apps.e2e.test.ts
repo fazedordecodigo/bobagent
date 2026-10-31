@@ -106,6 +106,7 @@ describe("connected apps (MCP) e2e", () => {
       "create_note",
       "foo__bar",
       "foo_bar",
+      "foo_bar_a3a759",
     ]);
     expect(JSON.stringify(list)).not.toContain(APP_SECRET);
     const vault = await c.request("vault.list", {});
@@ -117,12 +118,19 @@ describe("connected apps (MCP) e2e", () => {
     const who = await tool(a, "fake_app-whoami");
     expect(who).toContain("token-present:true");
     expect(who).not.toContain(APP_SECRET);
-    const collisionNames = appToolNames("fake_app", [{ name: "foo__bar" }, { name: "foo_bar" }]);
+    const collisionNames = appToolNames("fake_app", [
+      { name: "foo__bar" },
+      { name: "foo_bar" },
+      { name: "foo_bar_a3a759" },
+    ]);
     const doubleName = [...collisionNames].find(([, t]) => t.name === "foo__bar")?.[0];
+    expect(collisionNames.get("fake_app-foo_bar")?.name).toBe("foo_bar");
+    expect(collisionNames.get("fake_app-foo_bar_a3a759")?.name).toBe("foo_bar_a3a759");
     expect(await tool(a, "fake_app-foo_bar")).toBe("tool-ok:single-underscore");
     expect(doubleName).toMatch(/^fake_app-foo_bar_[0-9a-f]{6}$/);
     if (!doubleName) throw new Error("expected a disambiguated foo__bar tool name");
     expect(await tool(a, doubleName)).toBe("tool-ok:double-underscore");
+    expect(await tool(a, "fake_app-foo_bar_a3a759")).toBe("tool-ok:suffix-collision");
     expect(await tool(b, "fake_app-echo", { text: "hi" })).toContain("not available to you");
     const log = readFileSync(join(stateDir, "log.jsonl"), "utf8");
     expect(log).not.toContain(APP_SECRET);
