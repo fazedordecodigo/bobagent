@@ -364,7 +364,7 @@ describe("chat e2e (fake acp agent)", () => {
     const t3 = await waitTurnEnd(agent.id, 10000);
     expect(t3.status).toBe("cancelled");
     await waitForPidDead(pid);
-  });
+  }, 15_000);
 
   test("send during a running turn enqueues instead of busy", async () => {
     const agent = await newAgent("Busy", "devin");
