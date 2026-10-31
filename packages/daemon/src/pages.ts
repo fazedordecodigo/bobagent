@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { Agent, Page } from "@upbot/protocol";
+import type { Agent, Page } from "@boto/protocol";
 import { RpcError } from "./runtime/agent-runtime";
 
 // Pages: self-contained HTML reports, dashboards and trackers that bots publish. Files live

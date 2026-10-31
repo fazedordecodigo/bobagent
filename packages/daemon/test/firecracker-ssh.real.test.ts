@@ -11,7 +11,7 @@ import {
 import { createConnection, createServer } from "node:net";
 import { homedir, userInfo } from "node:os";
 import { join, resolve } from "node:path";
-import type { Agent, ChatItem, RemoteHost, Subagent, Turn } from "@upbot/protocol";
+import type { Agent, ChatItem, RemoteHost, Subagent, Turn } from "@boto/protocol";
 import {
   firecrackerRunDirs,
   makeFirecrackerHostRoot,
@@ -21,10 +21,10 @@ import {
 } from "./firecracker-ssh.fixtures";
 import { DaemonClient, type DaemonHandle, startDaemon, stopTestChildren, tmp } from "./helpers";
 
-const enabled = process.env.UPBOT_REAL_FIRECRACKER === "1" && existsSync("/usr/sbin/sshd");
+const enabled = process.env.BOTO_REAL_FIRECRACKER === "1" && existsSync("/usr/sbin/sshd");
 const providersRequested =
-  process.env.UPBOT_REAL_FIRECRACKER === "1" && process.env.UPBOT_REAL_PROVIDERS === "1";
-const artifacts = resolve(process.env.UPBOT_FC_ARTIFACTS ?? join(homedir(), ".upbot/firecracker"));
+  process.env.BOTO_REAL_FIRECRACKER === "1" && process.env.BOTO_REAL_PROVIDERS === "1";
+const artifacts = resolve(process.env.BOTO_FC_ARTIFACTS ?? join(homedir(), ".boto/firecracker"));
 const providerCliPaths = {
   claude: "/usr/local/bin/claude",
   codex: "/usr/local/bin/codex",
@@ -113,8 +113,8 @@ async function runGuest(
     cwd: REPO_ROOT,
     env: {
       ...guestHostEnv,
-      UPBOT_HOST_ROOT: root,
-      UPBOT_VM_WORKSPACE_MIB: "32",
+      BOTO_HOST_ROOT: root,
+      BOTO_VM_WORKSPACE_MIB: "32",
     },
     stdin: "pipe",
     stdout: "pipe",
@@ -242,11 +242,11 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
     sshDir = tmp("fc-sshd-");
     const bundle = join(sshDir, "fake-acp-agent.js");
     run("bun", ["build", FAKE_AGENT, "--target=bun", "--outfile", bundle]);
-    const extraFiles = [{ source: bundle, destination: "/opt/upbot/fake-acp-agent.js" }];
+    const extraFiles = [{ source: bundle, destination: "/opt/boto/fake-acp-agent.js" }];
     if (providersRequested) {
       const probe = join(sshDir, "real-acp-probe.js");
       run("bun", ["build", REAL_ACP_PROBE, "--target=bun", "--outfile", probe]);
-      extraFiles.push({ source: probe, destination: "/opt/upbot/real-acp-probe.js" });
+      extraFiles.push({ source: probe, destination: "/opt/boto/real-acp-probe.js" });
     }
     root = makeFirecrackerHostRoot(extraFiles);
     username = userInfo().username;
@@ -276,7 +276,7 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
         "AllowStreamLocalForwarding yes",
         "AllowTcpForwarding yes",
         "PermitRootLogin yes",
-        `SetEnv UPBOT_HOST_ROOT=${root}`,
+        `SetEnv BOTO_HOST_ROOT=${root}`,
         "LogLevel VERBOSE",
       ].join("\n"),
     );
@@ -302,23 +302,23 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
         : ["ssh", "-o", `UserKnownHostsFile=${knownHosts}`];
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
       FAKE_ACP_STATE_DIR: stateDir,
-      UPBOT_PROVIDER_COMMAND_DEVIN: JSON.stringify(["bun", "/opt/upbot/fake-acp-agent.js"]),
-      UPBOT_SSH_COMMAND: JSON.stringify(sshCommand),
+      BOTO_PROVIDER_COMMAND_DEVIN: JSON.stringify(["bun", "/opt/boto/fake-acp-agent.js"]),
+      BOTO_SSH_COMMAND: JSON.stringify(sshCommand),
       ...(providersRequested
         ? {
-            UPBOT_SENTINEL_TEST: "leak",
+            BOTO_SENTINEL_TEST: "leak",
             ANTHROPIC_API_KEY: "sk-sentinel-leak",
             OPENAI_API_KEY: "sk-sentinel-leak",
-            UPBOT_PROVIDER_COMMAND_CLAUDE: "",
-            UPBOT_PROVIDER_COMMAND_CODEX: "",
-            UPBOT_PROVIDER_COMMAND_GEMINI: "",
-            UPBOT_PROVIDER_COMMAND_OPENCODE: "",
-            UPBOT_PROVIDER_COMMAND_CURSOR: "",
-            UPBOT_ACP_COMMAND_CLAUDE: "",
-            UPBOT_ACP_COMMAND_CODEX: "",
-            UPBOT_ACP_COMMAND_GEMINI: "",
-            UPBOT_ACP_COMMAND_OPENCODE: "",
-            UPBOT_ACP_COMMAND_CURSOR: "",
+            BOTO_PROVIDER_COMMAND_CLAUDE: "",
+            BOTO_PROVIDER_COMMAND_CODEX: "",
+            BOTO_PROVIDER_COMMAND_GEMINI: "",
+            BOTO_PROVIDER_COMMAND_OPENCODE: "",
+            BOTO_PROVIDER_COMMAND_CURSOR: "",
+            BOTO_ACP_COMMAND_CLAUDE: "",
+            BOTO_ACP_COMMAND_CODEX: "",
+            BOTO_ACP_COMMAND_GEMINI: "",
+            BOTO_ACP_COMMAND_OPENCODE: "",
+            BOTO_ACP_COMMAND_CURSOR: "",
           }
         : {}),
     });
@@ -515,7 +515,7 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
         const probe = await runGuest(
           root,
           `acp-probe-${provider}-${crypto.randomUUID()}`,
-          ["bun", "/opt/upbot/real-acp-probe.js", provider],
+          ["bun", "/opt/boto/real-acp-probe.js", provider],
           {},
           "\n",
           26000,
@@ -635,7 +635,7 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
               agentId: string;
               command: string;
               credentialKeys: string[];
-              upbotKeys: string[];
+              botoKeys: string[];
             },
         );
       for (const provider of ["gemini", "opencode", "cursor"] as const) {
@@ -644,7 +644,7 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
         for (const entry of specEnvs) {
           expect(entry.command).toBe(provider === "cursor" ? "agent" : provider);
           expect(entry.credentialKeys).toEqual([]);
-          expect(entry.upbotKeys).toEqual([]);
+          expect(entry.botoKeys).toEqual([]);
         }
       }
     }, 300000);
@@ -658,7 +658,7 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
           id: 1,
           method: "initialize",
           params: {
-            clientInfo: { name: "upbot-probe", title: "UpBot", version: "0.1.0" },
+            clientInfo: { name: "boto-probe", title: "Boto", version: "0.1.0" },
             capabilities: null,
           },
         },
@@ -714,7 +714,7 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
           id: 1,
           method: "initialize",
           params: {
-            clientInfo: { name: "upbot-probe", title: "UpBot", version: "0.1.0" },
+            clientInfo: { name: "boto-probe", title: "Boto", version: "0.1.0" },
             capabilities: null,
           },
         },
@@ -727,7 +727,7 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
         root,
         "codex-tmpfs-home",
         ["sh", "-c", 'mkdir -p "$CODEX_HOME" && exec codex app-server --listen stdio://'],
-        { OPENAI_API_KEY: key, CODEX_HOME: "/run/upbot/codex-home" },
+        { OPENAI_API_KEY: key, CODEX_HOME: "/run/boto/codex-home" },
         `${rpc}\n`,
         8000,
       );
@@ -749,7 +749,7 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
           `Codex tmpfs home raw response: stdout=${result.stdout.replaceAll(key, "<redacted>")} stderr=${result.stderr.replaceAll(key, "<redacted>")}`,
         );
       }
-      expect(initialized?.codexHome).toBe("/run/upbot/codex-home");
+      expect(initialized?.codexHome).toBe("/run/boto/codex-home");
       expect(account?.account).toBeNull();
       expect(account?.requiresOpenaiAuth).toBe(true);
       expect(result.stdout.includes(key)).toBe(false);
@@ -837,7 +837,7 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
               agentId: string;
               command: string;
               envKeys: string[];
-              upbotKeys: string[];
+              botoKeys: string[];
               apiKeyKeys: string[];
               hasSentinelValue: boolean;
             },
@@ -847,7 +847,7 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
         expect(specEnvs.length).toBeGreaterThan(0);
         for (const entry of specEnvs) {
           expect(entry.command).toBe(provider);
-          expect(entry.upbotKeys).toEqual([]);
+          expect(entry.botoKeys).toEqual([]);
           expect(entry.apiKeyKeys).toEqual([]);
           expect(entry.hasSentinelValue).toBe(false);
           console.log(`${provider} RunSpec env evidence: ${JSON.stringify(entry)}`);
@@ -876,7 +876,7 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
                 envKeys: string[];
                 credentialKeys: string[];
                 hasFakeCredential: boolean;
-                upbotKeys: string[];
+                botoKeys: string[];
                 hasSentinelValue: boolean;
               },
           );
@@ -985,7 +985,7 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
           expect(entry.command).toBe(provider === "cursor" ? "agent" : provider);
           expect(entry.credentialKeys).toEqual(envKeys);
           expect(entry.hasFakeCredential).toBe(true);
-          expect(entry.upbotKeys).toEqual([]);
+          expect(entry.botoKeys).toEqual([]);
           expect(entry.hasSentinelValue).toBe(false);
         }
         if (provider === "codex") {
@@ -1033,7 +1033,7 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
           expect(entry.isolation).toBe("none");
           expect(entry.credentialKeys).toEqual([]);
           expect(entry.hasFakeCredential).toBe(false);
-          expect(entry.upbotKeys).toEqual([]);
+          expect(entry.botoKeys).toEqual([]);
           expect(entry.hasSentinelValue).toBe(false);
           expect(JSON.stringify(entry)).not.toContain(key);
         }
@@ -1067,7 +1067,7 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
         expect(entry.isolation).toBe("none");
         expect(entry.credentialKeys).toEqual([]);
         expect(entry.hasFakeCredential).toBe(false);
-        expect(entry.upbotKeys).toEqual([]);
+        expect(entry.botoKeys).toEqual([]);
         expect(entry.hasSentinelValue).toBe(false);
       }
       expect(firecrackerRunDirs(root, noneAgent.id)).toHaveLength(0);

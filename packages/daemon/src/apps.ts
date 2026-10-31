@@ -12,8 +12,8 @@ import type {
   AppPermissionKind,
   AppPermissionLevel,
   ConnectedApp,
-} from "@upbot/protocol";
-import { AppPermissions, defaultAppPermissions } from "@upbot/protocol";
+} from "@boto/protocol";
+import { AppPermissions, defaultAppPermissions } from "@boto/protocol";
 import { envPositiveNumber } from "./env/vars";
 import { RpcError } from "./runtime/agent-runtime";
 import { APP_PREFIX, type Vault } from "./vault";
@@ -21,7 +21,7 @@ import { VERSION } from "./version";
 
 // Connected apps: MCP servers the daemon runs (stdio) or talks to (streamable HTTP) on behalf
 // of the bots. Secrets live in the vault as app.<id>.<KEY> and only reach the server process
-// (env) or its HTTP headers; bots see the app's tools through the upbot bridge as
+// (env) or its HTTP headers; bots see the app's tools through the boto bridge as
 // `<slug>-<tool>` and never the credentials. Account-wide: agentIds empty = every bot.
 
 type Broadcast = (event: string, data: unknown) => void;
@@ -540,8 +540,8 @@ export class AppsService {
       if (transport instanceof StdioClientTransport) {
         transport.stderr?.on("data", (d: Buffer) => stderr.push(d));
       }
-      const client = new Client({ name: "upbot", version: VERSION });
-      timeout = AbortSignal.timeout(envPositiveNumber("UPBOT_APP_START_TIMEOUT_MS", 60_000));
+      const client = new Client({ name: "boto", version: VERSION });
+      timeout = AbortSignal.timeout(envPositiveNumber("BOTO_APP_START_TIMEOUT_MS", 60_000));
       phase = "transport initialization";
       await client.connect(transport as Transport, { signal: timeout });
       phase = "tools/list";
@@ -561,7 +561,7 @@ export class AppsService {
           l.client = null;
           l.transport = null;
           if (wasReady) {
-            console.error("[upbotd] app MCP server exited", {
+            console.error("[botod] app MCP server exited", {
               appId: id,
               catalogId: r.catalog_id,
               transport: c.transport,
@@ -583,7 +583,7 @@ export class AppsService {
         ]
           .filter(Boolean)
           .join("\n");
-        console.error("[upbotd] app start failed", {
+        console.error("[botod] app start failed", {
           appId: id,
           catalogId: ctx?.catalogId ?? null,
           transport: ctx?.transport ?? null,
@@ -682,7 +682,7 @@ export class AppsService {
     if (!tool) throw new Error(`unknown tool ${name}`);
     const callStart = Date.now();
     const logCallFailure = () =>
-      console.error("[upbotd] app tool call failed", {
+      console.error("[botod] app tool call failed", {
         appId: r.id,
         tool: name,
         durationMs: Date.now() - callStart,

@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { type Agent, AgentAvatar, type MarketplaceItem, ProviderId } from "@upbot/protocol";
+import { type Agent, AgentAvatar, type MarketplaceItem, ProviderId } from "@boto/protocol";
 import { z } from "zod";
 import type { AgentStore } from "./agents";
 import { getSetting, setSetting } from "./db/settings";
@@ -63,7 +63,7 @@ export class Marketplace {
 
   sources(): string[] {
     const saved = getSetting(this.db, "marketplace_sources", sourcesSchema, null);
-    if (!saved) return [process.env.UPBOT_MARKETPLACE_URL ?? DEFAULT_REGISTRY];
+    if (!saved) return [process.env.BOTO_MARKETPLACE_URL ?? DEFAULT_REGISTRY];
     // sources saved before the repo moved to fazedordecodigo/upbot
     return saved.map((u) => (u === LEGACY_REGISTRY ? DEFAULT_REGISTRY : u));
   }

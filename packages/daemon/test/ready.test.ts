@@ -22,7 +22,7 @@ test("reads a split READY line and leaves stdout available", async () => {
   const stdout = new ReadableStream<Uint8Array>({
     start(streamController) {
       controller = streamController;
-      streamController.enqueue(encoder.encode('log\nUPBOT_READY {"po'));
+      streamController.enqueue(encoder.encode('log\nBOTO_READY {"po'));
       streamController.enqueue(encoder.encode('rt":4321}\n'));
     },
     cancel(reason) {
@@ -120,7 +120,7 @@ test("cancels stdout and releases its reader for malformed READY JSON", async ()
   let cancelled: unknown;
   const stdout = new ReadableStream<Uint8Array>({
     start(controller) {
-      controller.enqueue(encoder.encode("UPBOT_READY {bad\n"));
+      controller.enqueue(encoder.encode("BOTO_READY {bad\n"));
     },
     cancel(reason) {
       cancelled = reason;

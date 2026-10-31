@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentPlacement, RemoteHost } from "@upbot/protocol";
+import type { AgentPlacement, RemoteHost } from "@boto/protocol";
 import { openDatabase } from "../src/db";
 import { VmCredentials } from "../src/remote/credentials";
 import { remoteLaunch } from "../src/remote/hosts";
@@ -14,7 +14,7 @@ const host: RemoteHost = {
   target: "me@vps",
   port: 22,
   identityFile: null,
-  root: "/home/me/.upbot",
+  root: "/home/me/.boto",
   preflight: null,
   createdAt: 0,
 };
@@ -27,19 +27,19 @@ const placement = (isolation: AgentPlacement["isolation"]): AgentPlacement => ({
 });
 
 describe("microVM credentials", () => {
-  const prevSsh = process.env.UPBOT_SSH_COMMAND;
-  const prevKey = process.env.UPBOT_VAULT_KEY;
-  process.env.UPBOT_VAULT_KEY = "ab".repeat(32);
+  const prevSsh = process.env.BOTO_SSH_COMMAND;
+  const prevKey = process.env.BOTO_VAULT_KEY;
+  process.env.BOTO_VAULT_KEY = "ab".repeat(32);
   const dataDir = tmp("vmcred-");
   const db = openDatabase(dataDir);
   const vault = new Vault(db, dataDir);
   const creds = new VmCredentials(vault);
 
   afterAll(() => {
-    if (prevSsh === undefined) delete process.env.UPBOT_SSH_COMMAND;
-    else process.env.UPBOT_SSH_COMMAND = prevSsh;
-    if (prevKey === undefined) delete process.env.UPBOT_VAULT_KEY;
-    else process.env.UPBOT_VAULT_KEY = prevKey;
+    if (prevSsh === undefined) delete process.env.BOTO_SSH_COMMAND;
+    else process.env.BOTO_SSH_COMMAND = prevSsh;
+    if (prevKey === undefined) delete process.env.BOTO_VAULT_KEY;
+    else process.env.BOTO_VAULT_KEY = prevKey;
   });
 
   test("stores logins hidden from the vault and maps them to provider env", () => {
@@ -72,7 +72,7 @@ describe("microVM credentials", () => {
 
   async function specFor(isolation: AgentPlacement["isolation"]) {
     const out = join(tmp("vmcred-ssh-"), "spec.json");
-    process.env.UPBOT_SSH_COMMAND = JSON.stringify(["sh", "-c", `head -n 1 > ${out}`, "fake-ssh"]);
+    process.env.BOTO_SSH_COMMAND = JSON.stringify(["sh", "-c", `head -n 1 > ${out}`, "fake-ssh"]);
     const launch = remoteLaunch(host, placement(isolation), 0, creds.env("claude"));
     const child = launch.spawn(["claude", "--verbose"], { NO_COLOR: "1" });
     child.stdin?.end();
@@ -106,11 +106,11 @@ describe("microVM credentials", () => {
       expect(creds.list().map((c) => c.provider)).not.toContain("codex");
       expect(err.mock.calls).toEqual([
         [
-          "UpBot could not read a stored microVM credential",
+          "Boto could not read a stored microVM credential",
           { provider: "codex", reason: "invalid_entry" },
         ],
         [
-          "UpBot could not read a stored microVM credential",
+          "Boto could not read a stored microVM credential",
           { provider: "codex", reason: "invalid_entry" },
         ],
       ]);
@@ -124,7 +124,7 @@ describe("microVM credentials", () => {
       expect(creds.env("codex")).toEqual({});
       expect(err.mock.calls).toEqual([
         [
-          "UpBot could not read a stored microVM credential",
+          "Boto could not read a stored microVM credential",
           { provider: "codex", reason: "invalid_entry" },
         ],
       ]);
@@ -134,7 +134,7 @@ describe("microVM credentials", () => {
       expect(creds.env("codex")).toEqual({});
       expect(err.mock.calls).toEqual([
         [
-          "UpBot could not read a stored microVM credential",
+          "Boto could not read a stored microVM credential",
           { provider: "codex", reason: "invalid_entry" },
         ],
       ]);

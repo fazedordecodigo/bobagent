@@ -3,7 +3,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Agent, Memory, Routine } from "@upbot/protocol";
+import type { Agent, Memory, Routine } from "@boto/protocol";
 import { type Browser, chromium, type Page } from "playwright-core";
 import {
   DaemonClient,
@@ -30,7 +30,7 @@ const handoff = join(
   "attachments",
   "20e5b3d2-04f8-4494-82fa-8b1dbee8ae61",
   "handoff",
-  "upbot-config-agente-handoff",
+  "boto-config-agente-handoff",
 );
 const fixture = JSON.parse(
   readFileSync(join(import.meta.dir, "fixtures", "agent-config.json"), "utf8"),
@@ -51,7 +51,7 @@ const fixture = JSON.parse(
     }[];
   };
 };
-const prototype = join(handoff, "prototipo", "upbot-config-agente.html");
+const prototype = join(handoff, "prototipo", "boto-config-agente.html");
 const blueCounts: Record<string, number> = {};
 
 async function newMacAppPage() {
@@ -120,7 +120,7 @@ async function capturePrototype(name: string, fullPage = false) {
       await target.locator("#iconPop").waitFor({ state: "visible" });
     }
     if (state === "03") {
-      await target.locator("#name").fill("UpBot revisado");
+      await target.locator("#name").fill("Boto revisado");
       await target.locator("#savebar.show").waitFor();
     }
     if (state === "04") {
@@ -293,15 +293,15 @@ async function openSettings(target = page) {
 }
 
 beforeAll(async () => {
-  state = mkdtempSync(join(homedir(), "upbot-agent-config-"));
+  state = mkdtempSync(join(homedir(), "boto-agent-config-"));
   const fake = join(state, "fake");
   mkdirSync(fake);
   daemon = await startDaemon(join(state, "data"), join(state, "agents"), token, {
-    UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
-    UPBOT_ACP_COMMAND_GROK: JSON.stringify(["bun", FAKE_AGENT]),
+    BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+    BOTO_ACP_COMMAND_GROK: JSON.stringify(["bun", FAKE_AGENT]),
     FAKE_ACP_STATE_DIR: fake,
     FAKE_ACP_EFFORT: "1",
-    UPBOT_COMPUTER_DRYRUN: join(state, "computer.log"),
+    BOTO_COMPUTER_DRYRUN: join(state, "computer.log"),
   });
   rpc = await DaemonClient.connect(daemon.port, token);
   await ensureDesktopServer();
@@ -355,7 +355,7 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
       provider: "grok",
       instructions: fixture.agent.instructions,
     })) as Agent;
-    const fixtureDb = new Database(join(state, "data", "upbot.db"));
+    const fixtureDb = new Database(join(state, "data", "boto.db"));
     fixtureDb
       .query("UPDATE agents SET created_at = ?, config_json = ? WHERE id = ?")
       .run(
@@ -392,9 +392,9 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
     await rpc.request("computer.setAccess", { agentIds: [] });
     await page.addInitScript(
       ({ id, color }) => {
-        localStorage.setItem("upbot.agent", id);
-        localStorage.setItem("upbot.theme", color === "claro" ? "light" : "dark");
-        localStorage.setItem("upbot.view", "chat");
+        localStorage.setItem("boto.agent", id);
+        localStorage.setItem("boto.theme", color === "claro" ? "light" : "dark");
+        localStorage.setItem("boto.view", "chat");
       },
       { id: currentAgent.id, color: theme },
     );
@@ -473,9 +473,9 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
       await windowsCapture.addInitScript(
         ({ id, color }) => {
           Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
-          localStorage.setItem("upbot.agent", id);
-          localStorage.setItem("upbot.view", "chat");
-          localStorage.setItem("upbot.theme", color === "claro" ? "light" : "dark");
+          localStorage.setItem("boto.agent", id);
+          localStorage.setItem("boto.view", "chat");
+          localStorage.setItem("boto.theme", color === "claro" ? "light" : "dark");
         },
         { id: currentAgent.id, color: theme },
       );
@@ -492,12 +492,12 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
       await windowsCapture.close();
     }
 
-    await name.fill("UpBot revisado");
+    await name.fill("Boto revisado");
     await page.getByText("Alterações não salvas").waitFor();
     await page
       .locator("header")
       .filter({ hasText: "Configurações" })
-      .getByText("UpBot revisado", { exact: true })
+      .getByText("Boto revisado", { exact: true })
       .waitFor();
     await capture(`03-barra-salvar-${theme}.png`);
     await name.fill(currentAgent.name);
@@ -524,7 +524,7 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
     if ((await advanced.getAttribute("aria-expanded")) !== "true") await advanced.click();
     await page.getByRole("button", { name: "Excluir…" }).click();
     await page.getByRole("button", { name: "Excluir agente" }).click();
-    await page.getByText("UpBot foi excluído.").waitFor();
+    await page.getByText("Boto foi excluído.").waitFor();
     await capture(`08-agente-excluido-${theme}.png`);
     await page.getByRole("button", { name: "Voltar ao início" }).click();
     const deletedToast = page.getByRole("status").filter({ hasText: "Agente excluído." });
@@ -566,7 +566,7 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
     await page.getByLabel("Nova memória").fill("Rascunho descartado");
     await page.getByRole("button", { name: "Adicionar", exact: true }).click();
     await page.getByRole("button", { name: "Descartar" }).click();
-    expect(await page.getByLabel("Instruções").inputValue()).toContain("Você é o UpBot");
+    expect(await page.getByLabel("Instruções").inputValue()).toContain("Você é o Boto");
     expect(
       await page.getByRole("button", { name: "Remover memória: Rascunho descartado" }).count(),
     ).toBe(0);
@@ -715,8 +715,8 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
     await windows.addInitScript(
       ({ id }) => {
         Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
-        localStorage.setItem("upbot.agent", id);
-        localStorage.setItem("upbot.view", "chat");
+        localStorage.setItem("boto.agent", id);
+        localStorage.setItem("boto.view", "chat");
       },
       { id: agent.id },
     );
@@ -739,7 +739,7 @@ test("agent settings save drafts through real daemon RPCs and expose the handoff
     );
     expect(buttonWidths[0]).toBe(buttonWidths[1]);
     await windows.getByRole("button", { name: "Agora não" }).click();
-    await windows.evaluate(() => localStorage.setItem("upbot.theme", "dark"));
+    await windows.evaluate(() => localStorage.setItem("boto.theme", "dark"));
     await windows.reload();
     await openSettings(windows);
     await windows.getByRole("switch", { name: "Usar o computador" }).click();
@@ -776,8 +776,8 @@ test("existing memories are editable inline and only persist on Save", async () 
   const target = await newMacAppPage();
   try {
     await target.addInitScript((id) => {
-      localStorage.setItem("upbot.agent", id);
-      localStorage.setItem("upbot.view", "chat");
+      localStorage.setItem("boto.agent", id);
+      localStorage.setItem("boto.view", "chat");
     }, subject.id);
     await gotoApp(target);
     await openSettings(target);

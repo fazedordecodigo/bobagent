@@ -9,10 +9,10 @@ import { Vault } from "../src/vault";
 async function withApprovals(
   run: (approvals: ApprovalService, apps: AppsService, vault: Vault) => Promise<void>,
 ) {
-  const ttl = process.env.UPBOT_APPROVAL_TTL_MS;
-  const vaultKey = process.env.UPBOT_VAULT_KEY;
-  process.env.UPBOT_APPROVAL_TTL_MS = "50";
-  process.env.UPBOT_VAULT_KEY = "ab".repeat(32);
+  const ttl = process.env.BOTO_APPROVAL_TTL_MS;
+  const vaultKey = process.env.BOTO_VAULT_KEY;
+  process.env.BOTO_APPROVAL_TTL_MS = "50";
+  process.env.BOTO_VAULT_KEY = "ab".repeat(32);
   const db = new Database(":memory:");
   try {
     for (const sql of migrations) db.exec(sql);
@@ -45,10 +45,10 @@ async function withApprovals(
     );
     await run(approvals, apps, vault);
   } finally {
-    if (ttl === undefined) delete process.env.UPBOT_APPROVAL_TTL_MS;
-    else process.env.UPBOT_APPROVAL_TTL_MS = ttl;
-    if (vaultKey === undefined) delete process.env.UPBOT_VAULT_KEY;
-    else process.env.UPBOT_VAULT_KEY = vaultKey;
+    if (ttl === undefined) delete process.env.BOTO_APPROVAL_TTL_MS;
+    else process.env.BOTO_APPROVAL_TTL_MS = ttl;
+    if (vaultKey === undefined) delete process.env.BOTO_VAULT_KEY;
+    else process.env.BOTO_VAULT_KEY = vaultKey;
     db.close();
   }
 }

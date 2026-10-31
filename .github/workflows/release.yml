@@ -53,7 +53,7 @@ jobs:
             fi
             id="$(jq -r .databaseId <<< "$release")"
           else
-            gh release create "$tag" --draft --title "UpBot $tag" \
+            gh release create "$tag" --draft --title "Boto $tag" \
               --notes "See the commits since the previous release."
             release="$(gh release view "$tag" --json databaseId,isDraft)"
             id="$(jq -r .databaseId <<< "$release")"
@@ -148,7 +148,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.create-release.outputs.tag }}
         run: |
-          dir="$RUNNER_TEMP/upbot-release"
+          dir="$RUNNER_TEMP/boto-release"
           mkdir -p "$dir"
           gh release view "$TAG" --json assets > "$dir/assets.json"
           gh release view "$TAG" --json body --jq .body > "$dir/notes.md"

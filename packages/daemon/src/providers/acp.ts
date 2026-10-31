@@ -1,6 +1,6 @@
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
-import type { ConfigOption, ProviderId } from "@upbot/protocol";
+import type { ConfigOption, ProviderId } from "@boto/protocol";
 import { envPositiveNumber } from "../env/vars";
 import { VERSION } from "../version";
 import {
@@ -48,7 +48,7 @@ async function boundedRequest<T>(
 }
 
 function opencodeFirstActivityTimeoutMs(): number {
-  return envPositiveNumber("UPBOT_ACP_FIRST_ACTIVITY_MS", DEFAULT_OPENCODE_FIRST_ACTIVITY_MS);
+  return envPositiveNumber("BOTO_ACP_FIRST_ACTIVITY_MS", DEFAULT_OPENCODE_FIRST_ACTIVITY_MS);
 }
 
 type AcpActivityMonitor = {
@@ -548,7 +548,7 @@ export class AcpDriver implements ProviderDriver {
 
     let loading = false;
     const app = acp
-      .client({ name: "upbot" })
+      .client({ name: "boto" })
       .onRequest("session/request_permission", async (ctx) => {
         const p = ctx.params as {
           toolCall?: { title?: string; kind?: string };
@@ -620,7 +620,7 @@ export class AcpDriver implements ProviderDriver {
                 fs: { readTextFile: false, writeTextFile: false },
                 terminal: false,
               },
-              clientInfo: { name: "upbot", version: VERSION },
+              clientInfo: { name: "boto", version: VERSION },
             } as never),
           ),
         )) as {

@@ -26,7 +26,7 @@ for (const behavior of ["resume", "unknown", "error", "close", "auth", "new-erro
     let client: DaemonClient | undefined;
     const start = async (env: Record<string, string> = {}) => {
       daemon = await startDaemon(dataDir, agentsRoot, token, {
-        UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+        BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
         FAKE_ACP_STATE_DIR: stateDir,
         ...env,
       });
@@ -67,7 +67,7 @@ for (const behavior of ["resume", "unknown", "error", "close", "auth", "new-erro
         .filter((entry) => entry.method === "session/prompt")
         .map((entry) => entry.params as { sessionId: string; prompt: { text: string }[] });
       const history = await c.request("chat.history", { agentId: agent.id });
-      const db = new Database(join(dataDir, "upbot.db"), { readonly: true });
+      const db = new Database(join(dataDir, "boto.db"), { readonly: true });
       try {
         const stored = db
           .query("SELECT session_id FROM agent_sessions WHERE agent_id = ?")

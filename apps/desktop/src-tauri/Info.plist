@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
   <key>NSMicrophoneUsageDescription</key>
-  <string>UpBot uses the microphone for voice dictation to your agents.</string>
+  <string>Boto uses the microphone for voice dictation to your agents.</string>
 </dict>
 </plist>

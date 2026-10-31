@@ -1,6 +1,6 @@
 import { lstatSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, extname, isAbsolute, join, win32 } from "node:path";
-import type { ChatAttachment } from "@upbot/protocol";
+import type { ChatAttachment } from "@boto/protocol";
 import { RpcError } from "./runtime/agent-runtime";
 
 // Attachments sent with a chat message are written into the agent workspace

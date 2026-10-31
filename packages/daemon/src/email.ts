@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
-import type { EmailAccount, EmailDraft, EmailProvider, MethodParsedParams } from "@upbot/protocol";
+import type { EmailAccount, EmailDraft, EmailProvider, MethodParsedParams } from "@boto/protocol";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import nodemailer from "nodemailer";
@@ -9,8 +9,8 @@ import { EMAIL_PREFIX, type Vault } from "./vault";
 
 // Email over IMAP (search/read) + SMTP (send). Passwords (app passwords) live in the vault as
 // email.<id>.password and never reach bots. Bots can only create drafts; a draft is sent only
-// when the user clicks Send (email.drafts.send). UPBOT_EMAIL_FAKE_MAILBOX=<json file> replaces
-// IMAP with a static mailbox (tests); UPBOT_EMAIL_PLAINTEXT=1 allows non-TLS SMTP (tests).
+// when the user clicks Send (email.drafts.send). BOTO_EMAIL_FAKE_MAILBOX=<json file> replaces
+// IMAP with a static mailbox (tests); BOTO_EMAIL_PLAINTEXT=1 allows non-TLS SMTP (tests).
 
 type Config = Omit<EmailAccount, "id" | "createdAt" | "hasPassword">;
 type Broadcast = (event: string, data: unknown) => void;
@@ -73,7 +73,7 @@ const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}\n…[tr
 type FakeMessage = Omit<EmailMessage, "seen"> & { mailbox?: string; seen?: boolean };
 
 function fakeMailbox(): FakeMessage[] | null {
-  const f = process.env.UPBOT_EMAIL_FAKE_MAILBOX;
+  const f = process.env.BOTO_EMAIL_FAKE_MAILBOX;
   return f ? (JSON.parse(readFileSync(f, "utf8")) as FakeMessage[]) : null;
 }
 
@@ -432,7 +432,7 @@ export class EmailService {
   }
 
   private transport(a: EmailAccount) {
-    const plaintext = process.env.UPBOT_EMAIL_PLAINTEXT === "1";
+    const plaintext = process.env.BOTO_EMAIL_PLAINTEXT === "1";
     return nodemailer.createTransport({
       host: a.smtpHost,
       port: a.smtpPort,

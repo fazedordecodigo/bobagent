@@ -5,7 +5,7 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder, Windo
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tauri_plugin_positioner::{Position, WindowExt};
 
-const TRAY_ID: &str = "upbot";
+const TRAY_ID: &str = "boto";
 const WINDOW_LABEL: &str = "menubar";
 
 type TrayRect = (tauri::PhysicalPosition<f64>, tauri::PhysicalSize<f64>);
@@ -88,11 +88,11 @@ fn menu_position(
 
 fn tray_tooltip(count: u32) -> String {
     if count == 0 {
-        "UpBot".into()
+        "Boto".into()
     } else if count == 1 {
-        "UpBot — 1 tarefa aguardando você".into()
+        "Boto — 1 tarefa aguardando você".into()
     } else {
-        format!("UpBot — {count} tarefas aguardando você")
+        format!("Boto — {count} tarefas aguardando você")
     }
 }
 
@@ -170,7 +170,7 @@ pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         WINDOW_LABEL,
         WebviewUrl::App("index.html#/menubar".into()),
     )
-    .title("UpBot")
+    .title("Boto")
     .inner_size(384.0, 600.0)
     .resizable(false)
     .decorations(false)
@@ -258,7 +258,7 @@ pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
 #[tauri::command]
 pub fn set_tray_count(app: AppHandle, count: u32) -> Result<(), String> {
-    let tray = app.tray_by_id(TRAY_ID).ok_or("UpBot tray icon not found")?;
+    let tray = app.tray_by_id(TRAY_ID).ok_or("Boto tray icon not found")?;
     #[cfg(target_os = "macos")]
     tray.set_title(Some(tray_title(count)))
         .map_err(|error| error.to_string())?;
@@ -310,7 +310,7 @@ pub async fn open_main(app: AppHandle, view: Option<String>) -> Result<(), Strin
     window.set_focus().map_err(|error| error.to_string())?;
     if let Some(view) = navigation {
         window
-            .emit("upbot://navigate", view)
+            .emit("boto://navigate", view)
             .map_err(|error| error.to_string())?;
     }
     Ok(())
@@ -329,7 +329,7 @@ pub fn main_ready(app: AppHandle, window: tauri::WebviewWindow) -> Result<(), St
         .mounted();
     if let Some(view) = view {
         window
-            .emit("upbot://navigate", view)
+            .emit("boto://navigate", view)
             .map_err(|error| error.to_string())?;
     }
     Ok(())
@@ -458,18 +458,18 @@ mod tests {
     #[test]
     fn empty_count_clears_title_and_tooltip() {
         assert_eq!(tray_title(0), "");
-        assert_eq!(tray_tooltip(0), "UpBot");
+        assert_eq!(tray_tooltip(0), "Boto");
     }
 
     #[test]
     fn pending_count_is_shown_without_truncation() {
-        assert_eq!(tray_tooltip(1), "UpBot — 1 tarefa aguardando você");
+        assert_eq!(tray_tooltip(1), "Boto — 1 tarefa aguardando você");
         assert_eq!(tray_title(1), "1");
         for count in [3, u32::MAX] {
             assert_eq!(tray_title(count), count.to_string());
             assert_eq!(
                 tray_tooltip(count),
-                format!("UpBot — {count} tarefas aguardando você")
+                format!("Boto — {count} tarefas aguardando você")
             );
         }
     }

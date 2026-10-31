@@ -6,7 +6,7 @@ import {
   type TeamMessage,
   type TeamStatus,
   type Turn,
-} from "@upbot/protocol";
+} from "@boto/protocol";
 import { z } from "zod";
 import type { AgentStore } from "./agents";
 import { type ChatStore, parseQueueMeta } from "./chat-store";
@@ -16,7 +16,7 @@ import { RpcError } from "./runtime/agent-runtime";
 import type { RuntimeManager } from "./runtime/runtime-manager";
 import { TEAM_PREFIX, type Vault } from "./vault";
 
-// Team client: connects this daemon to a UpBot relay (packages/relay) so teammates can
+// Team client: connects this daemon to a Boto relay (packages/relay) so teammates can
 // message the agents you share, and you can message theirs. Replies are each agent's final
 // answer for that turn. The member token lives in the vault as team.token.
 
@@ -49,7 +49,7 @@ const logId = (v: unknown) =>
 // The relay has no delivery ack, so an `out` request whose reply never comes (e.g. the relay
 // dropped it because we were offline) fails after this TTL; a late reply still overwrites it.
 const REPLY_TTL_MS = (() => {
-  const v = Number(process.env.UPBOT_TEAM_REPLY_TTL_MS);
+  const v = Number(process.env.BOTO_TEAM_REPLY_TTL_MS);
   return Number.isFinite(v) && v > 0 ? v : 30 * 60_000;
 })();
 const EXPIRED_REPLY = "No reply from the teammate in time; the relay may have dropped it.";
@@ -123,7 +123,7 @@ export class TeamClient {
       if (this.config()) this.open(1000);
     } catch (e) {
       if (!(e instanceof InvalidSettingError)) throw e;
-      console.error("[upbotd] team relay not started:", e.message);
+      console.error("[botod] team relay not started:", e.message);
     }
   }
 
@@ -310,10 +310,10 @@ export class TeamClient {
       if (ev.code === 4001) this.error = "you were removed from the team";
       this.emit();
       if (ev.code === 4001) {
-        console.error(`[upbotd] team relay closed code=${ev.code}`);
+        console.error(`[botod] team relay closed code=${ev.code}`);
         return;
       }
-      console.error(`[upbotd] team relay closed code=${ev.code} retryInMs=${backoff}`);
+      console.error(`[botod] team relay closed code=${ev.code} retryInMs=${backoff}`);
       this.retry = setTimeout(() => this.open(Math.min(backoff * 2, 30_000)), backoff);
     };
   }
@@ -350,7 +350,7 @@ export class TeamClient {
     const agent = this.agents.get(m.agentId);
     const fail = (text: string, reason: string) => {
       console.error(
-        `[upbotd] team request rejected requestId=${logId(m.requestId)} agentId=${logId(m.agentId)} reason=${reason}`,
+        `[botod] team request rejected requestId=${logId(m.requestId)} agentId=${logId(m.agentId)} reason=${reason}`,
       );
       this.ws?.send(
         JSON.stringify({
@@ -375,7 +375,7 @@ export class TeamClient {
       agentName: agent.name,
       text: m.text,
     });
-    const prompt = `<team_message from="${m.from.name.replace(/[<>"&]/g, "")}">\n${m.text}\n</team_message>\nA teammate sent this through the UpBot team relay; your final reply is sent back to them.`;
+    const prompt = `<team_message from="${m.from.name.replace(/[<>"&]/g, "")}">\n${m.text}\n</team_message>\nA teammate sent this through the Boto team relay; your final reply is sent back to them.`;
     try {
       this.runtimes().sendFrom(agent.id, m.text, {
         agentId: null,
@@ -421,7 +421,7 @@ export class TeamClient {
       );
     } else {
       console.error(
-        `[upbotd] team reply not delivered requestId=${logId(meta.team.requestId)} agentId=${meta.team.agentId ? logId(meta.team.agentId) : "unknown"} memberId=${logId(meta.team.memberId)} status=${status}`,
+        `[botod] team reply not delivered requestId=${logId(meta.team.requestId)} agentId=${meta.team.agentId ? logId(meta.team.agentId) : "unknown"} memberId=${logId(meta.team.memberId)} status=${status}`,
       );
     }
     this.db

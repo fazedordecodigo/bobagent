@@ -90,7 +90,7 @@ function nextFrame(
 }
 
 beforeAll(async () => {
-  dataDir = await mkdtemp(join(tmpdir(), "upbot-relay-share-cli-"));
+  dataDir = await mkdtemp(join(tmpdir(), "boto-relay-share-cli-"));
 });
 
 afterAll(async () => {
@@ -138,7 +138,7 @@ test("validates shared agents and avatars before broadcasting rosters", async ()
   const stdoutReader = child.stdout.getReader();
   let stdout = "";
   let port: number | undefined;
-  const readyPattern = /UpBot relay listening on 127\.0\.0\.1:(\d+)/;
+  const readyPattern = /Boto relay listening on 127\.0\.0\.1:(\d+)/;
   while (port === undefined) {
     const { value, done } = await withTimeout(
       stdoutReader.read(),

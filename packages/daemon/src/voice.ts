@@ -5,8 +5,8 @@ import { resolveCommandIn, spawnEnv } from "./env/login-path";
 import { spawnChild } from "./env/spawn";
 import { envOverride } from "./env/vars";
 
-// Voice: text-to-speech with macOS `say` (or UPBOT_TTS_COMMAND, text on stdin) and
-// speech-to-text with UPBOT_STT_COMMAND (JSON array, "{file}" = recorded audio path,
+// Voice: text-to-speech with macOS `say` (or BOTO_TTS_COMMAND, text on stdin) and
+// speech-to-text with BOTO_STT_COMMAND (JSON array, "{file}" = recorded audio path,
 // transcript on stdout) or the `whisper` CLI when it is on PATH.
 
 const EXT: Record<string, string> = {
@@ -26,7 +26,7 @@ export class Voice {
   ) {}
 
   private tts(): string[] | null {
-    return envOverride("UPBOT_TTS_COMMAND") ?? (process.platform === "darwin" ? ["say"] : null);
+    return envOverride("BOTO_TTS_COMMAND") ?? (process.platform === "darwin" ? ["say"] : null);
   }
 
   private resolve(cmd: string): string | null {
@@ -43,7 +43,7 @@ export class Voice {
   status() {
     return {
       tts: this.tts() !== null,
-      stt: envOverride("UPBOT_STT_COMMAND") !== null || this.whisper() !== null,
+      stt: envOverride("BOTO_STT_COMMAND") !== null || this.whisper() !== null,
     };
   }
 
@@ -85,11 +85,11 @@ export class Voice {
     const file = join(work, `audio.${EXT[mime.split(";")[0]!.trim()] ?? "webm"}`);
     writeFileSync(file, Buffer.from(audioBase64, "base64"));
     try {
-      const custom = envOverride("UPBOT_STT_COMMAND");
+      const custom = envOverride("BOTO_STT_COMMAND");
       const whisper = custom ? null : this.whisper();
       if (!custom && !whisper)
         throw new Error(
-          "speech-to-text is not available (install whisper or set UPBOT_STT_COMMAND)",
+          "speech-to-text is not available (install whisper or set BOTO_STT_COMMAND)",
         );
       const cmd = custom
         ? custom.map((a) => a.replaceAll("{file}", file))

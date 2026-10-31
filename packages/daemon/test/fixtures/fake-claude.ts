@@ -118,7 +118,7 @@ async function runPrompt(raw: string) {
   const s = sessions();
   if (!s.includes(sessionId)) writeFileSync(SESSIONS, JSON.stringify([...s, sessionId]));
   const text = raw
-    .replace(/^[\s\S]*<\/(conversation_history|agent_instructions|upbot_context)>\s*/, "")
+    .replace(/^[\s\S]*<\/(conversation_history|agent_instructions|boto_context)>\s*/, "")
     .trim();
   send({ type: "system", subtype: "init", session_id: sessionId, permissionMode: mode, model });
   interrupted = false;

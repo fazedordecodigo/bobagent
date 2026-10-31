@@ -17,8 +17,8 @@ import { join, resolve } from "node:path";
 export const REPO_ROOT = resolve(import.meta.dir, "../../..");
 
 const HOST_MAIN = join(REPO_ROOT, "packages/host/src/main.ts");
-const HOST_INIT = join(REPO_ROOT, "packages/host/rootfs/upbot-init");
-const ARTIFACTS = resolve(process.env.UPBOT_FC_ARTIFACTS ?? join(homedir(), ".upbot/firecracker"));
+const HOST_INIT = join(REPO_ROOT, "packages/host/rootfs/boto-init");
+const ARTIFACTS = resolve(process.env.BOTO_FC_ARTIFACTS ?? join(homedir(), ".boto/firecracker"));
 
 function debugfs(rootfs: string, command: string) {
   const result = spawnSync("debugfs", ["-w", "-R", command, rootfs], { encoding: "utf8" });
@@ -35,7 +35,7 @@ function injectGuestFile(rootfs: string, source: string, destination: string, mo
 export function makeFirecrackerHostRoot(
   extraFiles: { source: string; destination: string; mode?: string }[] = [],
 ): string {
-  const root = mkdtempSync(join(tmpdir(), "upbot-fc-test-"));
+  const root = mkdtempSync(join(tmpdir(), "boto-fc-test-"));
   try {
     const firecracker = join(root, "firecracker");
     mkdirSync(firecracker, { recursive: true });
@@ -50,8 +50,8 @@ export function makeFirecrackerHostRoot(
     const rootfs = join(firecracker, "rootfs.ext4");
     const cp = spawnSync("cp", ["--reflink=auto", "--sparse=always", baseRootfs, rootfs]);
     if (cp.status !== 0) copyFileSync(baseRootfs, rootfs);
-    injectGuestFile(rootfs, HOST_MAIN, "/opt/upbot/upbot-host.ts");
-    injectGuestFile(rootfs, HOST_INIT, "/usr/sbin/upbot-init", "0100755");
+    injectGuestFile(rootfs, HOST_MAIN, "/opt/boto/boto-host.ts");
+    injectGuestFile(rootfs, HOST_INIT, "/usr/sbin/boto-init", "0100755");
     const helperHash = createHash("sha256").update(readFileSync(HOST_MAIN)).digest("hex");
     writeFileSync(join(firecracker, "guest-helper.sha256"), `${helperHash}\n`);
     for (const file of extraFiles)

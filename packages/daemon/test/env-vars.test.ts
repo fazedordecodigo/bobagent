@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { envNumber, envOverride, envPositiveNumber, envStringArray } from "../src/env/vars";
 
-const NAME = "UPBOT_TEST_ENV_VARS";
+const NAME = "BOTO_TEST_ENV_VARS";
 
 afterEach(() => {
   delete process.env[NAME];

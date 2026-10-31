@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
-import { type Agent, type HostPreflight, RemoteHost } from "@upbot/protocol";
+import { type Agent, type HostPreflight, RemoteHost } from "@boto/protocol";
 import { DaemonClient, type DaemonHandle, startDaemon, tmp } from "./helpers";
 
 const FAKE_SSH = join(import.meta.dir, "fixtures/fake-preflight-ssh.ts");
@@ -48,7 +48,7 @@ describe("host preflight RPC validation", () => {
 
   async function connect(env: Record<string, string> = {}) {
     daemon = await startDaemon(join(root, "data"), join(root, "agents"), TOKEN, {
-      UPBOT_SSH_COMMAND: JSON.stringify([process.execPath, FAKE_SSH]),
+      BOTO_SSH_COMMAND: JSON.stringify([process.execPath, FAKE_SSH]),
       FAKE_PREFLIGHT_OUTPUT: join(root, "output"),
       FAKE_PREFLIGHT_SSH_LOG: join(root, "ssh.jsonl"),
       ...env,
@@ -58,7 +58,7 @@ describe("host preflight RPC validation", () => {
   }
 
   function stored(id: string) {
-    const db = new Database(join(root, "data/upbot.db"), { readonly: true });
+    const db = new Database(join(root, "data/boto.db"), { readonly: true });
     try {
       return db.query("SELECT root, preflight_json FROM hosts WHERE id = ?").get(id);
     } finally {
@@ -134,7 +134,7 @@ describe("host preflight RPC validation", () => {
       JSON.stringify({ root: preflight.root, firecrackerReady: true }),
       "not-json",
     ]) {
-      const db = new Database(join(root, "data/upbot.db"));
+      const db = new Database(join(root, "data/boto.db"));
       try {
         db.query("UPDATE hosts SET root = ?, preflight_json = ? WHERE id = ?").run(
           preflight.root,
@@ -156,7 +156,7 @@ describe("host preflight RPC validation", () => {
   });
 
   test.each(["not-json", '["ssh",42]', "[]", '{"command":"ssh"}'])(
-    "invalid UPBOT_SSH_COMMAND %s falls back to ssh on PATH through RPC",
+    "invalid BOTO_SSH_COMMAND %s falls back to ssh on PATH through RPC",
     async (override) => {
       const compiled = Bun.spawnSync([
         process.execPath,
@@ -176,7 +176,7 @@ describe("host preflight RPC validation", () => {
       const pathKey =
         Object.keys(process.env).find((key) => key.toLowerCase() === "path") ?? "PATH";
       const client = await connect({
-        UPBOT_SSH_COMMAND: override,
+        BOTO_SSH_COMMAND: override,
         [pathKey]: `${root}${delimiter}${process.env[pathKey] ?? ""}`,
         ...(process.platform === "win32" ? {} : { SHELL: shell }),
       });

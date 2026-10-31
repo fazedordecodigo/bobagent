@@ -8,10 +8,10 @@ test("mobile audit distinguishes an expired pairing code from an inactive code",
   const dir = tmp("mob-expired-");
   const db = openDatabase(dir);
   const mobile = new MobileServer(db);
-  const host = process.env.UPBOT_MOBILE_HOST;
-  const port = process.env.UPBOT_MOBILE_PORT;
-  process.env.UPBOT_MOBILE_HOST = "127.0.0.1";
-  process.env.UPBOT_MOBILE_PORT = "0";
+  const host = process.env.BOTO_MOBILE_HOST;
+  const port = process.env.BOTO_MOBILE_PORT;
+  process.env.BOTO_MOBILE_HOST = "127.0.0.1";
+  process.env.BOTO_MOBILE_PORT = "0";
   const log = spyOn(console, "error").mockImplementation(() => {});
   try {
     const status = mobile.setEnabled(true);
@@ -28,17 +28,17 @@ test("mobile audit distinguishes an expired pairing code from an inactive code",
     });
     expect(response.status).toBe(401);
     expect(log).toHaveBeenCalledWith(
-      "[upbotd] mobile.pair_failed",
+      "[botod] mobile.pair_failed",
       JSON.stringify({ reason: "expired", attempts: 0, ip: "127.0.0.1" }),
     );
     expect(mobile.status().devices).toEqual([]);
   } finally {
     mobile.setEnabled(false);
     log.mockRestore();
-    if (host === undefined) delete process.env.UPBOT_MOBILE_HOST;
-    else process.env.UPBOT_MOBILE_HOST = host;
-    if (port === undefined) delete process.env.UPBOT_MOBILE_PORT;
-    else process.env.UPBOT_MOBILE_PORT = port;
+    if (host === undefined) delete process.env.BOTO_MOBILE_HOST;
+    else process.env.BOTO_MOBILE_HOST = host;
+    if (port === undefined) delete process.env.BOTO_MOBILE_PORT;
+    else process.env.BOTO_MOBILE_PORT = port;
     db.close();
     rmSync(dir, { recursive: true, force: true });
   }

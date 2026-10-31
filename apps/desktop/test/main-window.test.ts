@@ -10,7 +10,7 @@ import type {
   ConnectedApp,
   EmailDraft,
   Routine,
-} from "@upbot/protocol";
+} from "@boto/protocol";
 import { type Browser, chromium, type Page, type WebSocketRoute } from "playwright-core";
 import {
   DaemonClient,
@@ -88,13 +88,13 @@ async function seedEchoHistory(agentId: string, text: string) {
 }
 
 beforeAll(async () => {
-  state = mkdtempSync(join(homedir(), "upbot-window-test-"));
+  state = mkdtempSync(join(homedir(), "boto-window-test-"));
   const fake = join(state, "fake");
   mkdirSync(fake);
   daemon = await startDaemon(join(state, "data"), join(state, "bots"), token, {
-    UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+    BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
     FAKE_ACP_STATE_DIR: fake,
-    UPBOT_VAULT_KEY: "ab".repeat(32),
+    BOTO_VAULT_KEY: "ab".repeat(32),
   });
   rpc = await DaemonClient.connect(daemon.port, token);
   bot = (await rpc.request("agents.create", {
@@ -142,8 +142,8 @@ beforeAll(async () => {
   page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   await page.addInitScript(
     ({ id }) => {
-      localStorage.setItem("upbot.agent", id);
-      localStorage.setItem("upbot.view", "chat");
+      localStorage.setItem("boto.agent", id);
+      localStorage.setItem("boto.view", "chat");
     },
     { id: bot.id },
   );
@@ -171,7 +171,7 @@ afterAll(async () => {
 test("real chat, approval once/always/undo, details, palette, settings and drawer in both themes", async () => {
   for (const theme of ["light", "dark"] as const) {
     await page.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
-    await page.evaluate((theme) => localStorage.setItem("upbot.theme", theme), theme);
+    await page.evaluate((theme) => localStorage.setItem("boto.theme", theme), theme);
     await page.reload();
     await page.addStyleTag({ content: "*{transition:none!important;animation:none!important}" });
     await page
@@ -216,7 +216,7 @@ test("real chat, approval once/always/undo, details, palette, settings and drawe
         }),
       ).toEqual({ top: 0, height: 52, drag: true });
     }
-    expect(await page.locator(".side-brand").allTextContents()).toEqual(["UpBot"]);
+    expect(await page.locator(".side-brand").allTextContents()).toEqual(["Boto"]);
     expect(await page.locator(".rail").count()).toBe(0);
     expect(
       await page
@@ -371,8 +371,8 @@ test("RunPanel switch tracks contain their knobs on and off in both themes", asy
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   page.setDefaultTimeout(5000);
   await page.addInitScript((id) => {
-    localStorage.setItem("upbot.agent", id);
-    localStorage.setItem("upbot.view", "chat");
+    localStorage.setItem("boto.agent", id);
+    localStorage.setItem("boto.view", "chat");
   }, bot.id);
   await page.routeWebSocket(`ws://127.0.0.1:${daemon.port}/ws?*`, (socket) => {
     const server = socket.connectToServer();
@@ -407,7 +407,7 @@ test("RunPanel switch tracks contain their knobs on and off in both themes", asy
         ],
       });
       await page.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
-      await page.evaluate((value) => localStorage.setItem("upbot.theme", value), theme);
+      await page.evaluate((value) => localStorage.setItem("boto.theme", value), theme);
       await page.reload();
       await page.locator(".panel").waitFor();
       const permissions = page.locator('[data-od-id="panel-perms"]');
@@ -439,7 +439,7 @@ test("RunPanel switch tracks contain their knobs on and off in both themes", asy
 test("app requests, permissions dialog and sensitive conversation decisions stay synchronized", async () => {
   for (const theme of ["light", "dark"] as const) {
     await page.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
-    await page.evaluate((theme) => localStorage.setItem("upbot.theme", theme), theme);
+    await page.evaluate((theme) => localStorage.setItem("boto.theme", theme), theme);
     await page.reload();
     await page
       .locator(".main-head")
@@ -653,7 +653,7 @@ test("sidebar navigation, real approval counts, routines, groups, profile and th
       .getByRole("button", { name: theme === "light" ? "Tema claro" : "Tema escuro", exact: true })
       .click();
     expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe(theme);
-    expect(await page.evaluate(() => localStorage.getItem("upbot.theme"))).toBe(theme);
+    expect(await page.evaluate(() => localStorage.getItem("boto.theme"))).toBe(theme);
     for (const status of ["idle", "queue", "wait", "run", "err", "ok"]) {
       const row = side
         .locator(".side-bot")
@@ -789,12 +789,12 @@ test("chat uses a single composer row and anonymous left/right bubbles in both t
   target.setDefaultTimeout(5000);
   try {
     await target.addInitScript((id) => {
-      localStorage.setItem("upbot.agent", id);
-      localStorage.setItem("upbot.view", "chat");
+      localStorage.setItem("boto.agent", id);
+      localStorage.setItem("boto.view", "chat");
     }, agent.id);
     for (const theme of ["light", "dark"]) {
       await target.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
-      await target.evaluate((value) => localStorage.setItem("upbot.theme", value), theme);
+      await target.evaluate((value) => localStorage.setItem("boto.theme", value), theme);
       await target.reload();
       const prompt = target.getByRole("textbox", { name: "Mensagem para o bot", exact: true });
       await prompt.waitFor();
@@ -1020,8 +1020,8 @@ test("cached approval and draft cards remain visible when refreshes fail", async
   ]);
   await target.addInitScript(
     ({ id }) => {
-      localStorage.setItem("upbot.agent", id);
-      localStorage.setItem("upbot.view", "chat");
+      localStorage.setItem("boto.agent", id);
+      localStorage.setItem("boto.view", "chat");
     },
     { id: bot.id },
   );
@@ -1137,8 +1137,8 @@ test("status failure survives chat loading", async () => {
   let statusFailed = false;
   const heldHistory: string[] = [];
   await target.addInitScript((id) => {
-    localStorage.setItem("upbot.agent", id);
-    localStorage.setItem("upbot.view", "chat");
+    localStorage.setItem("boto.agent", id);
+    localStorage.setItem("boto.view", "chat");
   }, agent.id);
   await target.routeWebSocket(/\/ws\?/, (socket) => {
     const server = socket.connectToServer();
@@ -1191,8 +1191,8 @@ test("earlier-history failure is shown", async () => {
   const consoleText: string[] = [];
   target.on("console", (message) => consoleText.push(message.text()));
   await target.addInitScript((id) => {
-    localStorage.setItem("upbot.agent", id);
-    localStorage.setItem("upbot.view", "chat");
+    localStorage.setItem("boto.agent", id);
+    localStorage.setItem("boto.view", "chat");
   }, agent.id);
   await target.routeWebSocket(/\/ws\?/, (socket) => {
     const server = socket.connectToServer();
@@ -1247,8 +1247,8 @@ test("run panel shows its hook errors", async () => {
   const target = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   target.setDefaultTimeout(5000);
   await target.addInitScript((id) => {
-    localStorage.setItem("upbot.agent", id);
-    localStorage.setItem("upbot.view", "chat");
+    localStorage.setItem("boto.agent", id);
+    localStorage.setItem("boto.view", "chat");
   }, agent.id);
   await target.routeWebSocket(/\/ws\?/, (socket) => {
     const server = socket.connectToServer();
@@ -1316,8 +1316,8 @@ test("draft send logs update and send failures under their own scopes", async ()
   const methods: string[] = [];
   await target.addInitScript(
     ({ id }) => {
-      localStorage.setItem("upbot.agent", id);
-      localStorage.setItem("upbot.view", "chat");
+      localStorage.setItem("boto.agent", id);
+      localStorage.setItem("boto.view", "chat");
     },
     { id: bot.id },
   );
@@ -1496,7 +1496,7 @@ test("Pages and group chat use the active theme; settings tabs support arrow nav
   await rpc.request("channels.create", { name: "Revisão", memberIds: [bot.id] });
   for (const theme of ["light", "dark"]) {
     await page.goto(`http://localhost:1420/#port=${daemon.port}&token=${token}`);
-    await page.evaluate((value) => localStorage.setItem("upbot.theme", value), theme);
+    await page.evaluate((value) => localStorage.setItem("boto.theme", value), theme);
     await page.reload();
     await page.locator(".side").waitFor();
     await page.keyboard.press("Meta+p");

@@ -8,7 +8,7 @@ import type {
   PendingPermission,
   PermissionOption,
   QueueState,
-} from "@upbot/protocol";
+} from "@boto/protocol";
 import type { AgentStore } from "../agents";
 import { type ChatStore, type QueueSource, type QueueStore, readQueueMeta } from "../chat-store";
 import { envNumber, envPositiveNumber } from "../env/vars";
@@ -31,24 +31,24 @@ do not use any tools.
 </compaction_request>`;
 
 function compactThreshold(): number | null {
-  const raw = process.env.UPBOT_COMPACT_THRESHOLD;
+  const raw = process.env.BOTO_COMPACT_THRESHOLD;
   if (raw === "off" || raw === "0") return null;
-  return envNumber("UPBOT_COMPACT_THRESHOLD", 0.85, { max: 1 });
+  return envNumber("BOTO_COMPACT_THRESHOLD", 0.85, { max: 1 });
 }
 
 function compactTimeoutMs(): number {
-  return envPositiveNumber("UPBOT_COMPACT_TIMEOUT_MS", 180_000);
+  return envPositiveNumber("BOTO_COMPACT_TIMEOUT_MS", 180_000);
 }
 
 export function xmlAttr(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
 
-/** Prompt framing for a message that another agent sent via the upbot MCP bridge. */
+/** Prompt framing for a message that another agent sent via the boto MCP bridge. */
 export function wrapAgentMessage(from: { agentId: string; name: string }, text: string): string {
   return `<agent_message_context from="${xmlAttr(from.name)}" agent_id="${from.agentId}">
-This message comes from another UpBot agent, not from the user. To answer it, call the
-upbot send_message tool with to="${xmlAttr(from.name)}". Do not reply to pure acknowledgements.
+This message comes from another Boto agent, not from the user. To answer it, call the
+boto send_message tool with to="${xmlAttr(from.name)}". Do not reply to pure acknowledgements.
 </agent_message_context>
 ${text}`;
 }
@@ -148,9 +148,9 @@ type PendingEntry = {
   resolve: (r: { optionId: string | null }) => void;
 };
 
-// min: 0 honors UPBOT_CANCEL_GRACE_MS=0 as an immediate kill, which the old
+// min: 0 honors BOTO_CANCEL_GRACE_MS=0 as an immediate kill, which the old
 // Math.max(0, …) clamp suggested but the `|| 10_000` fallback silently ignored.
-const cancelGraceMs = () => envNumber("UPBOT_CANCEL_GRACE_MS", 10_000, { min: 0 });
+const cancelGraceMs = () => envNumber("BOTO_CANCEL_GRACE_MS", 10_000, { min: 0 });
 
 /** How often the in-memory streamed text is flushed to SQLite mid-stream. */
 const TEXT_FLUSH_MS = 150;
@@ -234,7 +234,7 @@ export class AgentRuntime {
    */
   private logRuntime(event: string, detail: string): void {
     console.error(
-      `[upbotd] ${event}: agent=${this.agent.id} provider=${this.agent.provider} ${detail}`,
+      `[botod] ${event}: agent=${this.agent.id} provider=${this.agent.provider} ${detail}`,
     );
   }
 
@@ -306,7 +306,7 @@ export class AgentRuntime {
     if (!next) return;
     const { meta, rejected } = readQueueMeta(next);
     if (rejected.length)
-      console.error(`[upbotd] queue item ${next.id}: ignored invalid meta ${rejected.join(", ")}`);
+      console.error(`[botod] queue item ${next.id}: ignored invalid meta ${rejected.join(", ")}`);
     this.draining = true;
     try {
       const turnRow = this.store.createTurn(this.agent.id, next.id);
@@ -477,7 +477,7 @@ export class AgentRuntime {
         if (handoff) promptText = handoff + promptText;
       }
       this.sessionPromptCount += 1;
-      const dbgDir = process.env.UPBOT_DEBUG_PROMPTS_DIR;
+      const dbgDir = process.env.BOTO_DEBUG_PROMPTS_DIR;
       if (dbgDir) {
         try {
           const { writeFileSync, mkdirSync } = await import("node:fs");
@@ -485,7 +485,7 @@ export class AgentRuntime {
           writeFileSync(join(dbgDir, `${this.agent.id}-${turn.id}.txt`), promptText);
         } catch (e) {
           console.error(
-            `[upbotd] failed to write debug prompt: agent=${this.agent.id} turn=${turn.id} ${errorFields(e)}`,
+            `[botod] failed to write debug prompt: agent=${this.agent.id} turn=${turn.id} ${errorFields(e)}`,
           );
         }
       }
@@ -934,7 +934,7 @@ export class AgentRuntime {
     try {
       this.flushTextItem();
     } catch (e) {
-      console.error("[upbotd] failed to persist streamed text:", (e as Error).message);
+      console.error("[botod] failed to persist streamed text:", (e as Error).message);
     }
     this.openTextItem = null;
   }

@@ -111,7 +111,7 @@ test("kit switch tracks contain knobs on and off in both themes", async () => {
 test("theme persists, focus is visible, colors invert, reduced motion stops pulse", async () => {
   await page.getByRole("button", { name: "Tema escuro" }).click();
   expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe("dark");
-  expect(await page.evaluate(() => localStorage.getItem("upbot.theme"))).toBe("dark");
+  expect(await page.evaluate(() => localStorage.getItem("boto.theme"))).toBe("dark");
   await page.reload();
   await page.getByRole("heading", { name: "Controles", exact: true }).waitFor();
   expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe("dark");

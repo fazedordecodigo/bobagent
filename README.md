@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="apps/desktop/public/assets/upbot-logo-branco.svg">
-    <source media="(prefers-color-scheme: light)" srcset="apps/desktop/public/assets/upbot-logo.svg">
-    <img alt="UpBot" src="apps/desktop/public/assets/upbot-logo.svg" width="240">
+    <source media="(prefers-color-scheme: dark)" srcset="apps/desktop/public/assets/boto-logo-branco.svg">
+    <source media="(prefers-color-scheme: light)" srcset="apps/desktop/public/assets/boto-logo.svg">
+    <img alt="Boto" src="apps/desktop/public/assets/boto-logo.svg" width="240">
   </picture>
 </p>
 
@@ -15,16 +15,33 @@
   <img alt="macOS · Windows · Linux" src="https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-informational">
 </p>
 
-UpBot is a local-first desktop app where a team of AI bots work together on your everyday
+Boto is a local-first desktop app where a team of AI bots work together on your everyday
 tasks: researching and browsing the web, reading and organizing files, drafting emails and
 documents, and using your connected apps. Each bot has its own name, role, memory and chat —
 they message each other, delegate, share files through a shared workspace, and ask before
 doing anything consequential. Under the hood, Claude Code, Codex and other ACP agents
 (Devin, Cursor, Grok, OpenCode, Gemini) are the bots' brains.
 
-Everything runs on your machine. Your bots, chats and secrets stay in `~/UpBot` (or the
+Everything runs on your machine. Your bots, chats and secrets stay in `~/Boto` (or the
 platform equivalent), secrets live in an encrypted vault, and nothing ever gets sent or
 written on your behalf without your approval.
+
+## Upgrading from UpBot
+
+Quit the old app before starting Boto. Boto moves the default `~/UpBot` (or older
+`~/BobAgent`) home to `~/Boto`, repoints stored bot workspaces, and migrates the
+`com.upbot.desktop` (or `com.bobagent.desktop`) app data directory to `com.boto.desktop`.
+The existing SQLite database becomes `boto.db`, including committed WAL records;
+vault keys from the old Keychain/Secret Service names remain readable. Existing Boto
+directories/databases are never overwritten or merged. Custom workspace roots stay put.
+
+Update custom environment variables from `UPBOT_*` to `BOTO_*`. The daemon is now
+`botod`, the remote helper is `boto-host`, and the MCP server is `boto`.
+For remote hosts, stop active sessions, use **Install** again in Settings → Hosts to
+migrate the default `~/.upbot` directory to `~/.boto` and upload the new helper, then
+rebuild the Firecracker rootfs before launching microVMs. Persistent workspace disks
+are retained. Custom host roots require the matching `BOTO_HOST_ROOT` setting.
+The GitHub repository URL is unchanged; updater and marketplace URLs still use it.
 
 ## Why you'll like it
 
@@ -54,32 +71,32 @@ corners, soft colors and the Nunito typeface.
 | **Mobile companion** | **Team relay** |
 | ![Mobile](docs/screenshots/mobile.png) | ![Team](docs/screenshots/team.png) |
 
-## Get UpBot
+## Get Boto
 
 Download the installer for your OS from [Releases](https://github.com/fazedordecodigo/upbot/releases):
 
 - **macOS:** install the `.dmg`; the app updates itself. Builds are not yet notarized by
   Apple — on first launch, open System Settings → Privacy & Security and click
-  **Open Anyway** (or run `xattr -cr /Applications/UpBot.app`). Versions before 0.2.1 were
+  **Open Anyway** (or run `xattr -cr /Applications/Boto.app`). Versions before 0.2.1 were
   reported as "damaged"; use the `xattr` command for those.
 - **Windows x64:** run the per-user `.exe` installer. Builds are unsigned, so SmartScreen
   may warn you: choose **More info → Run anyway** (in Portuguese, **Mais informações →
   Executar assim mesmo**).
-- **Linux x64:** use the `.AppImage` for in-app updates (`chmod +x UpBot_*.AppImage`, then
-  run it), or install the `.deb` with `sudo apt install ./UpBot_*.deb`. The `.deb` does not
+- **Linux x64:** use the `.AppImage` for in-app updates (`chmod +x Boto_*.AppImage`, then
+  run it), or install the `.deb` with `sudo apt install ./Boto_*.deb`. The `.deb` does not
   update itself; install newer `.deb` releases manually.
 
 On Linux, install `libsecret-tools` to store the vault key in Secret Service. Otherwise
-UpBot uses a plaintext key file with owner-only permissions and warns at startup. Windows
+Boto uses a plaintext key file with owner-only permissions and warns at startup. Windows
 stores new keys using DPAPI, and macOS uses Keychain. Computer Use and the built-in `say`
 voice are macOS-only.
 
-UpBot was called BobAgent until 0.3.0; updating moves `~/BobAgent` to `~/UpBot` and keeps
+Boto was called BobAgent until 0.3.0; updating moves `~/BobAgent` to `~/Boto` and keeps
 your bots, chats and vault.
 
 ## Run bots on your own server
 
-Point UpBot at a Linux VPS and each bot session can run there instead — as a plain process
+Point Boto at a Linux VPS and each bot session can run there instead — as a plain process
 or inside its own Firecracker microVM, with credentials delivered only inside the VM. Setup
 guide, host requirements and microVM internals:
 [docs/remote-hosts.md](docs/remote-hosts.md).
@@ -98,7 +115,7 @@ Architecture and conventions: [AGENTS.md](AGENTS.md).
 
 ## Contributing
 
-UpBot is better with more hands — PRs, ideas, bug reports and skills for the marketplace
+Boto is better with more hands — PRs, ideas, bug reports and skills for the marketplace
 are all welcome. The [contributing guide](CONTRIBUTING.md) covers setup, the pre-PR
 checklist and the few rules that keep the codebase easy to review, and
 [AGENTS.md](AGENTS.md) explains how everything fits together.
@@ -106,7 +123,7 @@ checklist and the few rules that keep the codebase easy to review, and
 Meet the people who built it so far:
 
 <a href="https://github.com/fazedordecodigo/upbot/graphs/contributors">
-  <img alt="UpBot contributors" src="https://contrib.rocks/image?repo=fazedordecodigo/upbot">
+  <img alt="Boto contributors" src="https://contrib.rocks/image?repo=fazedordecodigo/upbot">
 </a>
 
 Want to add yourself? Pick an [issue](https://github.com/fazedordecodigo/upbot/issues) or

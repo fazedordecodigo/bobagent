@@ -1,6 +1,6 @@
-# UpBot marketplace
+# Boto marketplace
 
-`index.json` lists installable skills and agent templates. UpBot fetches it from
+`index.json` lists installable skills and agent templates. Boto fetches it from
 `https://raw.githubusercontent.com/fazedordecodigo/upbot/main/marketplace/index.json` by
 default; you can add other registries (http(s) or file URLs) in the app.
 

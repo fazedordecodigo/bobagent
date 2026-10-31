@@ -1,4 +1,4 @@
-import { type VmCredential, VmCredentialKind, type VmCredentialProvider } from "@upbot/protocol";
+import { type VmCredential, VmCredentialKind, type VmCredentialProvider } from "@boto/protocol";
 import { z } from "zod";
 import { type Vault, VMCRED_PREFIX } from "../vault";
 
@@ -32,7 +32,7 @@ export class VmCredentials {
     try {
       return STORED_ENTRY.parse(JSON.parse(this.vault.revealInternal(name)));
     } catch {
-      console.error("UpBot could not read a stored microVM credential", {
+      console.error("Boto could not read a stored microVM credential", {
         provider,
         reason: "invalid_entry",
       });

@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 import { readStorage, writeStorage } from "./storage";
 
 export type ThemePreference = "light" | "dark" | "auto";
-const changed = "upbot:theme-changed";
+const changed = "boto:theme-changed";
 
 function apply(preference: string | null) {
   const pref = preference === "light" || preference === "dark" ? preference : "auto";
@@ -17,10 +17,10 @@ function apply(preference: string | null) {
 }
 
 export function initializeTheme() {
-  apply(readStorage("upbot.theme"));
+  apply(readStorage("boto.theme"));
   window.addEventListener("storage", (event) => {
-    if (event.key === "upbot.theme" || event.key === null) {
-      apply(readStorage("upbot.theme"));
+    if (event.key === "boto.theme" || event.key === null) {
+      apply(readStorage("boto.theme"));
     }
   });
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
@@ -29,7 +29,7 @@ export function initializeTheme() {
 }
 
 export function setThemePreference(pref: ThemePreference) {
-  writeStorage("upbot.theme", pref);
+  writeStorage("boto.theme", pref);
   apply(pref);
 }
 

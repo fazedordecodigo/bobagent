@@ -4,7 +4,7 @@ import {
   type ApprovalDecision,
   type ApprovalRule,
   isSensitivePermission,
-} from "@upbot/protocol";
+} from "@boto/protocol";
 import { useEffect, useState } from "react";
 import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import { permissionActions, permissionLabels } from "../lib/app-permissions";
@@ -131,7 +131,7 @@ export function ApprovalCard({
         {!copy && a.detail && <div>{a.detail}</div>}
         {a.kind === "takeover" && a.status === "pending" && (
           <div className={s.meta}>
-            Use a janela do navegador do UpBot para entrar na conta ou concluir a verificação.
+            Use a janela do navegador do Boto para entrar na conta ou concluir a verificação.
             Depois, selecione Concluir etapa. O bot não vê o que você digita.
           </div>
         )}

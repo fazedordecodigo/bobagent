@@ -47,7 +47,7 @@ const iconLabels: Record<string, string> = {
   SparkIcon: "Seta diagonal",
   SunIcon: "Sol",
   UpIcon: "Enviar",
-  UpbotSimboloCurrentcolorIcon: "Símbolo UpBot",
+  BotoSimboloCurrentcolorIcon: "Símbolo Boto",
 };
 
 export default function Kit() {
@@ -63,7 +63,7 @@ export default function Kit() {
     document.documentElement.dataset.themePref = value;
     document.documentElement.dataset.theme = value;
     try {
-      localStorage.setItem("upbot.theme", value);
+      localStorage.setItem("boto.theme", value);
     } catch {}
     setTheme(value);
   };
@@ -71,8 +71,8 @@ export default function Kit() {
     <main className={s.kit}>
       <header className={s.header}>
         <div className={s.brand}>
-          <icons.UpbotSimboloCurrentcolorIcon />
-          <strong>UpBot</strong>
+          <icons.BotoSimboloCurrentcolorIcon />
+          <strong>Boto</strong>
           <span>Kit de interface</span>
         </div>
         <SegmentedControl
@@ -202,7 +202,7 @@ export default function Kit() {
           <Field
             label="Enviar relatório para"
             defaultValue="marina.costa@empresa.com.br"
-            hint="O UpBot só envia depois que você aprovar."
+            hint="O Boto só envia depois que você aprovar."
           />
           <Field
             label="Limite por despesa"
@@ -285,7 +285,7 @@ export default function Kit() {
           <div className={s.setting}>
             <div>
               <b>Abrir com o sistema</b>
-              <p>O UpBot fica na barra de menus.</p>
+              <p>O Boto fica na barra de menus.</p>
             </div>
             <Switch
               checked={enabled}

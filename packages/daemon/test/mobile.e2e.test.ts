@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { rmSync } from "node:fs";
-import type { Agent } from "@upbot/protocol";
+import type { Agent } from "@boto/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -61,10 +61,10 @@ describe("mobile companion e2e", () => {
       fetch: () => new Response("occupied"),
     });
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
-      UPBOT_MOBILE_HOST: "127.0.0.1",
-      UPBOT_MOBILE_PORT: String(occupied.port),
+      BOTO_MOBILE_HOST: "127.0.0.1",
+      BOTO_MOBILE_PORT: String(occupied.port),
     });
     const stderrReader = (daemon.proc.stderr as ReadableStream<Uint8Array>).getReader();
     const dec = new TextDecoder();
@@ -105,7 +105,7 @@ describe("mobile companion e2e", () => {
     expect(await blocker.text()).toBe("occupied");
     const page = await fetch(`${base}/`);
     expect(page.headers.get("content-security-policy")).toContain("connect-src 'self'");
-    expect(await page.text()).toContain("Pair with UpBot");
+    expect(await page.text()).toContain("Pair with Boto");
   });
 
   test("pairing: wrong codes count toward a limit, the right code yields a device token once", async () => {
@@ -235,11 +235,11 @@ describe("mobile companion e2e", () => {
   });
 
   test("a busy stored port falls back to a random port and is not overwritten", async () => {
-    // This daemon has no UPBOT_MOBILE_PORT override, so the stored settings port drives binds.
+    // This daemon has no BOTO_MOBILE_PORT override, so the stored settings port drives binds.
     const d2 = tmp("mob-data2-");
     const a2 = tmp("mob-agents2-");
     const token2 = `mob-test2-${crypto.randomUUID()}`;
-    const daemon2 = await startDaemon(d2, a2, token2, { UPBOT_MOBILE_HOST: "127.0.0.1" });
+    const daemon2 = await startDaemon(d2, a2, token2, { BOTO_MOBILE_HOST: "127.0.0.1" });
     const c2 = await DaemonClient.connect(daemon2.port, token2);
     try {
       let st = await c2.request("mobile.enable", { enabled: true });

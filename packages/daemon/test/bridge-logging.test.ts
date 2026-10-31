@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import type { Agent } from "@upbot/protocol";
+import type { Agent } from "@boto/protocol";
 import type { AgentStore } from "../src/agents";
 import { type ApprovalService, GateRejection } from "../src/approvals";
 import type { AppsService } from "../src/apps";
@@ -17,7 +17,7 @@ function makeBridge(): Bridge {
     get: (id: string) => (id === agent.id ? agent : null),
     list: () => [agent],
   } as unknown as AgentStore;
-  return new Bridge(agents, () => ({}) as RuntimeManager, "/tmp/upbot-shared");
+  return new Bridge(agents, () => ({}) as RuntimeManager, "/tmp/boto-shared");
 }
 
 test("failed tool calls log the tool, agent, duration and error", async () => {
@@ -31,7 +31,7 @@ test("failed tool calls log the tool, agent, duration and error", async () => {
     expect(res.isError).toBe(true);
     expect(spy).toHaveBeenCalledTimes(1);
     const meta = spy.mock.calls[0]?.[1] as Record<string, unknown>;
-    expect(spy.mock.calls[0]?.[0]).toBe("[upbotd] bridge tool failed");
+    expect(spy.mock.calls[0]?.[0]).toBe("[botod] bridge tool failed");
     expect(meta).toMatchObject({
       agentId: "bot1",
       tool: "send_message",
@@ -62,7 +62,7 @@ test("expected gate rejections are logged with their reason", async () => {
     });
     expect(res.isError).toBe(true);
     expect(spy).toHaveBeenCalledWith(
-      "[upbotd] bridge tool failed",
+      "[botod] bridge tool failed",
       expect.objectContaining({ agentId: "bot1", tool: "send_message", reason: "denied" }),
     );
   } finally {
@@ -80,7 +80,7 @@ test("tools/list still answers and logs when app tools fail", async () => {
     const res = await bridge.handle("bot1", { method: "tools/list" });
     expect((res.tools as unknown[]).length).toBe(BRIDGE_TOOLS.length);
     expect(spy).toHaveBeenCalledWith(
-      "[upbotd] bridge tools/list failed",
+      "[botod] bridge tools/list failed",
       expect.objectContaining({ agentId: "bot1", errorType: "Error" }),
     );
     expect(JSON.stringify(spy.mock.calls)).not.toContain("sk-live-secret");
@@ -105,7 +105,7 @@ test("app tool errors are logged without their message", async () => {
     });
     expect(res.isError).toBe(true);
     expect(spy).toHaveBeenCalledWith(
-      "[upbotd] bridge tool failed",
+      "[botod] bridge tool failed",
       expect.objectContaining({ tool: "fake-create_note", isApp: true, errorType: "Error" }),
     );
     expect(JSON.stringify(spy.mock.calls)).not.toContain(secret);
@@ -126,7 +126,7 @@ test("unregistered tool names are never logged verbatim", async () => {
     });
     expect(res.isError).toBe(true);
     expect(spy).toHaveBeenCalledWith(
-      "[upbotd] bridge tool failed",
+      "[botod] bridge tool failed",
       expect.objectContaining({ tool: "<unregistered>" }),
     );
     expect(JSON.stringify(spy.mock.calls)).not.toContain(secret);

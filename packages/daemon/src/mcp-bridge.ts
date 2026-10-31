@@ -1,4 +1,4 @@
-// `upbotd mcp-bridge`: a stdio MCP server spawned by provider CLIs. It forwards
+// `botod mcp-bridge`: a stdio MCP server spawned by provider CLIs. It forwards
 // tools/list and tools/call to the daemon's /bridge endpoint.
 
 import { createInterface } from "node:readline";
@@ -9,10 +9,10 @@ const PROTOCOL_VERSION = "2025-06-18";
 type Msg = { jsonrpc?: string; id?: number | string; method?: string; params?: unknown };
 
 export async function runMcpBridge(): Promise<void> {
-  const url = process.env.UPBOT_BRIDGE_URL;
-  const token = process.env.UPBOT_BRIDGE_TOKEN;
+  const url = process.env.BOTO_BRIDGE_URL;
+  const token = process.env.BOTO_BRIDGE_TOKEN;
   if (!url || !token) {
-    console.error("upbotd mcp-bridge: UPBOT_BRIDGE_URL / UPBOT_BRIDGE_TOKEN missing");
+    console.error("botod mcp-bridge: BOTO_BRIDGE_URL / BOTO_BRIDGE_TOKEN missing");
     process.exit(2);
   }
   const send = (m: unknown) => process.stdout.write(`${JSON.stringify(m)}\n`);
@@ -51,7 +51,7 @@ export async function runMcpBridge(): Promise<void> {
           reply(m.id, {
             protocolVersion: requested ?? PROTOCOL_VERSION,
             capabilities: { tools: {} },
-            serverInfo: { name: "upbot", version: VERSION },
+            serverInfo: { name: "boto", version: VERSION },
           });
           return;
         }
@@ -106,7 +106,7 @@ export async function runMcpBridge(): Promise<void> {
         : typeof errorCode === "string" && /^[A-Za-z0-9_]{1,40}$/.test(errorCode)
           ? errorCode
           : "-";
-      console.error(`upbotd mcp-bridge: method=${method} tool=${tool} status=${status}`);
+      console.error(`botod mcp-bridge: method=${method} tool=${tool} status=${status}`);
       if (m.method === "tools/call") {
         reply(m.id, { content: [{ type: "text", text: err.message }], isError: true });
       } else {

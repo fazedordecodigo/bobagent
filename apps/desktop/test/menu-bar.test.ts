@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Agent, Approval, ConnectedApp, QueueState } from "@upbot/protocol";
+import type { Agent, Approval, ConnectedApp, QueueState } from "@boto/protocol";
 import { type Browser, chromium, type Page } from "playwright-core";
 import {
   DaemonClient,
@@ -30,17 +30,17 @@ const url = () => `${base}#/menubar?port=${daemon.port}&token=${token}`;
 const out = process.env.PHASE6_SCREEN_DIR ?? process.env.PHASE4_SCREEN_DIR;
 
 beforeAll(async () => {
-  state = mkdtempSync(join(homedir(), "upbot-menubar-test-"));
+  state = mkdtempSync(join(homedir(), "boto-menubar-test-"));
   mkdirSync(join(state, "fake"));
   daemon = await startDaemon(join(state, "data"), join(state, "bots"), token, {
-    UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+    BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
     FAKE_ACP_STATE_DIR: join(state, "fake"),
-    UPBOT_CANCEL_GRACE_MS: "250",
-    UPBOT_VAULT_KEY: "ab".repeat(32),
+    BOTO_CANCEL_GRACE_MS: "250",
+    BOTO_VAULT_KEY: "ab".repeat(32),
   });
   rpc = await DaemonClient.connect(daemon.port, token);
   bot = (await rpc.request("agents.create", {
-    name: "UpBot",
+    name: "Boto",
     provider: "devin",
     instructions: "Organiza as entregas.",
   })) as Agent;
@@ -98,8 +98,8 @@ beforeAll(async () => {
   main.on("pageerror", (error) => errors.push(error.message));
   await main.setViewportSize({ width: 1280, height: 900 });
   await main.addInitScript((id) => {
-    localStorage.setItem("upbot.agent", id);
-    localStorage.setItem("upbot.view", "chat");
+    localStorage.setItem("boto.agent", id);
+    localStorage.setItem("boto.view", "chat");
   }, bot.id);
   await main.goto(`${base}#port=${daemon.port}&token=${token}`);
   await main
@@ -168,7 +168,7 @@ test("empty state, guarded browser controls and footer error recovery use real d
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Abrir o app", exact: true }).click();
   await page.getByRole("button", { name: "Apps conectados →", exact: true }).click();
-  const input = page.getByRole("textbox", { name: "Peça uma tarefa ao UpBot" });
+  const input = page.getByRole("textbox", { name: "Peça uma tarefa ao Boto" });
   await input.fill("x".repeat(100001));
   await page.getByRole("button", { name: "Enviar tarefa", exact: true }).click();
   await page.getByRole("alert").filter({ hasText: "100000" }).waitFor();
@@ -177,7 +177,7 @@ test("empty state, guarded browser controls and footer error recovery use real d
   await page.getByRole("button", { name: "Enviar tarefa", exact: true }).click();
   await page
     .getByRole("region", { name: "Em execução (1)", exact: true })
-    .getByRole("button", { name: /UpBot$/ })
+    .getByRole("button", { name: /Boto$/ })
     .waitFor();
   expect(await input.inputValue()).toBe("");
   expect(await page.getByRole("alert").count()).toBe(0);
@@ -196,11 +196,11 @@ test("keyboard app approval becomes done, count decreases and honest undo restor
   await page.getByText("1 tarefa aguardando você", { exact: true }).waitFor();
   await page
     .getByTestId("menubar-approval")
-    .getByText("UpBot quer criar uma nota em Notas.", { exact: true })
+    .getByText("Boto quer criar uma nota em Notas.", { exact: true })
     .waitFor();
   await main
     .getByTestId("approval")
-    .getByText("UpBot quer criar uma nota em Notas.", { exact: true })
+    .getByText("Boto quer criar uma nota em Notas.", { exact: true })
     .waitFor();
   expect(await page.getByTestId("menubar-approval").innerText()).not.toMatch(
     /Run |create_note|\{\}/,
@@ -312,7 +312,7 @@ test("overflow keyboard menu pauses all real queues, syncs theme and confirms ex
   await rpc.request("queue.resume", { agentId: second.id });
   await rpc.request("agents.delete", { id: created.id });
   await main.evaluate(() => {
-    localStorage.setItem("upbot.theme", "light");
+    localStorage.setItem("boto.theme", "light");
   });
   await page.waitForFunction(() => document.documentElement.dataset.theme === "light");
   await more.click();
@@ -322,7 +322,7 @@ test("overflow keyboard menu pauses all real queues, syncs theme and confirms ex
   await more.click();
   await page.keyboard.press("End");
   await page.keyboard.press("Enter");
-  const dialog = page.getByRole("dialog", { name: "Sair do UpBot?", exact: true });
+  const dialog = page.getByRole("dialog", { name: "Sair do Boto?", exact: true });
   await dialog
     .getByText("As tarefas agendadas não rodam até você abrir o app de novo.", { exact: true })
     .waitFor();
@@ -357,7 +357,7 @@ test("native bridge navigation and commands retain real daemon data", async () =
             if (command === "main_ready") {
               const path = "/node_modules/@tauri-apps/api/event.js";
               void import(/* @vite-ignore */ path).then(({ emit }) =>
-                emit("upbot://navigate", "apps"),
+                emit("boto://navigate", "apps"),
               );
             }
           },
@@ -386,7 +386,7 @@ test("native bridge navigation and commands retain real daemon data", async () =
       native.evaluate(async (view) => {
         const path = "/node_modules/@tauri-apps/api/event.js";
         const { emit } = await import(/* @vite-ignore */ path);
-        await emit("upbot://navigate", view);
+        await emit("boto://navigate", view);
       }, view);
     await navigate("apps");
     await native.getByRole("heading", { name: "Apps conectados", exact: true }).waitFor();
@@ -405,12 +405,12 @@ test("native bridge navigation and commands retain real daemon data", async () =
     await native.getByRole("button", { name: "Apps conectados →", exact: true }).click();
     await native.keyboard.press("Escape");
     await native.getByRole("button", { name: "Mais opções", exact: true }).click();
-    await native.getByRole("menuitem", { name: "Sair do UpBot", exact: true }).click();
-    const dialog = native.getByRole("dialog", { name: "Sair do UpBot?" });
+    await native.getByRole("menuitem", { name: "Sair do Boto", exact: true }).click();
+    const dialog = native.getByRole("dialog", { name: "Sair do Boto?" });
     await dialog
       .getByText("As tarefas agendadas não rodam até você abrir o app de novo.", { exact: true })
       .waitFor();
-    await dialog.getByRole("button", { name: "Sair do UpBot", exact: true }).click();
+    await dialog.getByRole("button", { name: "Sair do Boto", exact: true }).click();
     const calls = await native.evaluate(() =>
       JSON.parse(document.body.dataset.nativeCalls ?? "[]"),
     );
@@ -441,7 +441,7 @@ test("multiple real pending items stay secondary after first; light/dark capture
   expect(await running.innerText()).toContain(bot.name);
   expect(await running.innerText()).toContain(second.name);
   for (const theme of ["light", "dark"]) {
-    await main.evaluate((theme) => localStorage.setItem("upbot.theme", theme), theme);
+    await main.evaluate((theme) => localStorage.setItem("boto.theme", theme), theme);
     await page.waitForFunction((theme) => document.documentElement.dataset.theme === theme, theme);
     await page.addStyleTag({ content: "*{transition:none!important;animation:none!important}" });
     await page.evaluate(() => document.fonts.ready);
@@ -452,7 +452,7 @@ test("multiple real pending items stay secondary after first; light/dark capture
       .waitFor();
     await page
       .getByTestId("menubar-approval")
-      .getByText("UpBot quer enviar uma mensagem em Notas.", { exact: true })
+      .getByText("Boto quer enviar uma mensagem em Notas.", { exact: true })
       .waitFor();
     const blue = await page
       .getByTestId("menubar-approval")

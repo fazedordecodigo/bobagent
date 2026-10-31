@@ -24,7 +24,7 @@ function setEnv(name: string, value: string | undefined) {
 }
 
 function testRoot() {
-  root = mkdtempSync(join(tmpdir(), "upbot-vault-platform-"));
+  root = mkdtempSync(join(tmpdir(), "boto-vault-platform-"));
   return root;
 }
 
@@ -49,7 +49,7 @@ function fakeSecretTool(
   );
   chmodSync(executable, 0o700);
   setEnv("SECRET_TOOL_STATE", state);
-  setEnv("UPBOT_VAULT_KEY", undefined);
+  setEnv("BOTO_VAULT_KEY", undefined);
   setEnv("PATH", directory);
   setEnv("SHELL", "/bin/false");
   setEnv("HOME", directory);
@@ -67,6 +67,20 @@ afterEach(() => {
 });
 
 describe("Linux Secret Service vault key", () => {
+  test.skipIf(process.platform === "win32")("reuses the UpBot key without replacing it", () => {
+    const directory = testRoot();
+    const dataDir = join(directory, "data");
+    const binDir = join(directory, "bin");
+    mkdirSync(dataDir);
+    mkdirSync(binDir);
+    fakeSecretTool(binDir, join(directory, "unused"));
+    const key = "a".repeat(64);
+    writeFileSync(join(binDir, "secret-tool"), `#!/bin/sh\nif [ "$1" = lookup ] && [ "$3" = UpBot ]; then printf '%s' '${key}'; exit 0; fi\nexit 1\n`, { mode: 0o700 });
+    writeFileSync(join(dataDir, "vault.key.location"), "secret-service\n");
+    expect(loadVaultKey(dataDir, "linux").toString("hex")).toBe(key);
+    expect(existsSync(join(dataDir, "vault.key"))).toBe(false);
+    expect(existsSync(join(directory, "unused"))).toBe(false);
+  });
   test.skipIf(process.platform !== "linux")("stores and verifies a key using secret-tool", () => {
     const directory = testRoot();
     const dataDir = join(directory, "data");
@@ -149,7 +163,7 @@ describe("Linux Secret Service vault key", () => {
     "falls back to a 0600 plaintext key without secret-tool",
     () => {
       const directory = testRoot();
-      setEnv("UPBOT_VAULT_KEY", undefined);
+      setEnv("BOTO_VAULT_KEY", undefined);
       const dataDir = join(directory, "data");
       setEnv("PATH", join(directory, "empty-bin"));
       setEnv("SHELL", "/bin/false");
@@ -163,11 +177,22 @@ describe("Linux Secret Service vault key", () => {
   );
 });
 
+test.skipIf(process.platform !== "darwin")("copies the UpBot Keychain key into Boto", () => {
+  const directory = testRoot();
+  const key = "b".repeat(64);
+  const log = join(directory,"services");
+  writeFileSync(join(directory,"security"), `#!/bin/sh\nif [ "$1" = find-generic-password ] && [ "$3" = UpBot ]; then printf '%s' '${key}'; exit 0; fi\nif [ "$1" = add-generic-password ] && [ "$3" = Boto ]; then printf '%s' "$3" > '${log}'; exit 0; fi\nexit 44\n`, {mode:0o700});
+  setEnv("PATH",directory);
+  setEnv("BOTO_VAULT_KEY",undefined);
+  expect(loadVaultKey(directory,"darwin").toString("hex")).toBe(key);
+  expect(readFileSync(log,"utf8")).toBe("Boto");
+});
+
 test.skipIf(process.platform !== "win32")(
   "Windows DPAPI vault key roundtrip",
   () => {
     const dataDir = join(testRoot(), "data");
-    setEnv("UPBOT_VAULT_KEY", undefined);
+    setEnv("BOTO_VAULT_KEY", undefined);
     const first = loadVaultKey(dataDir, "win32");
     const second = loadVaultKey(dataDir, "win32");
     expect(second.equals(first)).toBe(true);
@@ -183,7 +208,7 @@ test("logs the DPAPI failure cause and falls back to a plaintext key", () => {
   const directory = testRoot();
   const dataDir = join(directory, "data");
   mkdirSync(join(dataDir, "vault.key.dpapi.tmp"), { recursive: true });
-  setEnv("UPBOT_VAULT_KEY", undefined);
+  setEnv("BOTO_VAULT_KEY", undefined);
   if (process.platform !== "win32") {
     mkdirSync(join(directory, "empty-bin"));
     setEnv("PATH", join(directory, "empty-bin"));
@@ -196,7 +221,7 @@ test("logs the DPAPI failure cause and falls back to a plaintext key", () => {
     const file = join(dataDir, "vault.key");
     expect(error).toHaveBeenCalledTimes(1);
     expect(error.mock.calls[0]?.[0]).toMatch(
-      /^UpBot could not use Windows DPAPI \(.+\); storing the vault key in a plaintext file\.$/,
+      /^Boto could not use Windows DPAPI \(.+\); storing the vault key in a plaintext file\.$/,
     );
     expect(JSON.stringify(error.mock.calls)).not.toContain(keyHex);
     expect(readFileSync(file, "utf8")).toBe(keyHex);

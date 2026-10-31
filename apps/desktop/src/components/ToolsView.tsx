@@ -1,4 +1,4 @@
-import type { Agent } from "@upbot/protocol";
+import type { Agent } from "@boto/protocol";
 import type { DaemonClient } from "../lib/daemon";
 import { moveControlFocus } from "../lib/keyboard";
 import { ApprovalsView } from "./ApprovalsView";

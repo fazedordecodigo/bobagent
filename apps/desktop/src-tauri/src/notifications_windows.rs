@@ -21,7 +21,7 @@ use windows::{
     UI::Notifications::{ToastNotification, ToastNotificationManager, ToastNotifier},
 };
 
-const AUMID: &str = "com.upbot.desktop";
+const AUMID: &str = "com.boto.desktop";
 const ACTIVATOR: GUID = GUID::from_u128(0x42dd1a5e_5b26_40be_97e7_286ec9f8582f);
 const ACTIVATOR_ID: &str = "{42DD1A5E-5B26-40BE-97E7-286EC9F8582F}";
 
@@ -106,7 +106,7 @@ pub fn setup(app: &AppHandle) -> Result<(), String> {
         .create(format!("Software\\Classes\\AppUserModelId\\{AUMID}"))
         .map_err(|error| error.to_string())?;
     app_key
-        .set_string("DisplayName", "UpBot")
+        .set_string("DisplayName", "Boto")
         .map_err(|error| error.to_string())?;
     app_key
         .set_string("CustomActivator", ACTIVATOR_ID)
@@ -119,7 +119,7 @@ pub fn setup(app: &AppHandle) -> Result<(), String> {
     server
         .set_string("", format!("\"{}\" -ToastActivated", executable.display()))
         .map_err(|error| error.to_string())?;
-    unsafe { SetCurrentProcessExplicitAppUserModelID(w!("com.upbot.desktop")) }
+    unsafe { SetCurrentProcessExplicitAppUserModelID(w!("com.boto.desktop")) }
         .map_err(|error| error.to_string())?;
     let factory: IClassFactory = Factory { app: app.clone() }.into();
     let registration = unsafe {
@@ -155,7 +155,7 @@ pub fn post(app: &AppHandle, notification: Notification) -> Result<(), String> {
         .SetTag(&HSTRING::from(xml::tag(&notification.id)))
         .map_err(|error| error.to_string())?;
     toast
-        .SetGroup(&HSTRING::from("upbot"))
+        .SetGroup(&HSTRING::from("boto"))
         .map_err(|error| error.to_string())?;
     toast
         .SetSuppressPopup(notification.muted)
@@ -182,7 +182,7 @@ pub fn remove(app: &AppHandle, id: &str) -> Result<(), String> {
         .and_then(|history| {
             history.RemoveGroupedTagWithId(
                 &HSTRING::from(xml::tag(id)),
-                &HSTRING::from("upbot"),
+                &HSTRING::from("boto"),
                 &HSTRING::from(AUMID),
             )
         })

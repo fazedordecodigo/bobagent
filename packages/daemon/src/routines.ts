@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { timingSafeEqual } from "node:crypto";
-import type { Routine, RoutineRun, RoutineTrigger } from "@upbot/protocol";
+import type { Routine, RoutineRun, RoutineTrigger } from "@boto/protocol";
 import type { AgentStore } from "./agents";
 import { envPositiveNumber } from "./env/vars";
 import type { Broadcast } from "./rpc";
@@ -288,7 +288,7 @@ export class RoutineService {
 
   start(): void {
     this.tick();
-    this.timer = setInterval(() => this.tick(), envPositiveNumber("UPBOT_ROUTINE_TICK_MS", 30_000));
+    this.timer = setInterval(() => this.tick(), envPositiveNumber("BOTO_ROUTINE_TICK_MS", 30_000));
   }
 
   stop(): void {

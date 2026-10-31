@@ -7,7 +7,7 @@ import {
   RoutineTrigger,
   type Turn,
   type TurnStatus,
-} from "@upbot/protocol";
+} from "@boto/protocol";
 import { z } from "zod";
 
 type TurnRow = {

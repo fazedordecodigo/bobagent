@@ -10,12 +10,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import type { VaultEntry } from "@upbot/protocol";
+import type { VaultEntry } from "@boto/protocol";
 import { resolveCommand } from "./env/login-path";
 
 // Encrypted secret store (AES-256-GCM). The key uses the macOS Keychain, Windows DPAPI,
 // or Linux Secret Service where available, with a warned plaintext-file fallback.
-// UPBOT_VAULT_KEY (64 hex chars) overrides it for tests. Each secret has an agent
+// BOTO_VAULT_KEY (64 hex chars) overrides it for tests. Each secret has an agent
 // allowlist; agents read allowed secrets with the vault_get bridge tool.
 
 export const VAULT_NAME = /^[A-Za-z0-9_.-]{1,64}$/;
@@ -48,16 +48,16 @@ function keychainKey(): Buffer | null {
     const v = r.stdout.toString().trim();
     return r.exitCode === 0 && /^[0-9a-f]{64}$/.test(v) ? v : null;
   };
-  const existing = find("UpBot");
+  const existing = find("Boto");
   if (existing) return Buffer.from(existing, "hex");
   // vaults created before the rename keep their key under the old service name
-  const hex = find("BobAgent") ?? randomBytes(32).toString("hex");
+  const hex = find("UpBot") ?? find("BobAgent") ?? randomBytes(32).toString("hex");
   const add = Bun.spawnSync(
-    ["security", "add-generic-password", "-s", "UpBot", "-a", "vault-key", "-U", "-w", hex],
+    ["security", "add-generic-password", "-s", "Boto", "-a", "vault-key", "-U", "-w", hex],
     { stdout: "ignore", stderr: "ignore" },
   );
   if (add.exitCode !== 0) {
-    console.error(`[upbotd] keychain add failed (exit ${add.exitCode})`);
+    console.error(`[botod] keychain add failed (exit ${add.exitCode})`);
     return null;
   }
   return Buffer.from(hex, "hex");
@@ -83,14 +83,14 @@ function secretServiceKey(dataDir: string): Buffer | null {
   if (!tool) {
     if (existsSync(marker)) {
       throw new Error(
-        "The UpBot vault key is stored in Secret Service, but secret-tool is unavailable.",
+        "The Boto vault key is stored in Secret Service, but secret-tool is unavailable.",
       );
     }
     return null;
   }
 
-  const lookup = () => {
-    const result = runSecretTool(tool, ["lookup", "service", "UpBot", "account", "vault-key"]);
+  const lookup = (service = "Boto") => {
+    const result = runSecretTool(tool, ["lookup", "service", service, "account", "vault-key"]);
     return result.status === 0 ? keyFromHex(result.stdout.trim()) : null;
   };
   const existing = lookup();
@@ -98,16 +98,21 @@ function secretServiceKey(dataDir: string): Buffer | null {
     writeFileSync(marker, "secret-service\n", { mode: 0o600 });
     return existing;
   }
+  const legacy = lookup("UpBot");
+  if (legacy) {
+    writeFileSync(marker, "secret-service\n", { mode: 0o600 });
+    return legacy;
+  }
   if (existsSync(marker)) {
     throw new Error(
-      "The UpBot vault key could not be read from Secret Service. Unlock or restore the keyring before starting UpBot.",
+      "The Boto vault key could not be read from Secret Service. Unlock or restore the keyring before starting Boto.",
     );
   }
 
   const hex = randomBytes(32).toString("hex");
   const stored = runSecretTool(
     tool,
-    ["store", "--label=UpBot vault key", "service", "UpBot", "account", "vault-key"],
+    ["store", "--label=Boto vault key", "service", "Boto", "account", "vault-key"],
     `${hex}\n`,
   );
   if (stored.status !== 0) return null;
@@ -166,7 +171,7 @@ function unprotectWithDpapi(value: string): Buffer {
     throw result.error ?? new Error(result.stderr.trim() || "Windows DPAPI decryption failed");
   }
   const key = keyFromHex(result.stdout.trim());
-  if (!key) throw new Error("Windows DPAPI returned an invalid UpBot vault key.");
+  if (!key) throw new Error("Windows DPAPI returned an invalid Boto vault key.");
   return key;
 }
 
@@ -174,7 +179,7 @@ export function loadVaultKey(
   dataDir: string,
   platform: NodeJS.Platform = process.platform,
 ): Buffer {
-  const env = process.env.UPBOT_VAULT_KEY;
+  const env = process.env.BOTO_VAULT_KEY;
   if (env && /^[0-9a-fA-F]{64}$/.test(env)) return Buffer.from(env, "hex");
 
   if (platform === "darwin") {
@@ -185,7 +190,7 @@ export function loadVaultKey(
   const file = join(dataDir, "vault.key");
   if (existsSync(file)) {
     const key = keyFromHex(readFileSync(file, "utf8").trim());
-    if (!key) throw new Error("The UpBot vault key file is invalid.");
+    if (!key) throw new Error("The Boto vault key file is invalid.");
     return key;
   }
 
@@ -197,7 +202,7 @@ export function loadVaultKey(
       try {
         return unprotectWithDpapi(readFileSync(protectedFile, "utf8").trim());
       } catch (error) {
-        throw new Error("The UpBot vault key could not be decrypted with Windows DPAPI.", {
+        throw new Error("The Boto vault key could not be decrypted with Windows DPAPI.", {
           cause: error,
         });
       }
@@ -212,7 +217,7 @@ export function loadVaultKey(
         unlinkSync(tempFile);
       } catch {}
       console.error(
-        `UpBot could not use Windows DPAPI (${(error as Error).message}); storing the vault key in a plaintext file.`,
+        `Boto could not use Windows DPAPI (${(error as Error).message}); storing the vault key in a plaintext file.`,
       );
       writeFileSync(file, key.toString("hex"), { mode: 0o600 });
       return key;
@@ -225,7 +230,7 @@ export function loadVaultKey(
   }
 
   console.error(
-    "UpBot could not use the platform secure store; storing the vault key in a plaintext file.",
+    "Boto could not use the platform secure store; storing the vault key in a plaintext file.",
   );
   const key = randomBytes(32);
   writeFileSync(file, key.toString("hex"), { mode: 0o600 });

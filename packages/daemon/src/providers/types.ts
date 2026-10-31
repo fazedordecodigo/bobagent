@@ -1,4 +1,4 @@
-import type { ConfigOption, PermissionOption, ToolCallStatus } from "@upbot/protocol";
+import type { ConfigOption, PermissionOption, ToolCallStatus } from "@boto/protocol";
 
 export type NormalizedUpdate =
   | { type: "message_chunk"; text: string }

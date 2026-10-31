@@ -11,7 +11,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Agent, ChatItem, PendingPermission, Turn } from "@upbot/protocol";
+import type { Agent, ChatItem, PendingPermission, Turn } from "@boto/protocol";
 import { readReadyPort } from "../packages/daemon/src/ready";
 import { daemonTarget } from "../packages/daemon/src/target";
 
@@ -19,7 +19,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BINARY = join(
   ROOT,
   "apps/desktop/src-tauri/binaries",
-  `upbotd-${daemonTarget(process.platform, process.arch).rustTriple}`,
+  `botod-${daemonTarget(process.platform, process.arch).rustTriple}`,
 );
 const TOKEN = `smoke-${crypto.randomUUID()}`;
 const TURN_TIMEOUT_MS = 180_000;
@@ -115,7 +115,7 @@ async function startDaemon(
       HOME: process.env.HOME ?? "",
       SHELL: process.env.SHELL ?? "/bin/zsh",
       TMPDIR: process.env.TMPDIR ?? "/tmp",
-      UPBOT_DEBUG_PROMPTS_DIR: DBG_DIR,
+      BOTO_DEBUG_PROMPTS_DIR: DBG_DIR,
     },
     stdin: "pipe",
     stdout: "pipe",
@@ -213,7 +213,7 @@ async function main() {
       daemon = await startDaemon(dataDir, agentsRoot);
       c = await Ws.connect(daemon.port);
 
-      const db = new Database(join(dataDir, "upbot.db"), { readonly: true });
+      const db = new Database(join(dataDir, "boto.db"), { readonly: true });
       const sessBefore = db
         .query("SELECT session_id FROM agent_sessions WHERE agent_id = ?")
         .get(agent.id) as { session_id: string } | null;
@@ -240,7 +240,7 @@ async function main() {
       const msgs = h2.items.filter((i) => i.kind === "agent_message") as { text: string }[];
       rec.reply2 = msgs[msgs.length - 1]?.text ?? null;
 
-      const db2 = new Database(join(dataDir, "upbot.db"), { readonly: true });
+      const db2 = new Database(join(dataDir, "boto.db"), { readonly: true });
       const sessAfter = db2
         .query("SELECT session_id, updated_at FROM agent_sessions WHERE agent_id = ?")
         .get(agent.id) as { session_id: string; updated_at: number } | null;

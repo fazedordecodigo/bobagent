@@ -64,9 +64,9 @@ describe("ACP prompt first-activity watchdog", () => {
     agentsRoot = testAgentsRoot;
     stateDir = testStateDir;
     daemon = await startDaemon(testDataDir, testAgentsRoot, TOKEN, {
-      UPBOT_ACP_COMMAND_CURSOR: JSON.stringify(["bun", FAKE_AGENT]),
-      UPBOT_ACP_COMMAND_OPENCODE: JSON.stringify(["bun", FAKE_AGENT]),
-      UPBOT_ACP_FIRST_ACTIVITY_MS: String(WATCHDOG_MS),
+      BOTO_ACP_COMMAND_CURSOR: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_OPENCODE: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_FIRST_ACTIVITY_MS: String(WATCHDOG_MS),
       FAKE_ACP_STATE_DIR: testStateDir,
     });
     client = await DaemonClient.connect(daemon.port, TOKEN);

@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent } from "@upbot/protocol";
+import type { Agent } from "@boto/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -37,7 +37,7 @@ describe("pages e2e", () => {
     agentsRoot = tmp("pages-root-");
     stateDir = tmp("pages-fake-");
     daemon = await startDaemon(dataDir, join(agentsRoot, "agents"), TOKEN, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
@@ -125,7 +125,7 @@ describe("pages e2e", () => {
   test("legacy page metadata is capped on update", async () => {
     const id = crypto.randomUUID();
     const now = Date.now();
-    const db = new Database(join(dataDir, "upbot.db"));
+    const db = new Database(join(dataDir, "boto.db"));
     db.exec("PRAGMA busy_timeout=5000");
     db.query(
       "INSERT INTO pages (id, agent_id, title, description, version, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)",

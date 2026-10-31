@@ -6,7 +6,7 @@ import type {
   EmailAccount,
   QueueState,
   Turn,
-} from "@upbot/protocol";
+} from "@boto/protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
 import { errorFields, logWarn } from "../lib/log";

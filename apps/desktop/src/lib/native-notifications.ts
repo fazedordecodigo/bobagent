@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { Agent } from "@upbot/protocol";
+import type { Agent } from "@boto/protocol";
 import { useEffect, useRef } from "react";
 import type { DaemonClient } from "./daemon";
 import { errorMessage } from "./errors";
@@ -41,7 +41,7 @@ export function useNativeNotifications(
               onError(errorMessage(e));
             });
         };
-        const off = await listen("upbot://notification-actions", drain);
+        const off = await listen("boto://notification-actions", drain);
         drain();
         return () => {
           stopped = true;

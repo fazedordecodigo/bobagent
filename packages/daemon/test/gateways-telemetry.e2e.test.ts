@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { rmSync } from "node:fs";
-import type { Agent, Gateway } from "@upbot/protocol";
+import type { Agent, Gateway } from "@boto/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -53,7 +53,7 @@ describe("gateway telemetry e2e", () => {
 
   function logs(): GatewayLog[] {
     return stderr.split(/\r?\n/).flatMap((line) => {
-      const match = /^\[upbotd\] (gateway\.\S+) (\{.*\})$/.exec(line);
+      const match = /^\[botod\] (gateway\.\S+) (\{.*\})$/.exec(line);
       if (!match) return [];
       try {
         return [{ event: match[1]!, ctx: JSON.parse(match[2]!) as Record<string, unknown> }];
@@ -189,11 +189,11 @@ describe("gateway telemetry e2e", () => {
     stateDir = tmp("gw-telemetry-fake-");
     daemonToken = crypto.randomUUID();
     daemon = await startDaemon(dataDir, agentsRoot, daemonToken, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
-      UPBOT_VAULT_KEY: "cd".repeat(32),
-      UPBOT_TELEGRAM_API: base,
-      UPBOT_SLACK_API: `${base}/slack`,
+      BOTO_VAULT_KEY: "cd".repeat(32),
+      BOTO_TELEGRAM_API: base,
+      BOTO_SLACK_API: `${base}/slack`,
     });
     const reader = (daemon.proc.stderr as ReadableStream<Uint8Array>).getReader();
     const decoder = new TextDecoder();
@@ -350,7 +350,7 @@ describe("gateway telemetry e2e", () => {
 
   test("invalid external user ids are recorded without log injection", async () => {
     const { gateway, state } = await createTelegram("Invalid user id");
-    const forged = '7\n[upbotd] gateway.connected {"gatewayId":"forged"}';
+    const forged = '7\n[botod] gateway.connected {"gatewayId":"forged"}';
     state.updates.push(telegramUpdate(forged, 1999, "hello"));
     const unauthorized = await waitFor(() =>
       gatewayLogs(gateway.id).find((event) => event.event === "gateway.unauthorized_user"),
@@ -359,7 +359,7 @@ describe("gateway telemetry e2e", () => {
     expect(
       stderr
         .split(/\r?\n/)
-        .some((line) => line.startsWith('[upbotd] gateway.connected {"gatewayId":"forged"}')),
+        .some((line) => line.startsWith('[botod] gateway.connected {"gatewayId":"forged"}')),
     ).toBe(false);
     await deleteGateway(gateway.id);
   });

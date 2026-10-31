@@ -1,4 +1,4 @@
-import type { Agent, AgentStatusInfo, ProviderId, Turn } from "@upbot/protocol";
+import type { Agent, AgentStatusInfo, ProviderId, Turn } from "@boto/protocol";
 import { StatusPill } from "../components/ds/controls";
 import {
   CalIcon,
@@ -7,7 +7,7 @@ import {
   PlaneIcon,
   ReceiptIcon,
   SheetIcon,
-  UpbotSimboloCurrentcolorIcon,
+  BotoSimboloCurrentcolorIcon,
 } from "../components/ds/icons";
 
 export const PROVIDER_NAMES: Record<ProviderId, string> = {
@@ -95,7 +95,7 @@ export function MonoAv({
   const mark =
     avatar && "icon" in avatar ? (
       avatar.icon === "sym" ? (
-        <UpbotSimboloCurrentcolorIcon />
+        <BotoSimboloCurrentcolorIcon />
       ) : avatar.icon === "mail" ? (
         <MailIcon />
       ) : avatar.icon === "receipt" ? (

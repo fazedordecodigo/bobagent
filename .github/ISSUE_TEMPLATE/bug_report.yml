@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in UpBot does not work as expected
+description: Something in Boto does not work as expected
 labels: [bug]
 body:
   - type: textarea
@@ -12,7 +12,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: UpBot version
+      label: Boto version
       placeholder: "0.1.0"
     validations:
       required: true
@@ -31,5 +31,5 @@ body:
     id: logs
     attributes:
       label: Logs
-      description: Relevant output from Console.app (process upbotd) or the dev terminal. Remove tokens and secrets.
+      description: Relevant output from Console.app (process botod) or the dev terminal. Remove tokens and secrets.
       render: text

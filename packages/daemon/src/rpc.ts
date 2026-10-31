@@ -1,4 +1,4 @@
-import { type MethodName, type MethodParsedParams, methodMap } from "@upbot/protocol";
+import { type MethodName, type MethodParsedParams, methodMap } from "@boto/protocol";
 import type { AgentStore } from "./agents";
 import type { ApprovalService } from "./approvals";
 import type { AppsService } from "./apps";
@@ -126,7 +126,7 @@ export class Rpc {
       if (e instanceof RpcError) {
         if (e.code === "internal" || e.code === "busy" || e.cause !== undefined) {
           console.error(
-            "[upbotd] rpc failed",
+            "[botod] rpc failed",
             JSON.stringify({ method, code: e.code, durationMs, error: errorDiagnostics(e) }),
           );
         }
@@ -134,20 +134,20 @@ export class Rpc {
       }
       if (e instanceof ProviderError) {
         console.error(
-          "[upbotd] rpc failed",
+          "[botod] rpc failed",
           JSON.stringify({ method, code: e.code, durationMs, error: errorDiagnostics(e) }),
         );
         return JSON.stringify({ id, error: { code: e.code, message: e.message } });
       }
       if (e instanceof InvalidSettingError) {
         console.error(
-          "[upbotd] handler error",
+          "[botod] handler error",
           JSON.stringify({ method, durationMs, error: errorDiagnostics(e) }),
         );
         return JSON.stringify({ id, error: { code: "internal", message: e.message } });
       }
       console.error(
-        "[upbotd] handler error",
+        "[botod] handler error",
         JSON.stringify({ method, durationMs, error: errorDiagnostics(e) }),
       );
       return JSON.stringify({ id, error: { code: "internal", message: "internal error" } });
@@ -446,7 +446,7 @@ export class Rpc {
       }
       case "browser.status":
         return {
-          available: findBrowser() !== null && process.env.UPBOT_BROWSER !== "off",
+          available: findBrowser() !== null && process.env.BOTO_BROWSER !== "off",
           running: this.browser.running(),
           tabs: this.browser.list(),
         };

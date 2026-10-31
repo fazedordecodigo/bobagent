@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { rmSync } from "node:fs";
-import type { Agent, ChatAttachment, ChatItem, Gateway, Turn } from "@upbot/protocol";
+import type { Agent, ChatAttachment, ChatItem, Gateway, Turn } from "@boto/protocol";
 import { openDatabase } from "../src/db";
 import {
   DaemonClient,
@@ -92,10 +92,10 @@ describe("queue metadata e2e", () => {
     agentsRoot = tmp("queue-meta-agents-");
     stateDir = tmp("queue-meta-fake-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
-      UPBOT_VAULT_KEY: "cd".repeat(32),
-      UPBOT_TELEGRAM_API: base,
+      BOTO_VAULT_KEY: "cd".repeat(32),
+      BOTO_TELEGRAM_API: base,
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
     agent = (await c.request("agents.create", {

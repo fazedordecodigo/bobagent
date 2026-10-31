@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import type { Agent } from "@upbot/protocol";
+import type { Agent } from "@boto/protocol";
 import { spawnProvider } from "../src/providers/process";
 import { ProviderError } from "../src/providers/types";
 import {
@@ -30,9 +30,9 @@ describe("asynchronous child spawn errors", () => {
     agentsRoot = tmp("spawn-errors-agents-");
     stateDir = tmp("spawn-errors-fake-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      UPBOT_TTS_COMMAND: JSON.stringify(["definitely-missing-upbot-cmd"]),
-      UPBOT_PROVIDER_COMMAND_CLAUDE: JSON.stringify(["definitely-missing-upbot-cmd"]),
-      UPBOT_PROVIDER_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_TTS_COMMAND: JSON.stringify(["definitely-missing-boto-cmd"]),
+      BOTO_PROVIDER_COMMAND_CLAUDE: JSON.stringify(["definitely-missing-boto-cmd"]),
+      BOTO_PROVIDER_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
       FAKE_ACP_STDERR: `fatal: API key ${FAKE_GEMINI_KEY}`,
       FAKE_ACP_NEW_ERROR: "session new unavailable",
@@ -75,11 +75,11 @@ describe("asynchronous child spawn errors", () => {
   test("provider startup exposes asynchronous spawn failures", async () => {
     if (process.platform === "win32") {
       expect(() =>
-        spawnProvider(`${process.execPath}-missing-upbot.exe`, [], process.cwd()),
+        spawnProvider(`${process.execPath}-missing-boto.exe`, [], process.cwd()),
       ).toThrow(/failed to start: spawn .* ENOENT/);
       return;
     }
-    const proc = spawnProvider(`${process.execPath}-missing-upbot.exe`, [], process.cwd());
+    const proc = spawnProvider(`${process.execPath}-missing-boto.exe`, [], process.cwd());
     await expect(proc.waitForSpawn()).rejects.toThrow();
     proc.markClosed();
   });

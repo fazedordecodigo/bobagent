@@ -12,16 +12,16 @@ use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 use tokio::sync::Notify;
 
-const READY_PREFIX: &str = "UPBOT_READY ";
+const READY_PREFIX: &str = "BOTO_READY ";
 
 fn parse_ready_port(json: &str) -> Result<u16, &'static str> {
     let value = serde_json::from_str::<serde_json::Value>(json)
-        .map_err(|_| "upbotd READY line is not valid JSON")?;
+        .map_err(|_| "botod READY line is not valid JSON")?;
     value["port"]
         .as_u64()
         .and_then(|port| u16::try_from(port).ok())
         .filter(|port| *port != 0)
-        .ok_or("upbotd READY has no valid port")
+        .ok_or("botod READY has no valid port")
 }
 
 #[derive(Serialize, Clone)]
@@ -50,36 +50,45 @@ fn hex_token() -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+fn migrate_data_dir(data_dir: &std::path::Path) -> Result<(), String> {
+    if data_dir.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = data_dir.parent() {
+        for identifier in ["com.upbot.desktop", "com.bobagent.desktop"] {
+            let legacy = parent.join(identifier);
+            if legacy.is_dir() {
+                std::fs::rename(&legacy, data_dir)
+                    .map_err(|e| format!("could not migrate {identifier} data dir: {e}"))?;
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn spawn_daemon(app: &tauri::App) -> Result<(), String> {
     let state: SharedState = app.state::<SharedState>().inner().clone();
     let data_dir = app
         .path()
         .app_data_dir()
         .map_err(|e| format!("app_data_dir: {e}"))?;
-    if !data_dir.exists() {
-        if let Some(legacy) = data_dir.parent().map(|p| p.join("com.bobagent.desktop")) {
-            if legacy.is_dir() {
-                if let Err(e) = std::fs::rename(&legacy, &data_dir) {
-                    log::warn!("could not migrate legacy BobAgent data dir: {e}");
-                }
-            }
-        }
-    }
+    migrate_data_dir(&data_dir)?;
     std::fs::create_dir_all(&data_dir).map_err(|e| format!("create data dir: {e}"))?;
     let token = hex_token();
 
     let sidecar = app
         .shell()
-        .sidecar("upbotd")
+        .sidecar("botod")
         .map_err(|e| format!("sidecar: {e}"))?;
     let (mut rx, mut child) = sidecar
         .args([OsStr::new("--data-dir"), data_dir.as_os_str()])
         .spawn()
-        .map_err(|e| format!("spawn upbotd: {e}"))?;
+        .map_err(|e| format!("spawn botod: {e}"))?;
     // deliver the auth token on the daemon's first stdin line
     child
         .write(format!("{token}\n").as_bytes())
-        .map_err(|e| format!("write token to upbotd stdin: {e}"))?;
+        .map_err(|e| format!("write token to botod stdin: {e}"))?;
 
     {
         let mut inner = state.inner.lock().unwrap();
@@ -117,17 +126,17 @@ fn spawn_daemon(app: &tauri::App) -> Result<(), String> {
                 }
                 CommandEvent::Stderr(bytes) => {
                     for line in String::from_utf8_lossy(&bytes).lines() {
-                        log::info!("upbotd: {line}");
+                        log::info!("botod: {line}");
                     }
                 }
-                CommandEvent::Error(e) => log::error!("upbotd error: {e}"),
+                CommandEvent::Error(e) => log::error!("botod error: {e}"),
                 CommandEvent::Terminated(status) => {
-                    log::warn!("upbotd terminated: {status:?}");
+                    log::warn!("botod terminated: {status:?}");
                     {
                         let mut inner = state.inner.lock().unwrap();
                         inner.conn = None;
                         inner.child = None;
-                        inner.error = Some(format!("upbotd exited: {status:?}"));
+                        inner.error = Some(format!("botod exited: {status:?}"));
                     }
                     state.ready.notify_waiters();
                 }
@@ -203,14 +212,14 @@ fn main() {
             notifications::notifications_open
         ])
         .build(tauri::generate_context!())
-        .expect("error while building UpBot")
+        .expect("error while building Boto")
         .run(|app_handle, event| {
             if let RunEvent::Exit = event {
                 let state = app_handle.state::<SharedState>();
                 let mut inner = state.inner.lock().unwrap();
                 if let Some(child) = inner.child.take() {
                     if let Err(e) = child.kill() {
-                        log::warn!("could not kill upbotd: {e}");
+                        log::warn!("could not kill botod: {e}");
                     }
                 }
             }
@@ -219,7 +228,27 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_ready_port;
+    use super::{migrate_data_dir, parse_ready_port};
+
+    #[test]
+    fn migrates_legacy_data_without_overwriting_boto() {
+        for identifier in ["com.upbot.desktop", "com.bobagent.desktop"] {
+            let parent = std::env::temp_dir().join(format!("boto-migration-{}", rand::random::<u64>()));
+            let legacy = parent.join(identifier);
+            let current = parent.join("com.boto.desktop");
+            std::fs::create_dir_all(&legacy).unwrap();
+            std::fs::write(legacy.join("upbot.db"), b"preserved").unwrap();
+            migrate_data_dir(&current).unwrap();
+            assert!(!legacy.exists());
+            assert_eq!(std::fs::read(current.join("upbot.db")).unwrap(), b"preserved");
+            std::fs::create_dir(&legacy).unwrap();
+            std::fs::write(legacy.join("upbot.db"), b"other").unwrap();
+            migrate_data_dir(&current).unwrap();
+            assert_eq!(std::fs::read(current.join("upbot.db")).unwrap(), b"preserved");
+            assert_eq!(std::fs::read(legacy.join("upbot.db")).unwrap(), b"other");
+            std::fs::remove_dir_all(parent).unwrap();
+        }
+    }
 
     #[test]
     fn parses_valid_ready_port() {
@@ -236,7 +265,7 @@ mod tests {
         ] {
             assert_eq!(
                 parse_ready_port(json),
-                Err("upbotd READY has no valid port")
+                Err("botod READY has no valid port")
             );
         }
     }
@@ -245,7 +274,7 @@ mod tests {
     fn rejects_invalid_ready_json() {
         assert_eq!(
             parse_ready_port("not json"),
-            Err("upbotd READY line is not valid JSON")
+            Err("botod READY line is not valid JSON")
         );
     }
 

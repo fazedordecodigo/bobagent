@@ -11,11 +11,11 @@
 ## 0.3.0
 
 ### Changed
-- Renamed BobAgent to UpBot and repositioned it as a hub for general-purpose bots that work
+- Renamed BobAgent to Boto and repositioned it as a hub for general-purpose bots that work
   together (web, files, email, apps), not only coding agents. Existing data is migrated:
-  `~/BobAgent` -> `~/UpBot`, the app data folder, and the vault key in the Keychain.
-- A general-purpose "UpBot" bot is created on first launch; all bots share `~/UpBot/Workspace`
-  and get an `<upbot_context>` with collaboration and safety rules.
+  `~/BobAgent` -> `~/Boto`, the app data folder, and the vault key in the Keychain.
+- A general-purpose "Boto" bot is created on first launch; all bots share `~/Boto/Workspace`
+  and get an `<boto_context>` with collaboration and safety rules.
 
 ### Added
 - Email (IMAP/SMTP) with bot drafts that only the user can send.
@@ -35,10 +35,10 @@
 
 ### New
 - MicroVM sign-in: save a Claude token/API key or an OpenAI API key (encrypted in the vault)
-  and UpBot passes it to Claude/Codex inside Firecracker sessions only.
+  and Boto passes it to Claude/Codex inside Firecracker sessions only.
 - Settings & tools: Skills, Marketplace, Browser, Vault, Gateways, Mobile, Team and Hosts in
   one tabbed view.
-- Remote hosts: run agents on a Linux VPS over SSH (`upbot-host` helper, preflight, bridge
+- Remote hosts: run agents on a Linux VPS over SSH (`boto-host` helper, preflight, bridge
   over an `ssh -R` unix socket).
 - Firecracker microVM per agent session on KVM hosts, with vsock bridge and a proxy restricted
   to public destinations; `packages/host/rootfs/build-rootfs.sh` builds the guest image.

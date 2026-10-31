@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { cpSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { Agent, Routine } from "@upbot/protocol";
+import type { Agent, Routine } from "@boto/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -48,12 +48,12 @@ describe("bad request RPC codes e2e", () => {
       FAKE_ACP_STATE_DIR: stateDir,
       FAKE_SSH_HOME: sshHome,
       FAKE_SSH_LOG: sshLog,
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
-      UPBOT_MARKETPLACE_URL: marketIndex,
-      UPBOT_SHARED_ROOT: sharedRoot,
-      UPBOT_SSH_COMMAND: JSON.stringify(["bun", FAKE_SSH]),
-      UPBOT_STT_COMMAND: JSON.stringify(["definitely-missing-upbot-cmd", "{file}"]),
-      UPBOT_TTS_COMMAND: JSON.stringify(["definitely-missing-upbot-cmd"]),
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_MARKETPLACE_URL: marketIndex,
+      BOTO_SHARED_ROOT: sharedRoot,
+      BOTO_SSH_COMMAND: JSON.stringify(["bun", FAKE_SSH]),
+      BOTO_STT_COMMAND: JSON.stringify(["definitely-missing-boto-cmd", "{file}"]),
+      BOTO_TTS_COMMAND: JSON.stringify(["definitely-missing-boto-cmd"]),
     });
     const stderr = daemon.proc.stderr;
     if (!(stderr instanceof ReadableStream)) throw new Error("daemon stderr stream unavailable");
@@ -95,7 +95,7 @@ describe("bad request RPC codes e2e", () => {
       if (directory)
         rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
-    expect(daemonStderr).not.toContain("[upbotd] handler error");
+    expect(daemonStderr).not.toContain("[botod] handler error");
   });
 
   test("routines convert invalid schedules and preserve not-found codes", async () => {
@@ -197,7 +197,7 @@ describe("bad request RPC codes e2e", () => {
   test("voice reports missing speech commands as bad requests", async () => {
     await expect(c.request("voice.speak", { text: "hello" })).rejects.toMatchObject({
       code: "bad_request",
-      message: "text-to-speech command not found: definitely-missing-upbot-cmd",
+      message: "text-to-speech command not found: definitely-missing-boto-cmd",
     });
     await expect(
       c.request("voice.transcribe", {
@@ -206,7 +206,7 @@ describe("bad request RPC codes e2e", () => {
       }),
     ).rejects.toMatchObject({
       code: "bad_request",
-      message: "speech-to-text command not found: definitely-missing-upbot-cmd",
+      message: "speech-to-text command not found: definitely-missing-boto-cmd",
     });
   });
 

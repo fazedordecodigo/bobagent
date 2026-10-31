@@ -1,4 +1,4 @@
-// UpBot team relay: a small self-hostable Bun server that lets the daemons of a team share
+// Boto team relay: a small self-hostable Bun server that lets the daemons of a team share
 // agents. Members connect outbound over WebSocket with their member token; the relay keeps
 // the roster (who is online, which agents they share) and forwards messages and replies.
 // It stores no chat content and never logs member-supplied identifiers.
@@ -9,7 +9,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { AgentAvatar } from "@upbot/protocol";
+import { AgentAvatar } from "@boto/protocol";
 
 type Member = {
   id: string;
@@ -383,7 +383,7 @@ if (import.meta.main) {
     ...(process.env.RELAY_ADMIN_TOKEN ? { adminToken: process.env.RELAY_ADMIN_TOKEN } : {}),
   });
   console.log(
-    `UpBot relay listening on ${server.hostname}:${server.port} (admin token in ${join(dataDir, "admin-token")} or RELAY_ADMIN_TOKEN)`,
+    `Boto relay listening on ${server.hostname}:${server.port} (admin token in ${join(dataDir, "admin-token")} or RELAY_ADMIN_TOKEN)`,
   );
   let shuttingDown = false;
   const shutdown = () => {

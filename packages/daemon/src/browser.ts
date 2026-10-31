@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, win32 } from "node:path";
-import type { Agent, BrowserTab } from "@upbot/protocol";
+import type { Agent, BrowserTab } from "@boto/protocol";
 import type { Subprocess } from "bun";
 import type { Broadcast } from "./rpc";
 
@@ -86,7 +86,7 @@ export function browserCandidates(
 }
 
 export function findBrowser(): string | null {
-  const override = process.env.UPBOT_BROWSER_PATH;
+  const override = process.env.BOTO_BROWSER_PATH;
   if (override) return existsSync(override) ? override : null;
   return browserCandidates(process.platform).find((p) => existsSync(p)) ?? null;
 }
@@ -207,17 +207,17 @@ export class BrowserService {
   }
 
   private async launch(): Promise<Cdp> {
-    if (process.env.UPBOT_BROWSER === "off") throw new Error("the agent browser is disabled");
+    if (process.env.BOTO_BROWSER === "off") throw new Error("the agent browser is disabled");
     const exe = findBrowser();
     if (!exe)
       throw new Error(
-        "no Chromium-based browser found (install Google Chrome or set UPBOT_BROWSER_PATH)",
+        "no Chromium-based browser found (install Google Chrome or set BOTO_BROWSER_PATH)",
       );
     await this.close();
     mkdirSync(this.profileDir, { recursive: true });
     const portFile = join(this.profileDir, "DevToolsActivePort");
     rmSync(portFile, { force: true });
-    const headless = process.env.UPBOT_BROWSER_HEADLESS === "1";
+    const headless = process.env.BOTO_BROWSER_HEADLESS === "1";
     this.proc = Bun.spawn(
       [
         exe,

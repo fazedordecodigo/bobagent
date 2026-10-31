@@ -5,7 +5,7 @@ import {
   type AppPermissions,
   classifyAppTool,
   defaultAppPermissions,
-} from "@upbot/protocol";
+} from "@boto/protocol";
 import { AppsService } from "../src/apps";
 import { migrations } from "../src/db/migrations";
 import { Vault } from "../src/vault";

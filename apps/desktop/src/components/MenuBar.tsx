@@ -1,4 +1,4 @@
-import type { Approval, ApprovalDecision, EmailDraft } from "@upbot/protocol";
+import type { Approval, ApprovalDecision, EmailDraft } from "@boto/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDaemonState } from "../hooks/useDaemonState";
 import { permissionActions } from "../lib/app-permissions";
@@ -26,7 +26,7 @@ import {
   PlaneIcon,
   PlugIcon,
   SideIcon,
-  UpbotSimboloCurrentcolorIcon,
+  BotoSimboloCurrentcolorIcon,
   UpIcon,
 } from "./ds/icons";
 import { Menu } from "./ds/Menu";
@@ -189,11 +189,11 @@ export default function MenuBar() {
   ].sort((a, b) => b.createdAt - a.createdAt);
   const firstPending = rows.find((row) => !("result" in row))?.id;
   return (
-    <main className={s.window} aria-label="UpBot" data-testid="menubar">
+    <main className={s.window} aria-label="Boto" data-testid="menubar">
       <header className={s.header}>
-        <UpbotSimboloCurrentcolorIcon className={s.symbol} />
+        <BotoSimboloCurrentcolorIcon className={s.symbol} />
         <div className={s.heading}>
-          <h1>UpBot</h1>
+          <h1>Boto</h1>
           <p className={s.meta} aria-live="polite">
             {!ready
               ? "Conectando…"
@@ -209,7 +209,7 @@ export default function MenuBar() {
           <Menu
             label="Mais opções"
             items={[
-              { label: "Abrir o UpBot", onSelect: () => open() },
+              { label: "Abrir o Boto", onSelect: () => open() },
               {
                 label: queueAction === "resume" ? "Retomar bots" : "Pausar bots",
                 disabled:
@@ -235,7 +235,7 @@ export default function MenuBar() {
                 checked: dark,
                 onSelect: () => setTheme(dark ? "light" : "dark"),
               },
-              { label: "Sair do UpBot", onSelect: () => setQuit(true) },
+              { label: "Sair do Boto", onSelect: () => setQuit(true) },
             ]}
           >
             …
@@ -440,7 +440,7 @@ export default function MenuBar() {
           className={s.quick}
           onSubmit={(event) => {
             event.preventDefault();
-            const agent = agents.find((item) => item.name === "UpBot") ?? agents[0];
+            const agent = agents.find((item) => item.name === "Boto") ?? agents[0];
             if (!agent || !text.trim()) return;
             void perform("send", async () => {
               await client.request("chat.send", { agentId: agent.id, text: text.trim() });
@@ -450,8 +450,8 @@ export default function MenuBar() {
           }}
         >
           <input
-            aria-label="Peça uma tarefa ao UpBot"
-            placeholder="Peça uma tarefa ao UpBot"
+            aria-label="Peça uma tarefa ao Boto"
+            placeholder="Peça uma tarefa ao Boto"
             value={text}
             disabled={!ready || agents.length === 0 || busy.includes("send")}
             onChange={(event) => setText(event.target.value)}
@@ -477,9 +477,9 @@ export default function MenuBar() {
       </footer>
       {quit && (
         <ConfirmDialog
-          title="Sair do UpBot?"
+          title="Sair do Boto?"
           body="As tarefas agendadas não rodam até você abrir o app de novo."
-          confirmLabel="Sair do UpBot"
+          confirmLabel="Sair do Boto"
           onCancel={() => setQuit(false)}
           onConfirm={() => void perform("quit", () => nativeCommand("quit_app"))}
         />

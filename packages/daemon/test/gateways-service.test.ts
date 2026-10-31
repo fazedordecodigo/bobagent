@@ -2,7 +2,7 @@ import { expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Agent, GatewayKind, Turn } from "@upbot/protocol";
+import type { Agent, GatewayKind, Turn } from "@boto/protocol";
 import type { AgentStore } from "../src/agents";
 import type { ChatStore } from "../src/chat-store";
 import { openDatabase } from "../src/db";
@@ -19,7 +19,7 @@ type FakeTransport = Transport & {
 };
 
 test("gateway notices stay bound to their source transport and send errors stay separate", async () => {
-  const dataDir = mkdtempSync(join(tmpdir(), "upbot-gateway-service-"));
+  const dataDir = mkdtempSync(join(tmpdir(), "boto-gateway-service-"));
   const db = openDatabase(dataDir);
   const errorSpy = spyOn(console, "error").mockImplementation(() => {});
   let stopTransports = () => {};
@@ -129,7 +129,7 @@ test("gateway notices stay bound to their source transport and send errors stay 
       text: "hello",
     });
     await Bun.sleep(0);
-    expect(first.sent[1]?.text).toContain("UpBot could not deliver this");
+    expect(first.sent[1]?.text).toContain("Boto could not deliver this");
     expect(second.sent).toEqual([]);
 
     second.hooks.onStatus("connected");

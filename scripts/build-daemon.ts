@@ -27,7 +27,7 @@ function build(): void {
     process.exitCode = 1;
     return;
   }
-  const outfile = resolve("apps/desktop/src-tauri/binaries", `upbotd-${target.rustTriple}`);
+  const outfile = resolve("apps/desktop/src-tauri/binaries", `botod-${target.rustTriple}`);
   mkdirSync(dirname(outfile), { recursive: true });
   const result = spawnSync(
     "bun",

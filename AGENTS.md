@@ -1,24 +1,25 @@
-# UpBot
+# Boto
 
 Local-first cross-platform desktop hub for a team of collaborating general-purpose AI bots
 (web, files, email, connected apps). Code and RPC names still say "agent"; the UI says "bot".
-Renamed from BobAgent: `src/legacy.ts` moves `~/BobAgent` -> `~/UpBot` and repoints
-workspace paths; Rust moves the `com.bobagent.desktop` data dir; the vault key falls back to
-the old Keychain service `BobAgent`.
-Bun workspaces monorepo: a Bun sidecar daemon (`upbotd`) owns SQLite state and
+Renamed from UpBot (formerly BobAgent): `src/legacy.ts` moves `~/UpBot` or `~/BobAgent`
+to `~/Boto` and repoints workspace paths. Rust moves the old app data directory to
+`com.boto.desktop`; SQLite checkpoints and renames `upbot.db` to `boto.db`. Vault keys
+remain readable under the old platform service names. See README for remote-host upgrades.
+Bun workspaces monorepo: a Bun sidecar daemon (`botod`) owns SQLite state and
 serves a token-authenticated WebSocket API; a Tauri 2 + React desktop app spawns and
 talks to it.
 
 ## Bots (general purpose)
 
-`src/persona.ts`: every fresh session starts with `<upbot_context>` (shared workspace path,
-collaboration tools, approval and secret rules). `seedDefaultBot` creates one "UpBot" bot
-(claude) on a fresh install (`settings.default_bot_seeded`; `UPBOT_DEFAULT_BOT=off` skips it,
-set by the test helper). Shared workspace: `UPBOT_WORKSPACE_ROOT` or
-`dirname(agentsRoot)/Workspace` (`~/UpBot/Workspace`), passed to local sessions as
+`src/persona.ts`: every fresh session starts with `<boto_context>` (shared workspace path,
+collaboration tools, approval and secret rules). `seedDefaultBot` creates one "Boto" bot
+(claude) on a fresh install (`settings.default_bot_seeded`; `BOTO_DEFAULT_BOT=off` skips it,
+set by the test helper). Shared workspace: `BOTO_WORKSPACE_ROOT` or
+`dirname(agentsRoot)/Workspace` (`~/Boto/Workspace`), passed to local sessions as
 `StartOpts.extraDirs` (Claude `--add-dir`, Codex `writableRoots`).
 
-## Email (UpBot)
+## Email (Boto)
 
 `src/email.ts` (`EmailService`, migration 15 `email_accounts`, `email_drafts`): IMAP via
 `imapflow` + `mailparser`, SMTP via `nodemailer`. Presets gmail/icloud/outlook; app password
@@ -27,10 +28,10 @@ in the vault as `email.<id>.password` (hidden from `vault.list`, never given to 
 `email_draft` (creates a pending draft only), `email_draft_status`. Only the user sends:
 RPC `email.drafts.send` (also `email.accounts.list/save/delete/test`, `email.drafts.list/
 update/discard`); events `email.accounts.changed`, `email.draft.updated`. UI: Settings →
-Email and `DraftCards` above the composer. Tests: `UPBOT_EMAIL_FAKE_MAILBOX=<json>` replaces
-IMAP, `UPBOT_EMAIL_PLAINTEXT=1` allows non-TLS SMTP (`test/email.e2e.test.ts` with smtp-server).
+Email and `DraftCards` above the composer. Tests: `BOTO_EMAIL_FAKE_MAILBOX=<json>` replaces
+IMAP, `BOTO_EMAIL_PLAINTEXT=1` allows non-TLS SMTP (`test/email.e2e.test.ts` with smtp-server).
 
-## Connected apps (UpBot)
+## Connected apps (Boto)
 
 `src/apps.ts` (`AppsService`, migration 16 `connected_apps`): the daemon itself runs each app's
 MCP server via `@modelcontextprotocol/sdk` (stdio with secrets as env, or streamable HTTP with
@@ -43,7 +44,7 @@ The bridge appends app tools to `tools/list` as `<slug>-<tool>` and routes calls
 Migration 19 adds `permissions_json`: `read | write | send | pay | book | del` map to
 `off | ask | allow`. New and migrated apps default to read=allow and all others=ask.
 Sensitive kinds (send/pay/book/del) reject allow in both protocol schemas and AppsService.
-`apps.connect/update` accept partial permissions. `classifyAppTool` in `@upbot/protocol`
+`apps.connect/update` accept partial permissions. `classifyAppTool` in `@boto/protocol`
 (shared with the desktop UI) classifies the
 operation after `<slug>-` on underscores, hyphens and camelCase. The leading verb determines
 the kind; verbs after and/or/then can escalate it (del > pay > book > send > write > read).
@@ -54,7 +55,7 @@ The Apps permissions dialog edits stored levels; disconnect confirms removal of 
 secrets, while enable/disable remains reversible. No account or last-used data is invented.
 Grok rejects `__` in MCP tool names because it uses that separator to qualify server and tool names.
 
-## Approvals (UpBot)
+## Approvals (Boto)
 
 `src/approvals.ts` (`ApprovalService`): every bridge tool call passes `gate()`. Rules
 (`settings.approval_rules`, glob on tool names, per bot or `agentId: null`): "ask" beats
@@ -73,7 +74,7 @@ refresh from these events. Undo restores only the previous preference, never an 
 external action; task and deny expose no undo.
 A pending approval blocks the call; background turns (from another bot, routine, gateway,
 team or group chat — `AgentRuntime.currentTurn().background`) expire after
-`UPBOT_APPROVAL_BACKGROUND_TTL_MS` (10 min), others after `UPBOT_APPROVAL_TTL_MS` (60 min);
+`BOTO_APPROVAL_BACKGROUND_TTL_MS` (10 min), others after `BOTO_APPROVAL_TTL_MS` (60 min);
 a finished turn expires its approvals. Bridge `request_secret` (masked form, value goes to the
 vault allowlisted to the bot) and `request_takeover` (user uses the bot browser, clicks Done).
 RPC `approvals.list/respond/rules/setRules` (also allowed for mobile), events
@@ -112,7 +113,7 @@ Windows registers its COM activator before spawning the daemon; `-ToastActivated
 payloads and COM callbacks share the native queue. The single-instance plugin forwards
 second-launch arguments and focuses the existing window before another daemon starts.
 
-## Pages (UpBot)
+## Pages (Boto)
 
 `src/pages.ts` (`PageLibrary`, migration 17 `pages`): bots publish self-contained HTML with
 bridge `page_publish {title, html|file, id?}` (5 MB; `file` must be in the bot's or the
@@ -124,7 +125,7 @@ RPC `pages.list/delete`, event `pages.changed`. Tests: `test/pages.e2e.test.ts`.
 Titles are capped at 200 and descriptions at 1000 UTF-16 units on create and update
 (including legacy values), without splitting a surrogate pair.
 
-## Group chat + navigation (UpBot)
+## Group chat + navigation (Boto)
 
 Channels are "Group chats" in the UI. `ChannelService.post(channelId, text, replyTo?)`:
 `@Name` sends to those members, `@everyone`/`@all` to every member, a reply to a bot's
@@ -152,16 +153,16 @@ Firecracker provider env. Gemini invalid-key errors are explicit; Cursor's
 to `api2.cursor.sh` with a microVM credential set, since Cursor returns no explicit invalid-key
 error. `bun run test:firecracker:providers` checks these real ACP flows, credential delivery,
 placement isolation, and plaintext leaks.
-devin/grok need a custom image plus `UPBOT_PROVIDER_COMMAND_<PROVIDER>`.
+devin/grok need a custom image plus `BOTO_PROVIDER_COMMAND_<PROVIDER>`.
 
 ## Layout
 
-- `packages/protocol` — `@upbot/protocol`: zod 4 schemas + the typed method map
+- `packages/protocol` — `@boto/protocol`: zod 4 schemas + the typed method map
   (`methodMap`) shared by daemon and UI. Single source of truth for the wire contract.
-- `packages/daemon` — `@upbot/daemon`: `src/main.ts` is the sidecar entry.
-  Args: `--data-dir <path>` (required), `--agents-root <path>` (default `~/UpBot/agents`).
+- `packages/daemon` — `@boto/daemon`: `src/main.ts` is the sidecar entry.
+  Args: `--data-dir <path>` (required), `--agents-root <path>` (default `~/Boto/agents`).
   The auth token is the first line on stdin (required; never via env, so agent CLIs can't
-  read it). Prints `UPBOT_READY {"port":N}` on
+  read it). Prints `BOTO_READY {"port":N}` on
   stdout when listening on 127.0.0.1; all other logs go to stderr.
   Exits on SIGTERM/SIGINT and on stdin EOF. Migrations live in `src/db/migrations.ts`
   (ordered SQL array, tracked in `schema_migrations`). Agent delete is a soft delete;
@@ -183,19 +184,19 @@ devin/grok need a custom image plus `UPBOT_PROVIDER_COMMAND_<PROVIDER>`.
 Each agent gets a lazy `AgentRuntime` (`packages/daemon/src/runtime/`) that owns one
 provider session at a time. Turns stream ACP updates into `items` rows; permission
 requests pause in `awaiting_permission` until `permissions.respond`. Cancel sends
-`session/cancel` and hard-kills after `UPBOT_CANCEL_GRACE_MS` (default 10000).
+`session/cancel` and hard-kills after `BOTO_CANCEL_GRACE_MS` (default 10000).
 On daemon start, turns left `running` are marked `interrupted`. Provider CLIs are
 found via a login-shell PATH merge (`src/env/login-path.ts`) — spawned agents get
 `NO_COLOR=1` and a resolved absolute binary path.
 
 Daemon auth: the token is delivered on the FIRST STDIN LINE (never env — provider
 children must not see it). Missing/empty token or no line within 10 s -> exit 2.
-stdin EOF afterwards = shutdown. `spawnEnv` strips all `UPBOT_*` vars.
+stdin EOF afterwards = shutdown. `spawnEnv` strips all `BOTO_*` vars.
 
 Env vars (daemon):
-- `UPBOT_ACP_COMMAND_<PROVIDER>` — JSON array overriding the spawn command per
-  provider (e.g. `UPBOT_ACP_COMMAND_DEVIN='["bun","path/to/agent.ts"]'`).
-- `UPBOT_CANCEL_GRACE_MS` — ms after `chat.cancel` before the process is killed
+- `BOTO_ACP_COMMAND_<PROVIDER>` — JSON array overriding the spawn command per
+  provider (e.g. `BOTO_ACP_COMMAND_DEVIN='["bun","path/to/agent.ts"]'`).
+- `BOTO_CANCEL_GRACE_MS` — ms after `chat.cancel` before the process is killed
   (`0` kills immediately).
 
 Sign-in commands surfaced on auth errors: `devin auth login`, `agent login`,
@@ -223,7 +224,7 @@ New (non-resumed) sessions with prior history get a `<conversation_history>` blo
 (`src/runtime/handoff.ts`, pure fn) before the first prompt.
 
 `spikes/mode-probe.ts` — per provider x mode permission probe -> `spikes/out/mode-probe.json`.
-- `UPBOT_DEBUG_PROMPTS_DIR` — when set, the daemon writes every outgoing prompt to
+- `BOTO_DEBUG_PROMPTS_DIR` — when set, the daemon writes every outgoing prompt to
   `<dir>/<agentId>-<turnId>.txt` (debugging only).
 
 ## Native Claude + Codex (Phase 4)
@@ -244,20 +245,20 @@ stderr tail, JSONL and auth helpers live in `process.ts`.
   Config: `mode` (auto = workspace-write, read-only; both `on-request`), `model`, `effort`,
   sent with each `turn/start`.
 - Verified against real CLIs (signed out) on the VM: claude 2.1.310, codex-cli 0.164.0.
-- `UPBOT_PROVIDER_COMMAND_<PROVIDER>` overrides any provider's spawn command
-  (`UPBOT_ACP_COMMAND_<PROVIDER>` still works). Tests use
+- `BOTO_PROVIDER_COMMAND_<PROVIDER>` overrides any provider's spawn command
+  (`BOTO_ACP_COMMAND_<PROVIDER>` still works). Tests use
   `test/fixtures/fake-claude.ts` / `fake-codex.ts` (`$FAKE_CLAUDE_STATE_DIR`,
   `$FAKE_CODEX_STATE_DIR`, `FAKE_CODEX_NO_AUTH=1`) from `test/native.e2e.test.ts`.
 
 ## Agent-to-agent bridge (Phase 5)
 
-Every provider session gets a `upbot` stdio MCP server: the daemon binary run as
-`upbotd mcp-bridge` (dev: `bun src/main.ts mcp-bridge`), with
-`UPBOT_BRIDGE_URL`/`UPBOT_BRIDGE_TOKEN` in its env. The token is per agent,
+Every provider session gets a `boto` stdio MCP server: the daemon binary run as
+`botod mcp-bridge` (dev: `bun src/main.ts mcp-bridge`), with
+`BOTO_BRIDGE_URL`/`BOTO_BRIDGE_TOKEN` in its env. The token is per agent,
 regenerated each daemon start, and never the daemon's main token. The bridge forwards
 `tools/list`/`tools/call` to `POST /bridge` (Bearer bridge token; any Origin header ->
 403). Passed via ACP `mcpServers`, Claude `--mcp-config`, Codex `thread/start.config`
-(`mcp_servers.upbot`). Tools (`src/bridge.ts`):
+(`mcp_servers.boto`). Tools (`src/bridge.ts`):
 - `list_agents`, `send_message {to, text}`: enqueues on the recipient with
   `queue.from_agent_id` + `hops` (migration 5). The recipient's prompt is framed by
   `<agent_message_context>` (`wrapAgentMessage`); its `user_message` item has `from`.
@@ -265,7 +266,7 @@ regenerated each daemon start, and never the daemon's main token. The bridge for
 - `share_file {to, path, note?}`: only regular files inside the sender workspace, max 100 MB.
   It copies the file to `<shared>/Transfers/<id>/` with `manifest.json` (sha256), delivers it
   to `<recipient ws>/transfers/<id>/<name>`, and notifies the recipient. Shared root is
-  `UPBOT_SHARED_ROOT` or `dirname(agentsRoot)/Shared` (default `~/UpBot/Shared`).
+  `BOTO_SHARED_ROOT` or `dirname(agentsRoot)/Shared` (default `~/Boto/Shared`).
 Tests: `test/bridge.e2e.test.ts` (the fake ACP agent's `mcp:<tool> <json>` prompt
 spawns the real bridge and calls the tool).
 
@@ -291,9 +292,9 @@ Claude `result.usage`/`total_cost_usd`/`modelUsage.contextWindow`, Codex
 (`usedTokens`/`contextWindow`) and cumulative in/out tokens and cost; `agents.usage` RPC +
 `agent.usage` event; UI `components/UsageBar.tsx`. Compaction (`AgentRuntime.compact`, via
 `agents.compact` or automatically after a completed turn when used/window >=
-`UPBOT_COMPACT_THRESHOLD`, default 0.85, `off` disables): the agent answers a
+`BOTO_COMPACT_THRESHOLD`, default 0.85, `off` disables): the agent answers a
 `<compaction_request>` prompt (output captured, permissions denied, timeout
-`UPBOT_COMPACT_TIMEOUT_MS`), the provider session is dropped and forgotten, and a
+`BOTO_COMPACT_TIMEOUT_MS`), the provider session is dropped and forgotten, and a
 `compaction` chat item stores the summary. The next fresh session gets
 `<conversation_summary>` plus only the history after it. The queue waits while compacting.
 Tests: `test/usage.e2e.test.ts`.
@@ -318,7 +319,7 @@ prefixed with `<agent_memories>` and `<skills_library>` (index only). UI:
 
 Routines (`src/routines.ts`, migration 9: `routines`, `routine_runs`) are saved prompts sent
 to an agent with `trigger` schedule|webhook|manual. Schedules: `every <n>m|h|d`, `daily HH:MM`,
-`weekly <day> HH:MM` (local time); the scheduler ticks every `UPBOT_ROUTINE_TICK_MS`
+`weekly <day> HH:MM` (local time); the scheduler ticks every `BOTO_ROUTINE_TICK_MS`
 (default 30000), skips soft-deleted agents, and collapses missed runs into one. Manual and
 webhook triggers also reject routines whose agent is soft-deleted; restoring the agent resumes
 scheduled runs. Webhooks: `POST /hooks/<routineId>` with
@@ -337,20 +338,20 @@ extracted with `unzip` or Windows `tar`, with unsafe archive paths rejected) and
 ## Agent browser (Phase 10)
 
 `src/browser.ts`: one Chromium-family browser (Chrome/Chromium/Edge/Brave, or
-`UPBOT_BROWSER_PATH`) launched lazily with `--remote-debugging-port=0` and its own profile
+`BOTO_BROWSER_PATH`) launched lazily with `--remote-debugging-port=0` and its own profile
 (`<data-dir>/browser-profile`, port read from `DevToolsActivePort`), driven over CDP (flattened
 `Target.attachToTarget` sessions). Each agent gets one tab. Bridge tools: `browser_open`
 (http/https only), `browser_snapshot` (numbered interactive elements via `data-bob-ref` + page
 text), `browser_click`, `browser_type`, `browser_press`, `browser_back`, `browser_screenshot`
 (PNG into `<workspace>/browser/`), `browser_close`. RPC `browser.status/closeTab/close`, event
-`browser.updated`; UI `BrowserView`. `UPBOT_BROWSER=off` disables it,
-`UPBOT_BROWSER_HEADLESS=1` for tests. Tests: `test/browser.e2e.test.ts` (skipped when no
+`browser.updated`; UI `BrowserView`. `BOTO_BROWSER=off` disables it,
+`BOTO_BROWSER_HEADLESS=1` for tests. Tests: `test/browser.e2e.test.ts` (skipped when no
 browser is installed).
 
 ## Vault, connectors, Computer Use, voice (Phase 11)
 
 Vault (`src/vault.ts`, migration 10 `vault` + `settings`): AES-256-GCM secrets; key precedence
-is `UPBOT_VAULT_KEY` (64 hex, tests), macOS Keychain (service `UpBot`, account `vault-key`),
+is `BOTO_VAULT_KEY` (64 hex, tests), macOS Keychain (service `Boto`, account `vault-key`),
 an existing `<data-dir>/vault.key`, then Windows DPAPI or Linux Secret Service. Linux writes
 `vault.key.location` after a successful Secret Service store so a locked/unavailable keyring
 cannot silently orphan secrets; when secure storage is unavailable, a 0600 plaintext key file
@@ -360,15 +361,15 @@ Per-secret agent allowlist. RPC
 `vault.list/set/setAccess/delete` (values never returned), event `vault.changed`; bridge
 `vault_list`, `vault_get`. Connectors (`src/connectors.ts`) use shared secrets without
 returning them: `connector.github` -> `github_api` (REST proxy, token redacted,
-`UPBOT_GITHUB_API` for tests); `connector.1password` -> `onepassword_read` (`op read`,
+`BOTO_GITHUB_API` for tests); `connector.1password` -> `onepassword_read` (`op read`,
 optional service-account token); `connector.bitwarden` -> `bitwarden_get` (`bw get`,
-BW_SESSION). `UPBOT_OP_COMMAND`/`UPBOT_BW_COMMAND` override the CLIs.
+BW_SESSION). `BOTO_OP_COMMAND`/`BOTO_BW_COMMAND` override the CLIs.
 Computer Use (`src/computer.ts`, macOS): off per agent until `computer.setAccess`; bridge
 `computer_screenshot` (screencapture), `computer_click` (CoreGraphics via JXA),
 `computer_type`, `computer_key` (System Events, whitelisted keys/modifiers);
-`UPBOT_COMPUTER_DRYRUN=<file>` logs commands instead (tests).
-Voice (`src/voice.ts`): `voice.speak` (`say`, or `UPBOT_TTS_COMMAND` with text on
-stdin), `voice.transcribe` (`UPBOT_STT_COMMAND` with `{file}`, or `whisper` on PATH),
+`BOTO_COMPUTER_DRYRUN=<file>` logs commands instead (tests).
+Voice (`src/voice.ts`): `voice.speak` (`say`, or `BOTO_TTS_COMMAND` with text on
+stdin), `voice.transcribe` (`BOTO_STT_COMMAND` with `{file}`, or `whisper` on PATH),
 `voice.status`. UI: Vault view, Computer Use toggle, composer mic, read-aloud button;
 `src-tauri/Info.plist` has the microphone usage string. Tests: `test/phase11.e2e.test.ts`.
 
@@ -384,8 +385,8 @@ mentions count, DMs always. Prompt is wrapped in `<external_message>`; the queue
 `meta_json.gateway` drives the reply on `turn.ended`. RPC `gateways.list/create/update/delete`,
 events `gateway.updated/deleted`; UI `GatewaysView`. Daemon shutdown (SIGTERM/SIGINT/stdin EOF)
 calls `GatewayService.stopAll()` before closing runtimes. Test base URLs:
-`UPBOT_TELEGRAM_API`, `UPBOT_SLACK_API`, `UPBOT_DISCORD_API`.
-Stderr logs use `[upbotd] gateway.<event> <json>` for error/disconnected/connected (recovery
+`BOTO_TELEGRAM_API`, `BOTO_SLACK_API`, `BOTO_DISCORD_API`.
+Stderr logs use `[botod] gateway.<event> <json>` for error/disconnected/connected (recovery
 includes `downtimeMs` and `errorAttempts`), send_failed/send_recovered, deliver_failed and unauthorized_user.
 Error strings (including `status.error`) redact token values/shapes and URL paths, strip controls and cap at
 300 characters; later successful sends clear send-caused errors. Tests: `test/gateways.e2e.test.ts`,
@@ -394,7 +395,7 @@ Error strings (including `status.error`) redact token values/shapes and URL path
 ## Marketplace (Phase 12b)
 
 `marketplace/` holds the default registry (`index.json` + `skills/*.md` + `agents/*.json`),
-fetched from raw.githubusercontent.com (`UPBOT_MARKETPLACE_URL` overrides; user sources in
+fetched from raw.githubusercontent.com (`BOTO_MARKETPLACE_URL` overrides; user sources in
 `settings.marketplace_sources`, http(s)/file URLs). `src/marketplace.ts` verifies each file's
 sha256 before installing; skills go to the skills library (author `marketplace:<author>`),
 agent templates create an agent (chosen provider) and install their listed skills. RPC
@@ -405,7 +406,7 @@ agent templates create an agent (chosen provider) and install their listed skill
 
 `src/mobile.ts` + `src/mobile-app.ts` (vanilla JS PWA as a string): opt-in LAN
 server (`mobile.enable`, `0.0.0.0`, port remembered in `settings.mobile`;
-`UPBOT_MOBILE_HOST`/`UPBOT_MOBILE_PORT` override). Pairing: `mobile.pair` shows a
+`BOTO_MOBILE_HOST`/`BOTO_MOBILE_PORT` override). Pairing: `mobile.pair` shows a
 6-digit code (5 min, 5 attempts) -> `POST /api/pair` returns a device token (sha256 stored in
 `mobile_devices`, migration 12). Devices call `POST /api/rpc` with an allowlist (agents.list/
 statuses, chat.history/send/cancel, queue.get, permissions.list/respond; no attachments) and
@@ -425,7 +426,7 @@ selected agents, runs incoming messages as `<team_message>` turns and replies on
 An incoming row is `completed` once the reply is handed to an open relay socket; if the socket
 is down it is `failed` and logged (`team reply not delivered`). The relay has no delivery ack
 and drops replies to offline members, so a sender's `out` row still `pending` after
-`UPBOT_TEAM_REPLY_TTL_MS` (default 30 min; checked at start and periodically) becomes `failed`;
+`BOTO_TEAM_REPLY_TTL_MS` (default 30 min; checked at start and periodically) becomes `failed`;
 a late reply still overwrites it. No relay protocol change, nothing stored on the relay.
 RPC `team.status/connect/disconnect/share/send/messages`, events `team.updated/message`;
 UI `TeamView`. Tests: `test/team.e2e.test.ts` (spawns the relay). Relay audit logs are JSON
@@ -456,25 +457,25 @@ events `hosts.changed`, `placement.updated`, `subagent.updated`; UI `components/
 (Settings → Hosts). SSH runs the system `ssh` with `BatchMode=yes`,
 `StrictHostKeyChecking=accept-new`, keepalives, `-p`, optional `-i`, then `--` and the target
 (validated by `SshTarget`, so it cannot be an option); remote commands are single-quoted.
-`UPBOT_SSH_COMMAND` (JSON array) replaces `ssh` (tests: `test/fixtures/fake-ssh.ts`,
+`BOTO_SSH_COMMAND` (JSON array) replaces `ssh` (tests: `test/fixtures/fake-ssh.ts`,
 `$FAKE_SSH_HOME`, `$FAKE_SSH_LOG`, targets `unreachable*` fail). Install uploads
 `packages/host/src/main.ts` (embedded as text) to
-`${UPBOT_HOST_ROOT:-$HOME/.upbot}/bin/upbot-host.ts` and runs `preflight`; install and
-check honor the same remote `UPBOT_HOST_ROOT`. When an agent's placement has a host,
+`${BOTO_HOST_ROOT:-$HOME/.boto}/bin/boto-host.ts` and runs `preflight`; install and
+check honor the same remote `BOTO_HOST_ROOT`. When an agent's placement has a host,
 `AgentRuntime` passes a `RemoteLaunch` to
 the driver: the provider command is spawned as `ssh -R <sock>:127.0.0.1:<daemon port> ...
-upbot-host run` (first stdin line = RunSpec JSON), and the `upbot` MCP server becomes
-`upbot-host bridge` on the host (POSTs `/bridge` through the forwarded socket). Changing a
+boto-host run` (first stdin line = RunSpec JSON), and the `boto` MCP server becomes
+`boto-host bridge` on the host (POSTs `/bridge` through the forwarded socket). Changing a
 placement drops the provider session. Firecracker placement requires a host whose preflight
 says `firecrackerReady` (Linux + /dev/kvm + firecracker + vmlinux + rootfs.ext4 + `mkfs.ext4`,
 with no stale guest helper);
 there is no fallback. Build the guest from a checkout with
 `bash packages/host/rootfs/build-rootfs.sh`; the host needs Docker, curl, sudo and e2fsprogs,
 and the user needs `/dev/kvm` access (`sudo usermod -aG kvm "$USER"`, then re-login).
-`packages/host` (`upbot-host run` with `isolation: "firecracker"`) boots one VM per session
+`packages/host` (`boto-host run` with `isolation: "firecracker"`) boots one VM per session
 (`firecracker --no-api --config-file`, fresh root disk copied from the base rootfs, vCPU 1-32,
 memory 256-65536 MiB) and gives each agent a persistent sparse `workspace.ext4` (default
-8192 MiB, configurable with `UPBOT_VM_WORKSPACE_MIB`) mounted at `/persist`, with `/workspace`
+8192 MiB, configurable with `BOTO_VM_WORKSPACE_MIB`) mounted at `/persist`, with `/workspace`
 and `/root` bind-mounted from it. It connects vsock 1024 for provider stdio, serves guest vsock
 5000 (bridge) and 3128 (CONNECT proxy), syncs storage when a provider exits, and removes the
 per-run root disk on session end. With `setpriv` installed, Firecracker runs with
@@ -482,7 +483,7 @@ per-run root disk on session end. With `setpriv` installed, Firecracker runs wit
 seconds. The proxy resolves DNS once, rejects a hostname if any IPv4 answer is non-public, and
 connects to the approved address. CONNECT requests are audited at `vms/<agentId>/proxy.log`
 (rotated to `.1` above 1 MiB) with allow/deny decisions plus `connected`/`upstream error`
-outcomes per destination; provider processes drop inherited `UPBOT_*` variables while
+outcomes per destination; provider processes drop inherited `BOTO_*` variables while
 retaining explicit RunSpec env.
 MicroVM sign-in (`src/remote/credentials.ts`): `vmCredentials.list/set/delete` store
 `vmcred.<provider>` in the vault (hidden from `vault.list`, never on an allowlist):
@@ -490,23 +491,23 @@ claude `oauth_token` -> `CLAUDE_CODE_OAUTH_TOKEN`, `api_key` -> `ANTHROPIC_API_K
 `api_key` -> `OPENAI_API_KEY` + `CODEX_API_KEY`. `HostStore.launchFor` adds them to
 `RemoteLaunch.credentials` and the RunSpec env only for `firecracker` placements; when Codex
 reports signed out and a key is present the driver calls `account/login/start {type:"apiKey"}`.
-Credentialed Codex sessions set `CODEX_HOME=/run/upbot/codex-home` on guest tmpfs; fake-key
+Credentialed Codex sessions set `CODEX_HOME=/run/boto/codex-home` on guest tmpfs; fake-key
 runs found no `/root/.codex/auth.json` on the persistent workspace. Fake `OPENAI_API_KEY` or
 `CODEX_API_KEY` alone left `account/read` signed out. Rejected credentials surface a redacted
 provider detail and a Settings → Hosts prompt. Tests: `test/vm-credentials.test.ts` and
 `bun run test:firecracker:providers` (real SSH/Firecracker, fake Claude API/OAuth and Codex
 keys, persistence and leak checks). Codex's home/thread cache is ephemeral; the driver falls
 back to `thread/start` if a thread cannot be resumed.
-Guest image: `packages/host/rootfs/` (`upbot-init`, `build-rootfs.sh`); run the real host and
+Guest image: `packages/host/rootfs/` (`boto-init`, `build-rootfs.sh`); run the real host and
 SSH integration tests with `bun run test:firecracker` on a Linux Firecracker host; signed-out
 real Claude/Codex flows use `bun run test:firecracker:providers`. `--base <image>` overrides
-`UPBOT_ROOTFS_BASE`; defaults try Debian Hub, mirror.gcr.io, then public ECR, selecting the
+`BOTO_ROOTFS_BASE`; defaults try Debian Hub, mirror.gcr.io, then public ECR, selecting the
 first cached or pullable image. This host's default-provider build selected Debian Hub and took
 1m 0s: rootfs 4.0 GiB apparent / 1.6 GiB allocated, 1643 MiB ext4 used; Docker image 2.35 GB
 disk usage / 775 MB content size. Re-run the build after updating or reinstalling the helper;
 preflight reports `guestHelperCurrent`.
 Subagents (`src/subagents.ts`): bridge `spawn_subagents {tasks:[{task,name?}], provider?,
-keep?}` (max 8 per call, `UPBOT_MAX_SUBAGENTS` running per parent, default 8, depth 2)
+keep?}` (max 8 per call, `BOTO_MAX_SUBAGENTS` running per parent, default 8, depth 2)
 creates child agents that inherit the parent's placement, sends each its task, and when the
 whole batch has ended delivers one `<subagent_results>` message to the parent; non-kept
 children are then deleted (stopping their process/VM). `list_subagents`, `stop_subagent`.

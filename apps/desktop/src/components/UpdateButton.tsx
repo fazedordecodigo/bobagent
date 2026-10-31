@@ -37,7 +37,7 @@ export function UpdateButton() {
     none: "Tudo atualizado",
     available: `Instalar ${update?.version ?? "atualização"}`,
     installing: "Instalando…",
-    done: "Reinicie o UpBot para concluir",
+    done: "Reinicie o Boto para concluir",
     error:
       failedPhase === "install"
         ? "Falha ao instalar atualização"

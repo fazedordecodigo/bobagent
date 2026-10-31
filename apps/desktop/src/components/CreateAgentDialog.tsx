@@ -1,4 +1,4 @@
-import type { AgentAvatar, ProviderId } from "@upbot/protocol";
+import type { AgentAvatar, ProviderId } from "@boto/protocol";
 import { useEffect, useRef, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
 import { errorMessage } from "../lib/errors";

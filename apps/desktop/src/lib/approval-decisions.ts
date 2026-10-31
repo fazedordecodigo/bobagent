@@ -1,4 +1,4 @@
-import { type Approval, type ApprovalDecision, isSensitivePermission } from "@upbot/protocol";
+import { type Approval, type ApprovalDecision, isSensitivePermission } from "@boto/protocol";
 import type { DaemonClient } from "./daemon";
 
 export type ApprovalResult = { message: string; undo?: () => Promise<void> };

@@ -1,6 +1,6 @@
 import type { DaemonClient } from "./daemon";
 
-export const GLOBAL_PAUSE_KEY = "upbot.menubar.pausedQueues.v1";
+export const GLOBAL_PAUSE_KEY = "boto.menubar.pausedQueues.v1";
 
 export type GlobalPauseState = { mode: "pausing" | "paused"; owned: string[] };
 export type GlobalPauseAction = "pause" | "resume";

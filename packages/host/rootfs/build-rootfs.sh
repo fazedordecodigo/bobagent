@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Builds the guest image for UpBot microVMs on the Linux host:
-#   ~/.upbot/firecracker/rootfs.ext4  (Debian + bun + socat + provider CLIs)
-#   ~/.upbot/firecracker/vmlinux      (Firecracker CI guest kernel)
-#   ~/.upbot/firecracker/firecracker  (release binary)
+# Builds the guest image for Boto microVMs on the Linux host:
+#   ~/.boto/firecracker/rootfs.ext4  (Debian + bun + socat + provider CLIs)
+#   ~/.boto/firecracker/vmlinux      (Firecracker CI guest kernel)
+#   ~/.boto/firecracker/firecracker  (release binary)
 # Requires: docker, curl, mkfs.ext4, sudo (for loop mounts). No credentials go into the
-# image; sign in to provider CLIs inside a microVM or pass API keys via the UpBot vault.
+# image; sign in to provider CLIs inside a microVM or pass API keys via the Boto vault.
 #
 # usage: build-rootfs.sh [--size-mib 4096] [--providers "claude codex gemini opencode cursor"] [--base image]
 set -euo pipefail
@@ -12,7 +12,7 @@ FC_VERSION="${FC_VERSION:-v1.12.1}"
 KERNEL_URL="${KERNEL_URL:-https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.12/$(uname -m)/vmlinux-6.1.128}"
 SIZE_MIB=4096
 PROVIDERS="claude codex"
-BASE="${UPBOT_ROOTFS_BASE:-}"
+BASE="${BOTO_ROOTFS_BASE:-}"
 BASE_EXPLICIT=0
 [ -n "$BASE" ] && BASE_EXPLICIT=1
 while [ $# -gt 0 ]; do
@@ -28,13 +28,16 @@ while [ $# -gt 0 ]; do
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
-ROOT="${UPBOT_HOST_ROOT:-$HOME/.upbot}"
+ROOT="${BOTO_HOST_ROOT:-$HOME/.boto}"
+if [ -z "${BOTO_HOST_ROOT:-}" ] && [ ! -e "$ROOT" ] && [ -d "$HOME/.upbot" ]; then
+  mv "$HOME/.upbot" "$ROOT"
+fi
 OUT="$ROOT/firecracker"
 HERE="$(cd "$(dirname "$0")" && pwd)"
-HELPER="$ROOT/bin/upbot-host.ts"
+HELPER="$ROOT/bin/boto-host.ts"
 if [ ! -f "$HELPER" ]; then
   HELPER="$HERE/../src/main.ts"
-  [ -f "$HELPER" ] || { echo "upbot-host source not found; run this script from a UpBot checkout or install the helper first" >&2; exit 1; }
+  [ -f "$HELPER" ] || { echo "boto-host source not found; run this script from a Boto checkout or install the helper first" >&2; exit 1; }
 fi
 [ -e /dev/kvm ] || echo "warning: /dev/kvm missing; microVMs will not boot on this host" >&2
 mkdir -p "$OUT"
@@ -84,8 +87,8 @@ fi
 
 work="$(mktemp -d)"
 trap 'sudo umount "$work/mnt" 2>/dev/null || true; rm -rf "$work"' EXIT
-cp "$HELPER" "$work/upbot-host.ts"
-cp "$HERE/upbot-init" "$work/upbot-init" 2>/dev/null || cp "$ROOT/bin/upbot-init" "$work/upbot-init"
+cp "$HELPER" "$work/boto-host.ts"
+cp "$HERE/boto-init" "$work/boto-init" 2>/dev/null || cp "$ROOT/bin/boto-init" "$work/boto-init"
 cat > "$work/Dockerfile" <<DOCKER
 FROM ${BASE}
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git socat iproute2 unzip xz-utils \
@@ -101,11 +104,11 @@ RUN set -eu; \
  tar -xJf "/tmp/node-dist/\$tarball" -C /usr/local --strip-components=1; \
  rm -rf /tmp/node-dist
 RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
-COPY upbot-host.ts /opt/upbot/upbot-host.ts
-COPY upbot-init /sbin/upbot-init
-RUN chmod 0755 /sbin/upbot-init \
- && printf '#!/bin/sh\nexec bun /opt/upbot/upbot-host.ts bridge\n' > /usr/local/bin/upbot-bridge \
- && chmod 0755 /usr/local/bin/upbot-bridge
+COPY boto-host.ts /opt/boto/boto-host.ts
+COPY boto-init /sbin/boto-init
+RUN chmod 0755 /sbin/boto-init \
+ && printf '#!/bin/sh\nexec bun /opt/boto/boto-host.ts bridge\n' > /usr/local/bin/boto-bridge \
+ && chmod 0755 /usr/local/bin/boto-bridge
 RUN for p in ${PROVIDERS}; do case "\$p" in \
       claude) npm install -g @anthropic-ai/claude-code ;; \
       codex) npm install -g @openai/codex ;; \
@@ -114,8 +117,8 @@ RUN for p in ${PROVIDERS}; do case "\$p" in \
       cursor) HOME=/opt/cursor-agent-home bash -c 'curl -fsS https://cursor.com/install | bash' && ln -sf /opt/cursor-agent-home/.local/bin/agent /usr/local/bin/agent ;; \
     esac; done
 DOCKER
-docker build -t upbot-guest "$work"
-cid="$(docker create upbot-guest)"
+docker build -t boto-guest "$work"
+cid="$(docker create boto-guest)"
 docker export "$cid" -o "$work/rootfs.tar"
 docker rm "$cid" >/dev/null
 truncate -s "${SIZE_MIB}M" "$work/rootfs.ext4"
@@ -125,6 +128,6 @@ sudo mount -o loop "$work/rootfs.ext4" "$work/mnt"
 sudo tar -xf "$work/rootfs.tar" -C "$work/mnt"
 sudo umount "$work/mnt"
 mv "$work/rootfs.ext4" "$OUT/rootfs.ext4"
-sha256sum "$work/upbot-host.ts" | awk '{print $1}' > "$OUT/guest-helper.sha256"
+sha256sum "$work/boto-host.ts" | awk '{print $1}' > "$OUT/guest-helper.sha256"
 sha256sum "$OUT/vmlinux" "$OUT/rootfs.ext4" "$OUT/firecracker" > "$OUT/SHA256SUMS"
-echo "ready: $OUT (run Check in UpBot → Settings → Hosts)"
+echo "ready: $OUT (run Check in Boto → Settings → Hosts)"

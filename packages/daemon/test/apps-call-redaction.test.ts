@@ -27,7 +27,7 @@ function setup(): { apps: AppsService; db: Database } {
       agentIds: [],
     }),
   );
-  const vault = new Vault(db, mkdtempSync(join(tmpdir(), "upbot-vault-")));
+  const vault = new Vault(db, mkdtempSync(join(tmpdir(), "boto-vault-")));
   vault.set("app.leaky.TOKEN", SECRET, []);
   return { apps: new AppsService(db, vault, () => {}), db };
 }

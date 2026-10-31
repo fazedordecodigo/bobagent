@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { ApprovalRule } from "@upbot/protocol";
+import type { ApprovalRule } from "@boto/protocol";
 import { nextApprovalRules } from "../src/lib/approval-rules";
 
 const askRule: ApprovalRule = { id: "ask", pattern: "*", action: "ask", agentId: null };

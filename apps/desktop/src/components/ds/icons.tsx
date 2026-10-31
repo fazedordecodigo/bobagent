@@ -337,7 +337,7 @@ export function UpIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
-export function UpbotSimboloCurrentcolorIcon(props: SVGProps<SVGSVGElement>) {
+export function BotoSimboloCurrentcolorIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...props} viewBox="0 0 48 48" width="24" height="24" aria-hidden="true">
       <path

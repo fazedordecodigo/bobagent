@@ -77,7 +77,7 @@ fn bundled() -> bool {
     let bundle = NSBundle::mainBundle();
     bundle
         .bundleIdentifier()
-        .is_some_and(|id| id.to_string() == "com.upbot.desktop")
+        .is_some_and(|id| id.to_string() == "com.boto.desktop")
         && bundle.bundlePath().to_string().ends_with(".app")
 }
 

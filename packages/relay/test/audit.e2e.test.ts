@@ -132,7 +132,7 @@ async function until(predicate: () => boolean, timeoutMs: number): Promise<void>
 }
 
 beforeAll(async () => {
-  dataDir = await mkdtemp(join(tmpdir(), "upbot-relay-audit-cli-"));
+  dataDir = await mkdtemp(join(tmpdir(), "boto-relay-audit-cli-"));
 });
 
 afterAll(async () => {
@@ -182,7 +182,7 @@ test("CLI periodically reports quiet actors' suppressed audit events without log
   const stdoutReader = child.stdout.getReader();
   let stdout = "";
   let port: number | undefined;
-  const readyPattern = /UpBot relay listening on 127\.0\.0\.1:(\d+)/;
+  const readyPattern = /Boto relay listening on 127\.0\.0\.1:(\d+)/;
   while (port === undefined) {
     const { value, done } = await withTimeout(
       stdoutReader.read(),

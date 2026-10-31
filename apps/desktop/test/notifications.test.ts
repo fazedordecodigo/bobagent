@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { Approval } from "@upbot/protocol";
+import type { Approval } from "@boto/protocol";
 import type { ApprovalResult } from "../src/lib/approval-decisions";
 import type { DaemonClient } from "../src/lib/daemon";
 import {
@@ -30,12 +30,12 @@ const pending: Approval = {
   expiresAt: 100000,
 };
 const notification = (overrides: Partial<Approval> = {}) =>
-  decisionNotification({ ...pending, ...overrides }, "UpBot", false, 1000);
+  decisionNotification({ ...pending, ...overrides }, "Boto", false, 1000);
 
 test("one pending decision produces human Portuguese and task-only permission actions", () => {
   expect(notification()).toEqual({
     id: "decision",
-    title: "UpBot quer criar uma nota em Notas.",
+    title: "Boto quer criar uma nota em Notas.",
     body: "",
     muted: false,
     actions: [
@@ -51,12 +51,12 @@ test("one pending decision produces human Portuguese and task-only permission ac
 test("payment, booking and deletion require the app; secrets and takeover never act inline", () => {
   for (const permission of ["pay", "book", "del"] as const) {
     expect(notification({ permission, detail: '{"total":100,"currency":"BRL"}' })?.actions).toEqual(
-      [{ id: "review", label: "Revisar no UpBot" }],
+      [{ id: "review", label: "Revisar no Boto" }],
     );
   }
   for (const kind of ["secret", "takeover"] as const) {
     const item = notification({ kind, detail: "secret stuff" });
-    expect(item?.actions).toEqual([{ id: "review", label: "Revisar no UpBot" }]);
+    expect(item?.actions).toEqual([{ id: "review", label: "Revisar no Boto" }]);
     expect(item?.body).not.toContain("secret stuff");
   }
 });
@@ -85,7 +85,7 @@ test("sends require complete recipients and content, with every field fitting", 
   const { appId, permission, appName, ...nonApp } = pending;
   const direct = decisionNotification(
     { ...nonApp, tool: "send_email", detail: '{"to":"Ana","body":"Oi"}' },
-    "UpBot",
+    "Boto",
     false,
     1000,
   );
@@ -98,12 +98,12 @@ test("sends require complete recipients and content, with every field fitting", 
 
 test("oversized titles and unknown operations fail closed to review, malformed details are safe", () => {
   expect(notification({ appName: "A".repeat(150) })?.actions.map((a) => a.id)).toEqual(["review"]);
-  expect(notification({ detail: "not JSON" })?.body).toBe("Revise os detalhes no UpBot.");
+  expect(notification({ detail: "not JSON" })?.body).toBe("Revise os detalhes no Boto.");
   expect(notification({ detail: '{"password":"secret"}' })?.body).not.toContain("secret");
   const { appId, permission, ...nonApp } = pending;
   for (const tool of ["get_and_delete", "fetch_then_send", "pay_invoice", "book_room"]) {
     expect(
-      decisionNotification({ ...nonApp, tool, detail: "{}" }, "UpBot", false, 1000)?.actions.map(
+      decisionNotification({ ...nonApp, tool, detail: "{}" }, "Boto", false, 1000)?.actions.map(
         (a) => a.id,
       ),
     ).toEqual(["review"]);
@@ -111,7 +111,7 @@ test("oversized titles and unknown operations fail closed to review, malformed d
   expect(
     decisionNotification(
       { ...nonApp, tool: "mystery", detail: "{}" },
-      "UpBot",
+      "Boto",
       false,
       1000,
     )?.actions.map((a) => a.id),
@@ -129,7 +129,7 @@ test("non-app reads and writes share the taxonomy and approve inline", () => {
     ["share_file", '{"to":"Ana","text":"Oi"}'],
   ] as const) {
     expect(
-      decisionNotification({ ...nonApp, tool, detail }, "UpBot", false, 1000)?.actions.map(
+      decisionNotification({ ...nonApp, tool, detail }, "Boto", false, 1000)?.actions.map(
         (a) => a.id,
       ),
     ).toEqual(["approve", "review"]);
@@ -230,7 +230,7 @@ function harness(initial: Approval[] = [pending], store = preferences(), result?
     client,
     bridge,
     store,
-    () => "UpBot",
+    () => "Boto",
     (view, notice) => {
       views.push(view);
       if (notice) notices.push(notice);
@@ -334,7 +334,7 @@ test("startup drain of a lost approval opens Approvals with a notice, removes to
       await Bun.sleep(0);
       expect(h.views).toEqual(["approvals", "open"]);
       expect(h.notices).toEqual([
-        "Esse pedido não está mais disponível. O UpBot foi fechado antes da decisão.",
+        "Esse pedido não está mais disponível. O Boto foi fechado antes da decisão.",
       ]);
       expect(h.removals).toContain("lost-on-restart");
       expect(h.posts).toEqual([]);

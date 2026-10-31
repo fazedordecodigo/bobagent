@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import type { Agent, Channel, ChannelMessage } from "@upbot/protocol";
+import type { Agent, Channel, ChannelMessage } from "@boto/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -44,9 +44,9 @@ describe("channels e2e", () => {
     agentsRoot = tmp("ch-agents-");
     stateDir = tmp("ch-fake-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
-      UPBOT_SHARED_ROOT: tmp("ch-shared-"),
+      BOTO_SHARED_ROOT: tmp("ch-shared-"),
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
     alice = await newAgent("Alice");

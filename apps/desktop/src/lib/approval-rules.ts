@@ -1,4 +1,4 @@
-import type { ApprovalRule } from "@upbot/protocol";
+import type { ApprovalRule } from "@boto/protocol";
 
 /**
  * Builds the next rules list for a mutation, or `null` when the current list

@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent } from "@upbot/protocol";
+import type { Agent } from "@boto/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -64,9 +64,9 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
   let daemon: DaemonHandle;
   let c: DaemonClient;
   const env = () => ({
-    UPBOT_PROVIDER_COMMAND_CLAUDE: JSON.stringify(["bun", join(FIXTURES, "fake-claude.ts")]),
-    UPBOT_PROVIDER_COMMAND_CODEX: JSON.stringify(["bun", join(FIXTURES, "fake-codex.ts")]),
-    UPBOT_CANCEL_GRACE_MS: "3000",
+    BOTO_PROVIDER_COMMAND_CLAUDE: JSON.stringify(["bun", join(FIXTURES, "fake-claude.ts")]),
+    BOTO_PROVIDER_COMMAND_CODEX: JSON.stringify(["bun", join(FIXTURES, "fake-codex.ts")]),
+    BOTO_CANCEL_GRACE_MS: "3000",
     [cs.stateEnv]: stateDir,
   });
 
@@ -79,7 +79,7 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
   const agentText = (agentId: string) => lastAgentText(c, agentId);
 
   function persistedSessionId(agentId: string): string | null {
-    const db = new Database(join(dataDir, "upbot.db"), { readonly: true });
+    const db = new Database(join(dataDir, "boto.db"), { readonly: true });
     try {
       const row = db
         .query("SELECT session_id FROM agent_sessions WHERE agent_id = ?")
@@ -155,12 +155,12 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
     if (cs.provider === "claude") {
       const argv = log.find((l) => l.method === "argv")!.params as string[];
       const cfg = JSON.parse(argv[argv.indexOf("--mcp-config") + 1]!);
-      expect(cfg.mcpServers.upbot.env.UPBOT_BRIDGE_TOKEN).toBeTruthy();
+      expect(cfg.mcpServers.boto.env.BOTO_BRIDGE_TOKEN).toBeTruthy();
     } else {
       const start = log.find((l) => l.method === "thread/start")!.params as {
         params: { config: Record<string, { env: Record<string, string> }> };
       };
-      expect(start.params.config["mcp_servers.upbot"]!.env.UPBOT_BRIDGE_TOKEN).toBeTruthy();
+      expect(start.params.config["mcp_servers.boto"]!.env.BOTO_BRIDGE_TOKEN).toBeTruthy();
     }
   });
 
@@ -297,7 +297,7 @@ describe.each(CASES)("native $provider driver e2e", (cs) => {
   test("unknown saved session falls back to a fresh one and logs provider.resume_failed", async () => {
     const a = await newAgent("ResumeFail");
     await turn(a.id, "echo:first");
-    const db = new Database(join(dataDir, "upbot.db"), { readonly: true });
+    const db = new Database(join(dataDir, "boto.db"), { readonly: true });
     const oldSessionId = (
       db.query("SELECT session_id FROM agent_sessions WHERE agent_id = ?").get(a.id) as {
         session_id: string;
@@ -400,7 +400,7 @@ describe("codex signed out", () => {
     const agentsRoot = tmp("nat-auth-agents-");
     const stateDir = tmp("nat-auth-fake-");
     const d = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      UPBOT_PROVIDER_COMMAND_CODEX: JSON.stringify(["bun", join(FIXTURES, "fake-codex.ts")]),
+      BOTO_PROVIDER_COMMAND_CODEX: JSON.stringify(["bun", join(FIXTURES, "fake-codex.ts")]),
       FAKE_CODEX_STATE_DIR: stateDir,
       FAKE_CODEX_NO_AUTH: "1",
       OPENAI_API_KEY: "",

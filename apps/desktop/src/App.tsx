@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import type { Agent, ApprovalRule } from "@upbot/protocol";
+import type { Agent, ApprovalRule } from "@boto/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AgentConfigScreen } from "./components/AgentConfigScreen";
 import agentConfigStyles from "./components/AgentConfigScreen.module.css";
@@ -45,7 +45,7 @@ type RailView = Extract<View, "chat" | "agents" | "tasks" | "settings">;
 const RAIL_VIEWS: RailView[] = ["chat", "agents", "tasks", "settings"];
 
 function readView(): RailView {
-  const stored = readStorage("upbot.view");
+  const stored = readStorage("boto.view");
   return RAIL_VIEWS.includes(stored as RailView) ? (stored as RailView) : "chat";
 }
 
@@ -61,7 +61,7 @@ export default function App() {
     setError,
     refresh,
   } = useDaemonState(client);
-  const [selectedId, setSelectedId] = useState<string | null>(() => readStorage("upbot.agent"));
+  const [selectedId, setSelectedId] = useState<string | null>(() => readStorage("boto.agent"));
   const [agentNameDraft, setAgentNameDraft] = useState<{
     agentId: string;
     name: string;
@@ -81,7 +81,7 @@ export default function App() {
   const [view, setView] = useState<View>(readView);
   const [creating, setCreating] = useState(false);
   const [settingsTab, setSettingsTab] = useState<ToolTab | "general">("general");
-  const [profileName, setProfileName] = useState(() => readStorage("upbot.profile.name") ?? "");
+  const [profileName, setProfileName] = useState(() => readStorage("boto.profile.name") ?? "");
   const [palette, setPalette] = useState<{ group?: string } | null>(null);
   const [paletteItems, setPaletteItems] = useState<PaletteItem[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
@@ -123,7 +123,7 @@ export default function App() {
   const navigate = useCallback((next: View) => {
     setView(next);
     setSideOpen(false);
-    if (RAIL_VIEWS.includes(next as RailView)) writeStorage("upbot.view", next);
+    if (RAIL_VIEWS.includes(next as RailView)) writeStorage("boto.view", next);
     setCreating(false);
   }, []);
 
@@ -146,7 +146,7 @@ export default function App() {
             : [...current, restored],
         );
         setSelectedId(restored.id);
-        writeStorage("upbot.agent", restored.id);
+        writeStorage("boto.agent", restored.id);
         navigate("agent-settings");
       } catch (e) {
         showAgentUndoToast(
@@ -168,7 +168,7 @@ export default function App() {
   const openAgent = useCallback(
     (id: string) => {
       setSelectedId(id);
-      writeStorage("upbot.agent", id);
+      writeStorage("boto.agent", id);
       setChannelId(null);
       navigate("chat");
     },
@@ -191,7 +191,7 @@ export default function App() {
     if (!clientReady || !("__TAURI_INTERNALS__" in window)) return;
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void listen<string>("upbot://navigate", ({ payload }) => {
+    void listen<string>("boto://navigate", ({ payload }) => {
       const tab = TABS.find((item) => item.id === payload);
       if (tab) {
         setSettingsTab(tab.id);
@@ -223,7 +223,7 @@ export default function App() {
       const first = agents[0];
       if (first) {
         setSelectedId(first.id);
-        writeStorage("upbot.agent", first.id);
+        writeStorage("boto.agent", first.id);
       }
     }
   }, [agents, clientReady, deletedAgentSnapshot, selectedId, view]);
@@ -376,7 +376,7 @@ export default function App() {
       });
       setAgents((prev) => (prev.some((item) => item.id === agent.id) ? prev : [...prev, agent]));
       setSelectedId(agent.id);
-      writeStorage("upbot.agent", agent.id);
+      writeStorage("boto.agent", agent.id);
       navigate("chat");
       if (form.autonomy !== "sensitive") {
         try {
@@ -498,14 +498,14 @@ export default function App() {
           {error ? (
             <section className="view on">
               <div className="empty">
-                <h2>Não foi possível conectar ao UpBot</h2>
+                <h2>Não foi possível conectar ao Boto</h2>
                 <p className="meta">{error}</p>
               </div>
             </section>
           ) : !clientReady ? (
             <section className="view on">
               <div className="empty">
-                <h2>Conectando ao UpBot…</h2>
+                <h2>Conectando ao Boto…</h2>
               </div>
             </section>
           ) : view === "scheduled" ? (
@@ -563,7 +563,7 @@ export default function App() {
               profileName={profileName}
               onProfileName={(name) => {
                 setProfileName(name);
-                writeStorage("upbot.profile.name", name);
+                writeStorage("boto.profile.name", name);
               }}
             />
           ) : view === "channel-new" ? (

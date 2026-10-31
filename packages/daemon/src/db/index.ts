@@ -1,11 +1,25 @@
 import { Database } from "bun:sqlite";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { migrations } from "./migrations";
 
 export function openDatabase(dataDir: string): Database {
   mkdirSync(dataDir, { recursive: true });
-  const db = new Database(join(dataDir, "upbot.db"));
+  const file = join(dataDir, "boto.db");
+  const legacy = join(dataDir, "upbot.db");
+  if (!existsSync(file) && existsSync(legacy)) {
+    const previous = new Database(legacy);
+    try {
+      const checkpoint = previous.query("PRAGMA wal_checkpoint(TRUNCATE)").get() as {
+        busy: number;
+      };
+      if (checkpoint.busy) throw new Error("Close UpBot before migrating its database to Boto.");
+    } finally {
+      previous.close();
+    }
+    renameSync(legacy, file);
+  }
+  const db = new Database(file);
   db.exec("PRAGMA journal_mode=WAL");
   db.exec("PRAGMA foreign_keys=ON");
   db.exec(

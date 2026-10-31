@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { networkInterfaces } from "node:os";
-import { type MobileDevice, type MobileStatus, methodMap } from "@upbot/protocol";
+import { type MobileDevice, type MobileStatus, methodMap } from "@boto/protocol";
 import { z } from "zod";
 import { getSetting, InvalidSettingError, setSetting } from "./db/settings";
 import { envNumber } from "./env/vars";
@@ -72,7 +72,7 @@ const hash = (t: string) => createHash("sha256").update(t).digest("hex");
 
 // Audit trail for the LAN-exposed surface: event name + JSON metadata, never tokens/codes.
 const emit = (event: string, data: Record<string, unknown>) =>
-  console.error(`[upbotd] ${event}`, JSON.stringify(data));
+  console.error(`[botod] ${event}`, JSON.stringify(data));
 
 export class MobileServer {
   rpc: ((raw: string) => Promise<string>) | null = null;
@@ -95,7 +95,7 @@ export class MobileServer {
 
   status(): MobileStatus {
     const port = this.server?.port ?? null;
-    const host = process.env.UPBOT_MOBILE_HOST ?? "0.0.0.0";
+    const host = process.env.BOTO_MOBILE_HOST ?? "0.0.0.0";
     const ips =
       host === "0.0.0.0"
         ? Object.values(networkInterfaces())
@@ -122,7 +122,7 @@ export class MobileServer {
       if (this.setting().enabled) this.listen();
     } catch (e) {
       if (!(e instanceof InvalidSettingError)) throw e;
-      console.error("[upbotd] mobile access stays off:", e.message);
+      console.error("[botod] mobile access stays off:", e.message);
     }
   }
 
@@ -215,13 +215,13 @@ export class MobileServer {
 
   private listen() {
     if (this.server) return;
-    const port = envNumber("UPBOT_MOBILE_PORT", this.setting().port ?? 0, {
+    const port = envNumber("BOTO_MOBILE_PORT", this.setting().port ?? 0, {
       min: 0,
       max: 65_535,
       integer: true,
     });
     const opts = {
-      hostname: process.env.UPBOT_MOBILE_HOST ?? "0.0.0.0",
+      hostname: process.env.BOTO_MOBILE_HOST ?? "0.0.0.0",
       idleTimeout: 0,
       fetch: (req: Request, server: ReturnType<typeof Bun.serve>) => this.handle(req, server),
     };
@@ -262,8 +262,8 @@ export class MobileServer {
     if (req.method === "GET" && url.pathname === "/manifest.webmanifest") {
       return Response.json(
         {
-          name: "UpBot",
-          short_name: "UpBot",
+          name: "Boto",
+          short_name: "Boto",
           start_url: "/",
           display: "standalone",
           background_color: "#09090b",

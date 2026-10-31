@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { type Approval, type ApprovalRule, defaultAppPermissions } from "@upbot/protocol";
+import { type Approval, type ApprovalRule, defaultAppPermissions } from "@boto/protocol";
 import { approvalAction, decideApproval } from "../src/lib/approval-decisions";
 import type { DaemonClient } from "../src/lib/daemon";
 

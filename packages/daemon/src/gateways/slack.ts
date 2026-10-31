@@ -24,7 +24,7 @@ type Envelope = {
   };
 };
 
-const api = () => process.env.UPBOT_SLACK_API ?? "https://slack.com/api";
+const api = () => process.env.BOTO_SLACK_API ?? "https://slack.com/api";
 
 export class SlackTransport implements Transport {
   private ws: WebSocket | null = null;

@@ -1,5 +1,5 @@
 // Remote execution hosts (Linux VPS over SSH). The daemon stays on the Mac; provider
-// processes run on the host through `upbot-host run` (packages/host), optionally inside a
+// processes run on the host through `boto-host run` (packages/host), optionally inside a
 // Firecracker microVM per agent. The MCP bridge reaches back over an `ssh -R` unix socket.
 
 import type { Database } from "bun:sqlite";
@@ -11,7 +11,7 @@ import {
   HostPreflight,
   type Isolation,
   type RemoteHost,
-} from "@upbot/protocol";
+} from "@boto/protocol";
 // @ts-expect-error -- Bun text import of the helper source (uploaded verbatim to hosts)
 import helperSource from "../../../host/src/main.ts" with { type: "text" };
 import { spawnEnv } from "../env/login-path";
@@ -31,7 +31,7 @@ type HostRow = {
   created_at: number;
 };
 
-const HELPER = "bin/upbot-host.ts";
+const HELPER = "bin/boto-host.ts";
 const BUN_PATH = 'PATH="$HOME/.bun/bin:$PATH"';
 
 /** POSIX single-quote escaping. */
@@ -40,7 +40,7 @@ export const shq = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
 const expandHome = (p: string) => (p.startsWith("~/") ? `${homedir()}${p.slice(1)}` : p);
 
 export function sshArgs(host: RemoteHost, extra: string[], remoteCmd: string): [string, string[]] {
-  const base = envOverride("UPBOT_SSH_COMMAND") ?? ["ssh"];
+  const base = envOverride("BOTO_SSH_COMMAND") ?? ["ssh"];
   const [bin, ...pre] = base as [string, ...string[]];
   return [
     bin,
@@ -167,7 +167,7 @@ export class HostStore {
     const h = this.mustGet(id);
     const r = await sshExec(
       h,
-      `ROOT="\${UPBOT_HOST_ROOT:-$HOME/.upbot}" && umask 077 && mkdir -p "$ROOT/bin" && cat > "$ROOT/${HELPER}.tmp" && mv "$ROOT/${HELPER}.tmp" "$ROOT/${HELPER}"`,
+      `ROOT="\${BOTO_HOST_ROOT:-$HOME/.boto}" && if [ -z "\${BOTO_HOST_ROOT:-}" ] && [ ! -e "$ROOT" ] && [ -d "$HOME/.upbot" ]; then mv "$HOME/.upbot" "$ROOT" || exit; fi && umask 077 && mkdir -p "$ROOT/bin" && cat > "$ROOT/${HELPER}.tmp" && mv "$ROOT/${HELPER}.tmp" "$ROOT/${HELPER}"`,
       helperSource as string,
     );
     if (r.code !== 0) throw new Error(`install failed: ${sshError(r)}`);
@@ -178,7 +178,7 @@ export class HostStore {
     const h = this.mustGet(id);
     const r = await sshExec(
       h,
-      `ROOT="\${UPBOT_HOST_ROOT:-$HOME/.upbot}"; ${BUN_PATH}; command -v bun >/dev/null 2>&1 || { echo "bun is not installed on the host (curl -fsSL https://bun.sh/install | bash)" >&2; exit 127; }; test -f "$ROOT/${HELPER}" || { echo "helper not installed; use Install" >&2; exit 3; }; exec bun "$ROOT/${HELPER}" preflight`,
+      `ROOT="\${BOTO_HOST_ROOT:-$HOME/.boto}"; ${BUN_PATH}; command -v bun >/dev/null 2>&1 || { echo "bun is not installed on the host (curl -fsSL https://bun.sh/install | bash)" >&2; exit 127; }; test -f "$ROOT/${HELPER}" || { echo "helper not installed; use Install" >&2; exit 3; }; exec bun "$ROOT/${HELPER}" preflight`,
     );
     if (r.code !== 0) throw new Error(sshError(r));
     const line = r.stdout.trim().split("\n").pop() ?? "";
@@ -310,26 +310,26 @@ export function remoteLaunch(
   const root = host.root!;
   const helper = `${root}/${HELPER}`;
   const vm = placement.isolation === "firecracker";
-  const socket = `/tmp/upbot-${randomBytes(8).toString("hex")}.sock`;
+  const socket = `/tmp/boto-${randomBytes(8).toString("hex")}.sock`;
   return {
     cwd: vm ? "/workspace" : `${root}/agents/${placement.agentId}`,
     describe: `${host.name}${vm ? " (microVM)" : ""}`,
     credentials: vm ? credentials : {},
     mcp(spec: McpServerSpec): McpServerSpec {
-      if (spec.name !== "upbot") return spec;
-      const token = spec.env.UPBOT_BRIDGE_TOKEN ?? "";
+      if (spec.name !== "boto") return spec;
+      const token = spec.env.BOTO_BRIDGE_TOKEN ?? "";
       return vm
         ? {
             name: spec.name,
-            command: "upbot-bridge",
+            command: "boto-bridge",
             args: [],
-            env: { UPBOT_BRIDGE_TOKEN: token },
+            env: { BOTO_BRIDGE_TOKEN: token },
           }
         : {
             name: spec.name,
             command: "sh",
             args: ["-c", `${BUN_PATH} exec bun ${shq(helper)} bridge`],
-            env: { UPBOT_BRIDGE_SOCKET: socket, UPBOT_BRIDGE_TOKEN: token },
+            env: { BOTO_BRIDGE_SOCKET: socket, BOTO_BRIDGE_TOKEN: token },
           };
     },
     spawn(cmd: string[], env: Record<string, string>): ChildProcess {
