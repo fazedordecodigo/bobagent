@@ -44,8 +44,8 @@ describe("marketplace e2e", () => {
     agentsRoot = tmp("mk-agents-");
     sharedRoot = tmp("mk-shared-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      UPBOT_SHARED_ROOT: sharedRoot,
-      UPBOT_MARKETPLACE_URL: fileIndex,
+      BOTO_SHARED_ROOT: sharedRoot,
+      BOTO_MARKETPLACE_URL: fileIndex,
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
   });
@@ -81,7 +81,7 @@ describe("marketplace e2e", () => {
     });
     expect(s.skills).toEqual(["write-tests"]);
     const skill = await c.request("skills.get", { name: "write-tests" });
-    expect(skill.author).toBe("marketplace:UpBot");
+    expect(skill.author).toBe("marketplace:Boto");
     expect(skill.body).toContain("Detect the test runner");
     const created = c.waitForEventWhere("agent.created", (d) => d.name === "Reviewer", 10000);
     const r = await c.request("marketplace.install", {

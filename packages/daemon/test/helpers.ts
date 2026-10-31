@@ -8,7 +8,7 @@ import type {
   MethodParams,
   MethodResult,
   Turn,
-} from "@upbot/protocol";
+} from "@boto/protocol";
 import { readReadyPort } from "../src/ready";
 
 type DaemonEventName = keyof DaemonEventMap;
@@ -160,7 +160,7 @@ export async function startDaemon(
   captureStderr = false,
 ): Promise<DaemonHandle> {
   const proc = Bun.spawn(["bun", DAEMON, "--data-dir", dataDir, "--agents-root", agentsRoot], {
-    env: { ...process.env, UPBOT_DEFAULT_BOT: "off", ...env },
+    env: { ...process.env, BOTO_DEFAULT_BOT: "off", ...env },
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",

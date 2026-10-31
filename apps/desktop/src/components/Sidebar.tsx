@@ -1,4 +1,4 @@
-import type { Agent, AgentStatusInfo, Channel } from "@upbot/protocol";
+import type { Agent, AgentStatusInfo, Channel } from "@boto/protocol";
 import type { RefObject } from "react";
 import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { AgentOverview } from "../hooks/useOverview";
@@ -8,6 +8,7 @@ import { mod } from "../lib/platform";
 import { useThemePref } from "../lib/theme";
 import { fmtTime } from "../lib/ui";
 import {
+  BotoSimboloCurrentcolorIcon,
   ClockIcon,
   HomeIcon,
   MoonIcon,
@@ -15,7 +16,6 @@ import {
   PlusIcon,
   SearchIcon,
   SunIcon,
-  UpbotSimboloCurrentcolorIcon,
 } from "./ds/icons";
 import { Icon } from "./icons";
 
@@ -99,9 +99,9 @@ export function Sidebar({
         </button>
       )}
       <div className="side-titlebar" data-tauri-drag-region />
-      <div className="side-brand" role="img" aria-label="UpBot">
-        <UpbotSimboloCurrentcolorIcon />
-        <span>UpBot</span>
+      <div className="side-brand" role="img" aria-label="Boto">
+        <BotoSimboloCurrentcolorIcon />
+        <span>Boto</span>
       </div>
       <nav className="side-actions" aria-label="Navegação principal">
         <button type="button" className="side-btn new" onClick={onNew}>

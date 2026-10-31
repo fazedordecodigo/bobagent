@@ -1,4 +1,4 @@
-/* UpBot — tokens de design (v1)
+/* Boto — tokens de design (v1)
  * Fonte única de verdade para cor, tipo, espaço, raio, sombra e movimento.
  * Tema claro em :root; tema escuro em [data-theme="dark"] no <html>.
  * Regra: nenhum hex fora deste arquivo. Tons derivados usam color-mix(in oklch, …).
@@ -21,7 +21,7 @@
   --fg:        #0e1217;  /* Tinta — texto, seleção (inversão) */
   --muted:     #5e646a;  /* Neblina — texto secundário, metadados */
   --border:    #e2e5e8;  /* Linha — divisões de 1px */
-  --accent:    #2a67bd;  /* Azul UpBot — símbolo + 1 ação principal por tela */
+  --accent:    #2a67bd;  /* Azul Boto — símbolo + 1 ação principal por tela */
   --sky:       #e4f2ff;  /* Céu — SÓ peças de marca, nunca na UI do produto */
   --on-accent: #ffffff;
   --ink: #000000;

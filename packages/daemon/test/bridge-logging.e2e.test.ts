@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, ChatItem, ConnectedApp, Turn } from "@upbot/protocol";
+import type { Agent, ChatItem, ConnectedApp, Turn } from "@boto/protocol";
 import { BRIDGE_TOOLS } from "../src/bridge";
 import { openDatabase } from "../src/db";
 import {
@@ -21,9 +21,9 @@ const CONFIG_SECRET = "sk_corruptConfigSecret77";
 /** Daemon with its stderr collected while it runs. */
 async function launch(dataDir: string, agentsRoot: string, stateDir: string, token: string) {
   const daemon = await startDaemon(dataDir, agentsRoot, token, {
-    UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+    BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
     FAKE_ACP_STATE_DIR: stateDir,
-    UPBOT_VAULT_KEY: "ab".repeat(32),
+    BOTO_VAULT_KEY: "ab".repeat(32),
   });
   const log = { text: "" };
   void (async () => {
@@ -93,7 +93,7 @@ describe("bridge failure logging e2e", () => {
   test("a failed built-in tool call is logged on daemon stderr", async () => {
     const text = await reply(run.c, bot.id, 'mcp:send_message {"to":"Nobody","text":"hi"}');
     expect(text).toStartWith("tool-error:");
-    const line = await stderrEntry(run.log, "[upbotd] bridge tool failed", "send_message");
+    const line = await stderrEntry(run.log, "[botod] bridge tool failed", "send_message");
     expect(line).toContain(bot.id);
     expect(line).toContain('reason: "error"');
     expect(line).toContain("errorType:");
@@ -118,7 +118,7 @@ describe("bridge failure logging e2e", () => {
     expect(text).toStartWith("tool-error:");
     expect(text).toContain("app MCP tool call failed");
     expect(text).not.toContain(APP_SECRET);
-    const line = await stderrEntry(run.log, "[upbotd] bridge tool failed", "leaky-leak_token");
+    const line = await stderrEntry(run.log, "[botod] bridge tool failed", "leaky-leak_token");
     expect(line).toContain("isApp: true");
     expect(line).toContain('errorType: "AppToolError"');
     expect(line).toMatch(/cause: \{[\s\S]*errorType: "McpError"[\s\S]*code: -32000/);
@@ -156,7 +156,7 @@ describe("bridge tools/list fallback logging e2e", () => {
   test("tools/list falls back to built-in tools and logs without the error text", async () => {
     const text = await reply(run.c, bot.id, "mcp-list");
     expect(text).toBe(`tools:${BRIDGE_TOOLS.map((t) => t.name).join(",")}`);
-    const line = await stderrEntry(run.log, "[upbotd] bridge tools/list failed");
+    const line = await stderrEntry(run.log, "[botod] bridge tools/list failed");
     expect(line).toContain(bot.id);
     expect(line).toContain('errorType: "SyntaxError"');
     expect(run.log.text).not.toContain(CONFIG_SECRET);

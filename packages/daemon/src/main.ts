@@ -22,7 +22,7 @@ import { runMcpBridge } from "./mcp-bridge";
 import { MemoryStore } from "./memories";
 import { MobileServer } from "./mobile";
 import { PageLibrary } from "./pages";
-import { seedDefaultBot, upbotContext } from "./persona";
+import { botoContext, seedDefaultBot } from "./persona";
 import { readyLine } from "./ready";
 import { VmCredentials } from "./remote/credentials";
 import { HostStore } from "./remote/hosts";
@@ -44,7 +44,7 @@ const ORIGIN_ALLOWLIST = new Set([
 
 function parseArgs(argv: string[]): { dataDir: string; agentsRoot: string } {
   let dataDir: string | undefined;
-  let agentsRoot = join(homedir(), "UpBot", "agents");
+  let agentsRoot = join(homedir(), "Boto", "agents");
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg === "--data-dir") {
@@ -54,7 +54,7 @@ function parseArgs(argv: string[]): { dataDir: string; agentsRoot: string } {
     }
   }
   if (!dataDir) {
-    console.error("upbotd: --data-dir <path> is required");
+    console.error("botod: --data-dir <path> is required");
     process.exit(2);
   }
   return { dataDir, agentsRoot };
@@ -67,7 +67,7 @@ function tokenEqual(a: string, b: string): boolean {
 }
 
 function log(...args: unknown[]) {
-  console.error("[upbotd]", ...args);
+  console.error("[botod]", ...args);
 }
 
 const LOGGED_ERROR_TYPES = new Set(["Error", "TypeError", "SyntaxError", "RangeError", "RpcError"]);
@@ -146,7 +146,7 @@ async function main() {
   const { dataDir, agentsRoot } = parseArgs(process.argv.slice(2));
   const token = await readTokenFromStdin();
   if (!token) {
-    console.error("upbotd: no auth token on stdin (first line required)");
+    console.error("botod: no auth token on stdin (first line required)");
     process.exit(2);
   }
 
@@ -158,7 +158,7 @@ async function main() {
   migrateLegacyHome(db, agentsRoot, log);
   const store = new AgentStore(db, agentsRoot);
   seedDefaultBot(db, store);
-  const workspaceRoot = process.env.UPBOT_WORKSPACE_ROOT || join(dirname(agentsRoot), "Workspace");
+  const workspaceRoot = process.env.BOTO_WORKSPACE_ROOT || join(dirname(agentsRoot), "Workspace");
   mkdirSync(workspaceRoot, { recursive: true });
   const queue = new QueueStore(db);
   const hosts = new HostStore(db);
@@ -173,7 +173,7 @@ async function main() {
     }
     mobile.onEvent(event, data);
     if (event === "turn.ended") {
-      const turn = data as import("@upbot/protocol").Turn;
+      const turn = data as import("@boto/protocol").Turn;
       queueMicrotask(() => {
         void (async () => {
           approvalsRef?.onTurnEnded(turn.agentId, turn.id);
@@ -187,7 +187,7 @@ async function main() {
     }
   }
 
-  const sharedRoot = process.env.UPBOT_SHARED_ROOT || join(dirname(agentsRoot), "Shared");
+  const sharedRoot = process.env.BOTO_SHARED_ROOT || join(dirname(agentsRoot), "Shared");
   const bridge = new Bridge(store, () => runtimes, sharedRoot);
   const memories = new MemoryStore(db);
   const skills = new SkillLibrary(sharedRoot);
@@ -197,7 +197,7 @@ async function main() {
     queue,
     broadcast,
     (id) => bridge.serversFor(id),
-    (id) => upbotContext(workspaceRoot) + memories.promptBlock(id) + skills.promptBlock(),
+    (id) => botoContext(workspaceRoot) + memories.promptBlock(id) + skills.promptBlock(),
     (id) => hosts.launchFor(id, bridge.port),
     () => [workspaceRoot],
   );
@@ -421,6 +421,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error("[upbotd] fatal", e);
+  console.error("[botod] fatal", e);
   process.exit(1);
 });

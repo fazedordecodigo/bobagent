@@ -198,7 +198,7 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
     .replace(/^(?:@[\w-]+\s+)+/, "");
   // session context blocks prepended by the daemon are not part of the command
   const stripped = full.replace(
-    /^(?:<(upbot_context|agent_instructions|agent_memories|skills_library|conversation_summary|conversation_history|attachments)>[\s\S]*?<\/\1>\s*)+/,
+    /^(?:<(boto_context|agent_instructions|agent_memories|skills_library|conversation_summary|conversation_history|attachments)>[\s\S]*?<\/\1>\s*)+/,
     "",
   );
   const external = /^<(external_message|team_message)[^>]*>\n([\s\S]*?)\n<\/\1>/.exec(stripped);
@@ -248,22 +248,22 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
       tool: string;
       args: Record<string, unknown>;
     }[];
-    const spec = sessionMcp.get(sessionId)?.find((x) => x.name === "upbot");
-    if (!spec) throw new Error("no-upbot-mcp");
+    const spec = sessionMcp.get(sessionId)?.find((x) => x.name === "boto");
+    if (!spec) throw new Error("no-boto-mcp");
     for (const call of calls)
       await say("agent_message_chunk", await callMcp(spec, call.tool, call.args));
     return { stopReason: "end_turn" };
   }
   if (text === "mcp-list") {
-    const spec = sessionMcp.get(sessionId)?.find((x) => x.name === "upbot");
-    await say("agent_message_chunk", spec ? await callMcp(spec, "tools/list", {}) : "no-upbot-mcp");
+    const spec = sessionMcp.get(sessionId)?.find((x) => x.name === "boto");
+    await say("agent_message_chunk", spec ? await callMcp(spec, "tools/list", {}) : "no-boto-mcp");
     return { stopReason: "end_turn" };
   }
   if (text.startsWith("mcp:")) {
     const m = /^mcp:([A-Za-z0-9_-]+)\s*([\s\S]*)$/.exec(text);
-    const spec = sessionMcp.get(sessionId)?.find((x) => x.name === "upbot");
+    const spec = sessionMcp.get(sessionId)?.find((x) => x.name === "boto");
     if (!m || !spec) {
-      await say("agent_message_chunk", "no-upbot-mcp");
+      await say("agent_message_chunk", "no-boto-mcp");
       return { stopReason: "end_turn" };
     }
     await say("agent_message_chunk", await callMcp(spec, m[1]!, JSON.parse(m[2] || "{}")));

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, Turn } from "@upbot/protocol";
+import type { Agent, Turn } from "@boto/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -47,9 +47,9 @@ describe("agent-to-agent bridge e2e", () => {
     stateDir = tmp("br-fake-");
     sharedRoot = tmp("br-shared-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
-      UPBOT_SHARED_ROOT: sharedRoot,
+      BOTO_SHARED_ROOT: sharedRoot,
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
     alice = await newAgent("Alice");
@@ -63,7 +63,7 @@ describe("agent-to-agent bridge e2e", () => {
     }
   });
 
-  test("sessions get a upbot MCP server with a per-agent token", async () => {
+  test("sessions get a boto MCP server with a per-agent token", async () => {
     await turn(alice.id, "echo:hi");
     const news = readLog(stateDir).filter((l) => l.method === "session/new");
     const spec = (
@@ -71,8 +71,8 @@ describe("agent-to-agent bridge e2e", () => {
         mcpServers: { name: string; env: { name: string; value: string }[] }[];
       }
     ).mcpServers[0]!;
-    expect(spec.name).toBe("upbot");
-    const tokenVar = spec.env.find((e) => e.name === "UPBOT_BRIDGE_TOKEN")!;
+    expect(spec.name).toBe("boto");
+    const tokenVar = spec.env.find((e) => e.name === "BOTO_BRIDGE_TOKEN")!;
     expect(tokenVar.value.length).toBeGreaterThan(20);
     expect(tokenVar.value).not.toBe(TOKEN);
   });

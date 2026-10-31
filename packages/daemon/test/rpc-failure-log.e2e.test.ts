@@ -39,7 +39,7 @@ describe("RPC failure logs", () => {
     source = `http://127.0.0.1:${server.port}/index.json?token=${SECRET}`;
     dataDir = tmp("rpc-log-data-");
     agentsRoot = tmp("rpc-log-agents-");
-    daemon = await startDaemon(dataDir, agentsRoot, TOKEN, { UPBOT_MARKETPLACE_URL: source });
+    daemon = await startDaemon(dataDir, agentsRoot, TOKEN, { BOTO_MARKETPLACE_URL: source });
     const reader = (daemon.proc.stderr as ReadableStream<Uint8Array>).getReader();
     stderrPump = (async () => {
       const decoder = new TextDecoder();
@@ -76,7 +76,7 @@ describe("RPC failure logs", () => {
       code: "bad_request",
     });
 
-    const prefix = "[upbotd] rpc failed ";
+    const prefix = "[botod] rpc failed ";
     const captured = await waitForStderr((buffer) =>
       buffer.split(/\r?\n/).some((line) => line.startsWith(prefix)),
     );

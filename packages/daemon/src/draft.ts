@@ -1,4 +1,4 @@
-import type { AgentAvatar } from "@upbot/protocol";
+import type { AgentAvatar } from "@boto/protocol";
 
 // Turns a free-form description ("an agent that reviews PRs for security issues")
 // into a draft name, avatar and instructions. Deterministic; the user edits the result.

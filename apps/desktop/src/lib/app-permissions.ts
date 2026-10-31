@@ -1,4 +1,4 @@
-import type { AppPermissionKind } from "@upbot/protocol";
+import type { AppPermissionKind } from "@boto/protocol";
 
 export const permissionLabels: Record<AppPermissionKind, string> = {
   read: "Ler",

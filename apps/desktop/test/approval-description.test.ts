@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { AppPermissionKind, Approval } from "@upbot/protocol";
+import type { AppPermissionKind, Approval } from "@boto/protocol";
 import {
   approvalArguments,
   describeApproval,
@@ -59,10 +59,10 @@ test("app consequences use clean Portuguese operations, not raw tool requests", 
   ] as const) {
     const result = describeApproval(
       { ...approval, tool, permission, title: `Run ${tool}` },
-      "UpBot",
+      "Boto",
     );
     expect(result).toEqual({
-      description: `UpBot quer ${consequence} em Notas.`,
+      description: `Boto quer ${consequence} em Notas.`,
       context: null,
       arguments: null,
     });
@@ -80,9 +80,9 @@ test("unknown objects and compound actions fall back to the permission, without 
   };
   for (const permission of Object.keys(fallback) as AppPermissionKind[]) {
     expect(
-      describeApproval({ ...approval, tool: "notas-mystery_widget", permission }, "UpBot")
+      describeApproval({ ...approval, tool: "notas-mystery_widget", permission }, "Boto")
         .description,
-    ).toBe(`UpBot quer ${fallback[permission]} em Notas.`);
+    ).toBe(`Boto quer ${fallback[permission]} em Notas.`);
   }
   expect(describeApproval({ ...approval, tool: "notas-create_widget" }).description).toBe(
     "O bot quer alterar conteúdo em Notas.",

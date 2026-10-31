@@ -12,7 +12,7 @@ import {
   setSetting,
 } from "../src/db/settings";
 
-const db = () => openDatabase(mkdtempSync(join(tmpdir(), "upbot-data-")));
+const db = () => openDatabase(mkdtempSync(join(tmpdir(), "boto-data-")));
 
 describe("settings store", () => {
   test("round-trips JSON values and returns the fallback when absent", () => {

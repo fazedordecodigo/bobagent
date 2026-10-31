@@ -1,5 +1,5 @@
 name: Feature request
-description: Suggest an idea for UpBot
+description: Suggest an idea for Boto
 labels: [enhancement]
 body:
   - type: textarea

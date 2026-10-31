@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, ChatItem, Turn } from "@upbot/protocol";
+import type { Agent, ChatItem, Turn } from "@boto/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -61,10 +61,10 @@ describe("runtime failure logs e2e", () => {
     mkdirSync(stateDir, { recursive: true });
     writeFileSync(blocker, "not a directory");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
-      UPBOT_COMPACT_THRESHOLD: "0.8",
-      UPBOT_DEBUG_PROMPTS_DIR: join(blocker, "sub"),
+      BOTO_COMPACT_THRESHOLD: "0.8",
+      BOTO_DEBUG_PROMPTS_DIR: join(blocker, "sub"),
       FAKE_ACP_COMPACT_ERROR: "provider rejected key COMPACTMARKER9b2c",
     });
     const reader = (daemon.proc.stderr as ReadableStream<Uint8Array>).getReader();
@@ -99,7 +99,7 @@ describe("runtime failure logs e2e", () => {
     expect(turn.status).toBe("completed");
     await waitForStderr(
       new RegExp(
-        `\\[upbotd\\] failed to write debug prompt: agent=${agent.id} turn=${turn.id} errorType=\\w+ code=E[A-Z]+`,
+        `\\[botod\\] failed to write debug prompt: agent=${agent.id} turn=${turn.id} errorType=\\w+ code=E[A-Z]+`,
       ),
       5000,
     );
@@ -126,7 +126,7 @@ describe("runtime failure logs e2e", () => {
     expect((await compaction).status).toBe("failed");
     await waitForStderr(
       new RegExp(
-        `\\[upbotd\\] auto-compaction failed: agent=${agent.id} provider=devin turn=\\S+ errorType=RpcError code=internal`,
+        `\\[botod\\] auto-compaction failed: agent=${agent.id} provider=devin turn=\\S+ errorType=RpcError code=internal`,
       ),
       5000,
     );
@@ -151,7 +151,7 @@ describe("runtime failure logs e2e", () => {
       (event) => (event as Turn).queueId === badQueueId,
       15000,
     ) as Promise<Turn>;
-    const db = new Database(join(dataDir, "upbot.db"));
+    const db = new Database(join(dataDir, "boto.db"));
     db.exec("PRAGMA busy_timeout=5000");
     db.query(
       "INSERT INTO queue (id, agent_id, text, status, created_at, meta_json) VALUES (?, ?, ?, 'queued', ?, ?)",
@@ -165,7 +165,7 @@ describe("runtime failure logs e2e", () => {
     )) as Turn;
     expect(ended.status).toBe("completed");
     await waitForStderr(
-      new RegExp(`\\[upbotd\\] queue item ${badQueueId}: ignored invalid meta meta_json`),
+      new RegExp(`\\[botod\\] queue item ${badQueueId}: ignored invalid meta meta_json`),
       5000,
     );
     expect(stderr).not.toContain("RUNTURNMARKER5d1e");

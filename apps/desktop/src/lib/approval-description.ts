@@ -4,7 +4,7 @@ import {
   classifyToolVerb,
   isSensitivePermission,
   toolOperationTokens,
-} from "@upbot/protocol";
+} from "@boto/protocol";
 
 export function requiresFullReview(approval: Approval) {
   return (

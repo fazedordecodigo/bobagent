@@ -1,4 +1,4 @@
-import { type Approval, type ApprovalDecision, classifyToolOperation } from "@upbot/protocol";
+import { type Approval, type ApprovalDecision, classifyToolOperation } from "@boto/protocol";
 import { type ApprovalResult, decideApproval } from "./approval-decisions";
 import { describeApproval } from "./approval-description";
 import type { DaemonClient } from "./daemon";
@@ -22,8 +22,8 @@ export interface NotificationBridge {
   open(): Promise<void>;
 }
 type Preferences = Pick<Storage, "getItem" | "setItem">;
-export const MUTE_KEY = "upbot.notifications.muteUntil";
-const SEEN_KEY = "upbot.notifications.seen";
+export const MUTE_KEY = "boto.notifications.muteUntil";
+const SEEN_KEY = "boto.notifications.seen";
 const oneLine = (value: string) => value.replace(/\s+/g, " ").trim();
 const limits = { title: 110, body: 180 };
 
@@ -59,7 +59,7 @@ function notificationDetails(detail: string) {
     const args: unknown = JSON.parse(detail);
     if (!args || typeof args !== "object" || Array.isArray(args))
       return {
-        body: "Revise os detalhes no UpBot.",
+        body: "Revise os detalhes no Boto.",
         complete: false,
         recipient: false,
         message: false,
@@ -97,7 +97,7 @@ function notificationDetails(detail: string) {
     };
   } catch {
     return {
-      body: "Revise os detalhes no UpBot.",
+      body: "Revise os detalhes no Boto.",
       complete: false,
       recipient: false,
       message: false,
@@ -115,7 +115,7 @@ export function decisionNotification(
   const title =
     approval.kind === "tool"
       ? describeApproval(approval, botName).description
-      : `${botName} precisa de você no UpBot.`;
+      : `${botName} precisa de você no Boto.`;
   const details = notificationDetails(approval.detail);
   const detected = approval.permission ?? classifyToolOperation(approval.tool ?? "");
   // Non-app read tools are treated as writes: they get the same inline approval
@@ -139,9 +139,9 @@ export function decisionNotification(
           { id: "approve", label: kind === "send" ? "Aprovar e enviar" : "Aprovar e executar" },
           { id: "review", label: "Revisar no app" },
         ]
-    : [{ id: "review", label: "Revisar no UpBot" }];
+    : [{ id: "review", label: "Revisar no Boto" }];
   const body =
-    approval.kind === "tool" ? details.body : "Abra o UpBot para continuar com segurança.";
+    approval.kind === "tool" ? details.body : "Abra o Boto para continuar com segurança.";
   return {
     id: approval.id,
     title: title.length > limits.title ? `${title.slice(0, limits.title - 1)}…` : title,
@@ -361,7 +361,7 @@ export class ApprovalNotifications {
     this.unavailable.add(id);
     this.review(
       "approvals",
-      "Esse pedido não está mais disponível. O UpBot foi fechado antes da decisão.",
+      "Esse pedido não está mais disponível. O Boto foi fechado antes da decisão.",
     );
     await Promise.all([this.bridge.open(), this.bridge.remove(id)]);
   }

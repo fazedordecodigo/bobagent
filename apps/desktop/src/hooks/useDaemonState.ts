@@ -1,4 +1,4 @@
-import type { Agent, AgentStatusInfo, Channel } from "@upbot/protocol";
+import type { Agent, AgentStatusInfo, Channel } from "@boto/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
 import { errorFields, logError } from "../lib/log";

@@ -1,12 +1,12 @@
 {
-  "name": "@upbot/relay",
+  "name": "@boto/relay",
   "version": "0.3.0",
   "license": "MIT",
   "private": true,
   "type": "module",
   "main": "./src/main.ts",
   "dependencies": {
-    "@upbot/protocol": "workspace:*"
+    "@boto/protocol": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "1.4.3"

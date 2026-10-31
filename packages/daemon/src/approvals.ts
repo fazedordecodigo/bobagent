@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
-import type { Approval, ApprovalDecision, ApprovalRule } from "@upbot/protocol";
-import { classifyAppTool, isSensitivePermission } from "@upbot/protocol";
+import type { Approval, ApprovalDecision, ApprovalRule } from "@boto/protocol";
+import { classifyAppTool, isSensitivePermission } from "@boto/protocol";
 import { z } from "zod";
 import type { AppsService } from "./apps";
 import { getSetting, InvalidSettingError, setSetting } from "./db/settings";
@@ -12,8 +12,8 @@ import type { Vault } from "./vault";
 // Approvals gate bot tool calls on the bridge. App permissions cannot be bypassed by
 // allow rules; explicit ask rules still require review. A pending approval blocks the tool call
 // until the user decides; approvals raised by background work (routines, other bots,
-// gateways, group chats) expire after UPBOT_APPROVAL_BACKGROUND_TTL_MS (default 10 min),
-// others after UPBOT_APPROVAL_TTL_MS (default 60 min). The same queue carries secure secret
+// gateways, group chats) expire after BOTO_APPROVAL_BACKGROUND_TTL_MS (default 10 min),
+// others after BOTO_APPROVAL_TTL_MS (default 60 min). The same queue carries secure secret
 // requests (value goes straight to the vault) and browser take-over requests.
 
 type Broadcast = (event: string, data: unknown) => void;
@@ -129,7 +129,7 @@ export class ApprovalService {
           Date.now(),
         );
     } catch (error) {
-      console.error("[upbotd] approval.audit_write_failed", (error as Error).message);
+      console.error("[botod] approval.audit_write_failed", (error as Error).message);
     }
   }
 
@@ -174,8 +174,8 @@ export class ApprovalService {
     const cur = this.runtimes().currentTurn(agentId);
     const background = cur?.background ?? true;
     const ttl = background
-      ? envPositiveNumber("UPBOT_APPROVAL_BACKGROUND_TTL_MS", 10 * 60_000)
-      : envPositiveNumber("UPBOT_APPROVAL_TTL_MS", 60 * 60_000);
+      ? envPositiveNumber("BOTO_APPROVAL_BACKGROUND_TTL_MS", 10 * 60_000)
+      : envPositiveNumber("BOTO_APPROVAL_TTL_MS", 60 * 60_000);
     const now = Date.now();
     const approval: Approval = {
       id: crypto.randomUUID(),
@@ -285,7 +285,7 @@ export class ApprovalService {
             },
             a,
           );
-          console.error("[upbotd] approval.secret_allowlist_read_failed", {
+          console.error("[botod] approval.secret_allowlist_read_failed", {
             approvalId: a.id,
             agentId: a.agentId,
             secretName: name,

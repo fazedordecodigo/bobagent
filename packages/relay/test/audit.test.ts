@@ -92,7 +92,7 @@ describe("relay audit logging", () => {
   const rawLines: string[] = [];
 
   beforeAll(async () => {
-    dataDir = await mkdtemp(join(tmpdir(), "upbot-relay-audit-"));
+    dataDir = await mkdtemp(join(tmpdir(), "boto-relay-audit-"));
     relay = startRelay({
       dataDir,
       port: 0,

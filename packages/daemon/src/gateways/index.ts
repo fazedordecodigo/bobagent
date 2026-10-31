@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { Gateway, GatewayKind, GatewayStatus, Turn } from "@upbot/protocol";
+import type { Gateway, GatewayKind, GatewayStatus, Turn } from "@boto/protocol";
 import type { AgentStore } from "../agents";
 import { type ChatStore, parseQueueMeta } from "../chat-store";
 import type { Broadcast } from "../rpc";
@@ -45,7 +45,7 @@ export function safeGatewayError(message: string, secrets: readonly string[]): s
 
 // Emit bounded, redacted operational telemetry as one JSON line on stderr.
 function logGateway(event: string, ctx: Record<string, unknown>) {
-  console.error("[upbotd]", event, JSON.stringify(ctx));
+  console.error("[botod]", event, JSON.stringify(ctx));
 }
 
 type Row = {
@@ -366,7 +366,7 @@ export class GatewayService {
         id,
         sourceTransport,
         m.chatId,
-        `This UpBot gateway doesn't know you yet. Ask its owner to allow user id ${m.userId}.`,
+        `This Boto gateway doesn't know you yet. Ask its owner to allow user id ${m.userId}.`,
         m.replyTo,
       );
       return;
@@ -413,7 +413,7 @@ export class GatewayService {
         id,
         sourceTransport,
         m.chatId,
-        `UpBot could not deliver this: ${message}`,
+        `Boto could not deliver this: ${message}`,
         m.replyTo,
         { agentId },
       );

@@ -37,7 +37,7 @@ export function NotificationSettings() {
           } else setUntil(muteForHour(localStorage));
         }}
       >
-        {muted ? "Retomar notificações" : "Silenciar o UpBot por 1 hora"}
+        {muted ? "Retomar notificações" : "Silenciar o Boto por 1 hora"}
       </Button>
     </div>
   );

@@ -60,7 +60,7 @@ describe("zipEntries", () => {
   });
 
   test("does not extract symlink or traversal ZIPs", () => {
-    const workspace = mkdtempSync(join(tmpdir(), "upbot-attachments-"));
+    const workspace = mkdtempSync(join(tmpdir(), "boto-attachments-"));
     try {
       for (const [name, zip] of [
         ["symlink.zip", storedZip([{ name: "link", mode: 0o120777 }])],
@@ -77,7 +77,7 @@ describe("zipEntries", () => {
   });
 
   test("does not extract a ZIP with a traversal local filename", () => {
-    const workspace = mkdtempSync(join(tmpdir(), "upbot-attachments-"));
+    const workspace = mkdtempSync(join(tmpdir(), "boto-attachments-"));
     try {
       const zip = storedZip([
         { name: "ok.txt", localName: "../evil.txt", contents: Buffer.from("evil") },
@@ -95,7 +95,7 @@ describe("zipEntries", () => {
   });
 
   test("does not extract embedded local headers after a truncated local size", () => {
-    const workspace = mkdtempSync(join(tmpdir(), "upbot-attachments-"));
+    const workspace = mkdtempSync(join(tmpdir(), "boto-attachments-"));
     try {
       const evilName = "../evil.txt";
       const evilContents = Buffer.from("evil");

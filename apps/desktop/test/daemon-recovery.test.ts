@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Agent } from "@upbot/protocol";
+import type { Agent } from "@boto/protocol";
 import { type Browser, chromium, type Page, type WebSocketRoute } from "playwright-core";
 import {
   DaemonClient,
@@ -23,17 +23,17 @@ const token = `daemon-recovery-test-${crypto.randomUUID()}`;
 const base = "http://localhost:1420/";
 
 beforeAll(async () => {
-  state = mkdtempSync(join(homedir(), "upbot-daemon-recovery-test-"));
+  state = mkdtempSync(join(homedir(), "boto-daemon-recovery-test-"));
   const fake = join(state, "fake");
   mkdirSync(fake);
   daemon = await startDaemon(join(state, "data"), join(state, "bots"), token, {
-    UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+    BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
     FAKE_ACP_STATE_DIR: fake,
-    UPBOT_VAULT_KEY: "ab".repeat(32),
+    BOTO_VAULT_KEY: "ab".repeat(32),
   });
   rpc = await DaemonClient.connect(daemon.port, token);
   bot = (await rpc.request("agents.create", {
-    name: "UpBot",
+    name: "Boto",
     provider: "devin",
     instructions: "Organiza as entregas.",
   })) as Agent;
@@ -81,8 +81,8 @@ async function pageWithBot(): Promise<Page> {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   page.setDefaultTimeout(10000);
   await page.addInitScript((id) => {
-    localStorage.setItem("upbot.agent", id);
-    localStorage.setItem("upbot.view", "chat");
+    localStorage.setItem("boto.agent", id);
+    localStorage.setItem("boto.view", "chat");
   }, bot.id);
   return page;
 }
@@ -121,7 +121,7 @@ test("main window recovers after its initial refresh fails", async () => {
   try {
     await page.goto(`${base}#port=${daemon.port}&token=${token}`);
     const heading = page.getByRole("heading", {
-      name: "Não foi possível conectar ao UpBot",
+      name: "Não foi possível conectar ao Boto",
       exact: true,
     });
     await heading.waitFor();
@@ -178,7 +178,7 @@ test("main window refreshes when the first socket retry connects", async () => {
   try {
     await page.goto(`${base}#port=${port}&token=${token}`);
     const heading = page.getByRole("heading", {
-      name: "Não foi possível conectar ao UpBot",
+      name: "Não foi possível conectar ao Boto",
       exact: true,
     });
     await heading.waitFor();

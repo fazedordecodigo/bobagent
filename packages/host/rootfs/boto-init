@@ -1,8 +1,8 @@
 #!/bin/sh
-# PID 1 inside a UpBot Firecracker microVM. The guest has no network device: everything
-# goes over vsock to the host (CID 2), which runs `upbot-host run`.
-#   vsock 1024 (listen)  -> provider stdio via `upbot-host guest-exec`
-#   /run/upbot/bridge.sock -> host vsock 5000 (upbot MCP bridge)
+# PID 1 inside a Boto Firecracker microVM. The guest has no network device: everything
+# goes over vsock to the host (CID 2), which runs `boto-host run`.
+#   vsock 1024 (listen)  -> provider stdio via `boto-host guest-exec`
+#   /run/boto/bridge.sock -> host vsock 5000 (boto MCP bridge)
 #   127.0.0.1:3128      -> host vsock 3128 (HTTPS CONNECT proxy, public destinations only)
 set -eu
 export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
@@ -12,7 +12,7 @@ mount -t devtmpfs dev /dev 2>/dev/null || true
 mount -t tmpfs tmpfs /run
 mkdir -p /dev/pts /tmp /workspace && mount -t devpts devpts /dev/pts
 mount -t tmpfs tmpfs /tmp
-mkdir -p /run/upbot
+mkdir -p /run/boto
 if [ -e /dev/vdb ]; then
   mkdir -p /persist
   mount -t ext4 /dev/vdb /persist
@@ -20,11 +20,11 @@ if [ -e /dev/vdb ]; then
   mount --bind /persist/workspace /workspace
   mount --bind /persist/root /root
 fi
-hostname upbot-vm
+hostname boto-vm
 ip link set lo up 2>/dev/null || true
-export HOME=/root UPBOT_GUEST_PROXY=http://127.0.0.1:3128
-export UPBOT_GUEST_BRIDGE_SOCKET=/run/upbot/bridge.sock
-socat UNIX-LISTEN:/run/upbot/bridge.sock,fork,mode=600 VSOCK-CONNECT:2:5000 &
+export HOME=/root BOTO_GUEST_PROXY=http://127.0.0.1:3128
+export BOTO_GUEST_BRIDGE_SOCKET=/run/boto/bridge.sock
+socat UNIX-LISTEN:/run/boto/bridge.sock,fork,mode=600 VSOCK-CONNECT:2:5000 &
 socat TCP-LISTEN:3128,bind=127.0.0.1,fork,reuseaddr VSOCK-CONNECT:2:3128 &
 cd /workspace
-exec socat -t 10 VSOCK-LISTEN:1024,fork,reuseaddr EXEC:"bun /opt/upbot/upbot-host.ts guest-exec"
+exec socat -t 10 VSOCK-LISTEN:1024,fork,reuseaddr EXEC:"bun /opt/boto/boto-host.ts guest-exec"

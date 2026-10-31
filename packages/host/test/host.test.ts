@@ -21,7 +21,7 @@ import {
 
 const MAIN = join(import.meta.dir, "../src/main.ts");
 
-describe("upbot-host", () => {
+describe("boto-host", () => {
   test("readFirstLine keeps the bytes after the spec", async () => {
     const s = new PassThrough();
     const p = readFirstLine(s);
@@ -62,22 +62,24 @@ describe("upbot-host", () => {
     expect(await proxyTarget("8.8.8.8")).toBe("8.8.8.8");
   });
 
-  test("guest provider env strips inherited internal UpBot values", () => {
+  test("guest provider env strips inherited internal Boto values", () => {
     const env = buildGuestProviderEnv(
       {
-        UPBOT_GUEST_PROXY: "http://127.0.0.1:3128",
-        UPBOT_GUEST_BRIDGE_SOCKET: "/run/upbot/bridge.sock",
-        UPBOT_SENTINEL_TEST: "leak",
+        BOTO_GUEST_PROXY: "http://127.0.0.1:3128",
+        BOTO_GUEST_BRIDGE_SOCKET: "/run/boto/bridge.sock",
+        BOTO_SENTINEL_TEST: "leak",
+        UPBOT_SENTINEL_TEST: "legacy-leak",
         HOME: "/root",
         PATH: "/usr/bin",
       },
-      { UPBOT_BRIDGE_TOKEN: "mcp-token", CUSTOM_VALUE: "kept" },
+      { BOTO_BRIDGE_TOKEN: "mcp-token", CUSTOM_VALUE: "kept" },
       "http://127.0.0.1:3128",
     );
-    expect(env.UPBOT_GUEST_PROXY).toBeUndefined();
-    expect(env.UPBOT_GUEST_BRIDGE_SOCKET).toBeUndefined();
+    expect(env.BOTO_GUEST_PROXY).toBeUndefined();
     expect(env.UPBOT_SENTINEL_TEST).toBeUndefined();
-    expect(env.UPBOT_BRIDGE_TOKEN).toBe("mcp-token");
+    expect(env.BOTO_GUEST_BRIDGE_SOCKET).toBeUndefined();
+    expect(env.BOTO_SENTINEL_TEST).toBeUndefined();
+    expect(env.BOTO_BRIDGE_TOKEN).toBe("mcp-token");
     expect(env.CUSTOM_VALUE).toBe("kept");
     expect(env.HOME).toBe("/root");
     expect(env.NO_COLOR).toBe("1");
@@ -206,14 +208,14 @@ describe("upbot-host", () => {
         })}\n`,
         env: {
           ...process.env,
-          UPBOT_BRIDGE_SOCKET: join(dir, "missing.sock"),
-          UPBOT_BRIDGE_TOKEN: "sentinel-token",
+          BOTO_BRIDGE_SOCKET: join(dir, "missing.sock"),
+          BOTO_BRIDGE_TOKEN: "sentinel-token",
         },
         encoding: "utf8",
         timeout: 15000,
       });
       expect(r.stdout).toContain('"isError":true');
-      expect(r.stderr).toContain("upbot-host bridge: method=tools/call tool=unlisted");
+      expect(r.stderr).toContain("boto-host bridge: method=tools/call tool=unlisted");
       expect(r.stderr).not.toContain("sentinel-token");
       expect(r.stderr).not.toContain(secretName);
     } finally {
@@ -237,8 +239,8 @@ describe("upbot-host", () => {
     const child = spawn("bun", [MAIN, "bridge"], {
       env: {
         ...process.env,
-        UPBOT_BRIDGE_SOCKET: socket,
-        UPBOT_BRIDGE_TOKEN: token,
+        BOTO_BRIDGE_SOCKET: socket,
+        BOTO_BRIDGE_TOKEN: token,
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -344,7 +346,7 @@ describe("upbot-host", () => {
   test("preflight reports readiness without pretending", () => {
     const root = mkdtempSync(join(tmpdir(), "host-root-"));
     const r = spawnSync("bun", [MAIN, "preflight"], {
-      env: { ...process.env, UPBOT_HOST_ROOT: root, UPBOT_FIRECRACKER_BIN: "/nonexistent" },
+      env: { ...process.env, BOTO_HOST_ROOT: root, BOTO_FIRECRACKER_BIN: "/nonexistent" },
       encoding: "utf8",
     });
     expect(r.status).toBe(0);
@@ -387,7 +389,7 @@ describe("upbot-host", () => {
     const root = mkdtempSync(join(tmpdir(), "host-root-"));
     const r = spawnSync("bun", [MAIN, "run"], {
       input: `${JSON.stringify({ agentId: "a", isolation: "firecracker", cmd: ["true"] })}\n`,
-      env: { ...process.env, UPBOT_HOST_ROOT: root, UPBOT_FIRECRACKER_BIN: "" },
+      env: { ...process.env, BOTO_HOST_ROOT: root, BOTO_FIRECRACKER_BIN: "" },
       encoding: "utf8",
     });
     expect(r.status).not.toBe(0);
@@ -402,14 +404,14 @@ describe("upbot-host", () => {
           input: `${JSON.stringify({ agentId: "a", isolation: "firecracker", cmd: ["true"] })}\n`,
           env: {
             ...process.env,
-            UPBOT_HOST_ROOT: root,
-            UPBOT_FIRECRACKER_BIN: "",
-            UPBOT_VM_BOOT_TIMEOUT_MS: value,
+            BOTO_HOST_ROOT: root,
+            BOTO_FIRECRACKER_BIN: "",
+            BOTO_VM_BOOT_TIMEOUT_MS: value,
           },
           encoding: "utf8",
         });
         expect(r.status).not.toBe(0);
-        expect(r.stderr).toContain("UPBOT_VM_BOOT_TIMEOUT_MS must be a positive number");
+        expect(r.stderr).toContain("BOTO_VM_BOOT_TIMEOUT_MS must be a positive number");
       }
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -428,7 +430,7 @@ describe("upbot-host", () => {
           "console.log(process.cwd()); process.stdin.pipe(process.stdout)",
         ],
       })}\nhello`,
-      env: { ...process.env, UPBOT_HOST_ROOT: root },
+      env: { ...process.env, BOTO_HOST_ROOT: root },
       encoding: "utf8",
     });
     expect(r.status).toBe(0);

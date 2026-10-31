@@ -1,4 +1,4 @@
-import type { Agent } from "@upbot/protocol";
+import type { Agent } from "@boto/protocol";
 import type { AgentOverview } from "../hooks/useOverview";
 import { MonoAv, Pill, type UiStatus } from "../lib/ui";
 

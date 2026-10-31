@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "
 setDefaultTimeout(30000);
 
 import { rmSync } from "node:fs";
-import type { Gateway } from "@upbot/protocol";
+import type { Gateway } from "@boto/protocol";
 import { DaemonClient, type DaemonHandle, startDaemon, tmp, waitForExit } from "./helpers";
 
 const TOKEN = `gw-shutdown-${crypto.randomUUID()}`;
@@ -134,10 +134,10 @@ describe("gateway transport cleanup on daemon shutdown", () => {
     dataDir = tmp("gateway-shutdown-data-");
     agentsRoot = tmp("gateway-shutdown-agents-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      UPBOT_VAULT_KEY: "cd".repeat(32),
-      UPBOT_TELEGRAM_API: base,
-      UPBOT_SLACK_API: `${base}/slack`,
-      UPBOT_DISCORD_API: `${base}/discord`,
+      BOTO_VAULT_KEY: "cd".repeat(32),
+      BOTO_TELEGRAM_API: base,
+      BOTO_SLACK_API: `${base}/slack`,
+      BOTO_DISCORD_API: `${base}/discord`,
     });
     client = await DaemonClient.connect(daemon.port, TOKEN);
   });

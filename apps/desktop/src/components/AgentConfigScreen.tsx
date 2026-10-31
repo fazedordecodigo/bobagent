@@ -7,7 +7,7 @@ import type {
   EmailAccount,
   ProviderId,
   Routine,
-} from "@upbot/protocol";
+} from "@boto/protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useLayerFocus } from "../hooks/useLayerFocus";
@@ -31,6 +31,7 @@ import s from "./AgentConfigScreen.module.css";
 import { PermissionNotice } from "./AgentSettings";
 import { Button, Field, SegmentedControl, Switch } from "./ds/controls";
 import {
+  BotoSimboloCurrentcolorIcon,
   CalIcon,
   ChartIcon,
   ChevIcon,
@@ -45,7 +46,6 @@ import {
   PlusIcon,
   ReceiptIcon,
   SheetIcon,
-  UpbotSimboloCurrentcolorIcon,
 } from "./ds/icons";
 
 const PROVIDERS: ProviderId[] = [
@@ -85,7 +85,7 @@ const EMPTY: AgentConfig = {
 function Mark({ icon, size = 24 }: { icon: AgentIconId; size?: number }) {
   const props = { width: size, height: size };
   return icon === "sym" ? (
-    <UpbotSimboloCurrentcolorIcon {...props} />
+    <BotoSimboloCurrentcolorIcon {...props} />
   ) : icon === "mail" ? (
     <MailIcon {...props} />
   ) : icon === "receipt" ? (

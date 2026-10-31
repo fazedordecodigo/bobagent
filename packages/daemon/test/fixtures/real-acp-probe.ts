@@ -21,7 +21,7 @@ const stream = acp.ndJsonStream(
   Writable.toWeb(child.stdin!) as WritableStream<Uint8Array>,
   Readable.toWeb(child.stdout!) as unknown as ReadableStream<Uint8Array>,
 );
-const conn = acp.client({ name: "upbot-acp-probe" }).connect(stream);
+const conn = acp.client({ name: "boto-acp-probe" }).connect(stream);
 conn.closed.catch(() => {});
 
 async function bounded<T>(name: string, promise: Promise<T>): Promise<T> {
@@ -54,7 +54,7 @@ try {
         fs: { readTextFile: false, writeTextFile: false },
         terminal: false,
       },
-      clientInfo: { name: "upbot-acp-probe", version: VERSION },
+      clientInfo: { name: "boto-acp-probe", version: VERSION },
     } as never),
   )) as Record<string, unknown>;
   await conn.agent.notify("initialized");

@@ -71,7 +71,7 @@ export function spawnEnv(
   const env: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(process.env)) {
     if (platform === "win32" && k.toLowerCase() === "path") continue;
-    if (!k.startsWith("UPBOT_")) env[k] = v;
+    if (!k.startsWith("BOTO_") && !k.startsWith("UPBOT_")) env[k] = v;
   }
   for (const [k, v] of Object.entries(extra ?? {})) {
     if (platform === "win32" && k.toLowerCase() === "path") continue;

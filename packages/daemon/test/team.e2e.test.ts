@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, TeamMessage, TeamStatus, VaultEntry } from "@upbot/protocol";
+import type { Agent, TeamMessage, TeamStatus, VaultEntry } from "@boto/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -52,9 +52,9 @@ describe("teams via relay e2e", () => {
     dirs.push(d, a, s);
     const token = `tm-${crypto.randomUUID()}`;
     const h = await startDaemon(d, a, token, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: s,
-      UPBOT_VAULT_KEY: "ef".repeat(32),
+      BOTO_VAULT_KEY: "ef".repeat(32),
       ...env,
     });
     daemons.push(h);
@@ -214,7 +214,7 @@ describe("teams via relay e2e", () => {
 
     beforeAll(async () => {
       cara = await daemon(
-        { UPBOT_ACP_COMMAND_CURSOR: JSON.stringify(["upbot-missing-provider-cli"]) },
+        { BOTO_ACP_COMMAND_CURSOR: JSON.stringify(["boto-missing-provider-cli"]) },
         caraLog,
       );
       caraSlow = (await cara.request("agents.create", {
@@ -239,7 +239,7 @@ describe("teams via relay e2e", () => {
         return s.members.find((x) => x.id === caraMemberId)?.agents.length === 2 ? true : undefined;
       });
       // A requester whose unanswered requests expire after 1 s instead of 30 min.
-      dan = await daemon({ UPBOT_TEAM_REPLY_TTL_MS: "1000" });
+      dan = await daemon({ BOTO_TEAM_REPLY_TTL_MS: "1000" });
       const d = await invite("Dan");
       danMemberId = d.id;
       await dan.request("team.connect", { url: relayUrl, token: d.token });
@@ -259,7 +259,7 @@ describe("teams via relay e2e", () => {
         const m = await bobOut(sent.requestId);
         return m?.status === "failed" ? m : undefined;
       });
-      expect(failed.reply).toContain("upbot-missing-provider-cli");
+      expect(failed.reply).toContain("boto-missing-provider-cli");
       const inbound = await until(async () => {
         const m = await caraIn(sent.requestId);
         return m?.status === "failed" ? m : undefined;
@@ -268,7 +268,7 @@ describe("teams via relay e2e", () => {
       await until(async () => (caraLog.text.includes("team request rejected") ? true : undefined));
       const line = caraLog.text.split("\n").find((l) => l.includes("team request rejected"));
       expect(line).toBe(
-        `[upbotd] team request rejected requestId=${sent.requestId} agentId=${caraBroken.id} reason=provider_unavailable`,
+        `[botod] team request rejected requestId=${sent.requestId} agentId=${caraBroken.id} reason=provider_unavailable`,
       );
     });
 
@@ -285,7 +285,7 @@ describe("teams via relay e2e", () => {
           if (m.type === "reply") resolve(m);
         };
       });
-      const requestId = "forged\n[upbotd] fake line";
+      const requestId = "forged\n[botod] fake line";
       ws.send(
         JSON.stringify({
           type: "send",
@@ -297,7 +297,7 @@ describe("teams via relay e2e", () => {
       expect((await reply).status).toBe("failed");
       ws.close();
       await until(async () => (caraLog.text.includes("requestId=invalid") ? true : undefined));
-      expect(caraLog.text).not.toContain("[upbotd] fake line");
+      expect(caraLog.text).not.toContain("[botod] fake line");
       expect(caraLog.text).not.toContain("forged");
     });
 
@@ -347,7 +347,7 @@ describe("teams via relay e2e", () => {
       );
       const line = caraLog.text.split("\n").find((l) => l.includes("team reply not delivered"));
       expect(line).toBe(
-        `[upbotd] team reply not delivered requestId=${sent.requestId} agentId=${caraSlow.id} memberId=${danMemberId} status=completed`,
+        `[botod] team reply not delivered requestId=${sent.requestId} agentId=${caraSlow.id} memberId=${danMemberId} status=completed`,
       );
       expect(caraLog.text).not.toContain("watchdog-delay");
       expect(caraLog.text).not.toContain("token=");
@@ -366,11 +366,11 @@ describe("teams via relay e2e", () => {
   test("requests left pending past the TTL fail on daemon start, before any relay connect", async () => {
     const [d, a, s] = [tmp("tm-data-"), tmp("tm-agents-"), tmp("tm-fake-")];
     dirs.push(d, a, s);
-    const env = { FAKE_ACP_STATE_DIR: s, UPBOT_VAULT_KEY: "ef".repeat(32) };
+    const env = { FAKE_ACP_STATE_DIR: s, BOTO_VAULT_KEY: "ef".repeat(32) };
     const first = await startDaemon(d, a, `tm-${crypto.randomUUID()}`, env);
     first.proc.kill("SIGTERM");
     await first.proc.exited;
-    const db = new Database(join(d, "upbot.db"));
+    const db = new Database(join(d, "boto.db"));
     const insert = db.query(
       `INSERT INTO team_messages (id, request_id, direction, member_id, member_name, agent_id, agent_name, text, status, created_at)
        VALUES (?, ?, ?, 'm1', 'Ana', 'a1', 'Helper', 'hi', 'pending', ?)`,
@@ -381,7 +381,7 @@ describe("teams via relay e2e", () => {
     db.close();
     const token = `tm-${crypto.randomUUID()}`;
     // The periodic check runs every 30 s for this TTL, so only the startup pass can expire it in time.
-    const h = await startDaemon(d, a, token, { ...env, UPBOT_TEAM_REPLY_TTL_MS: "60000" });
+    const h = await startDaemon(d, a, token, { ...env, BOTO_TEAM_REPLY_TTL_MS: "60000" });
     daemons.push(h);
     const c = await DaemonClient.connect(h.port, token);
     clients.push(c);

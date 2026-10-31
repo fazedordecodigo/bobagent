@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, ChatItem, ConnectedApp, Turn } from "@upbot/protocol";
+import type { Agent, ChatItem, ConnectedApp, Turn } from "@boto/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -27,8 +27,8 @@ describe("credential-safe app diagnostics through the real daemon", () => {
     dirs = [tmp("diagnostic-data-"), tmp("diagnostic-agents-"), tmp("diagnostic-acp-")];
     const auth = `diagnostic-${crypto.randomUUID()}`;
     daemon = await startDaemon(dirs[0]!, dirs[1]!, auth, {
-      UPBOT_VAULT_KEY: "ef".repeat(32),
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_VAULT_KEY: "ef".repeat(32),
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: dirs[2]!,
     });
     pump = (async () => {
@@ -118,7 +118,7 @@ describe("credential-safe app diagnostics through the real daemon", () => {
         expect(
           failed.error?.includes(mode === "list-error" ? "tools/list" : "transport initialization"),
         ).toBe(true);
-        expect(stderr.includes("[upbotd] app start failed")).toBe(true);
+        expect(stderr.includes("[botod] app start failed")).toBe(true);
       } finally {
         await client.request("apps.delete", { id: app.id });
       }
@@ -201,7 +201,7 @@ describe("credential-safe app diagnostics through the real daemon", () => {
       expectNoFragments(JSON.stringify(failed));
       expectNoFragments(output);
       expectNoFragments(stderr);
-      expect(stderr.includes("[upbotd] app MCP server exited")).toBe(true);
+      expect(stderr.includes("[botod] app MCP server exited")).toBe(true);
     } finally {
       await client.request("apps.delete", { id: app.id });
     }

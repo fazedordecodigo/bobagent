@@ -1,5 +1,5 @@
 {
-  "name": "@upbot/daemon",
+  "name": "@boto/daemon",
   "version": "0.3.0",
   "license": "MIT",
   "private": true,
@@ -8,7 +8,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "1.9.0",
     "@modelcontextprotocol/sdk": "1.30.0",
-    "@upbot/protocol": "workspace:*",
+    "@boto/protocol": "workspace:*",
     "cross-spawn": "7.0.6",
     "imapflow": "1.7.6",
     "mailparser": "3.9.16",

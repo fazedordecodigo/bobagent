@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import type { Agent, Routine, Turn } from "@upbot/protocol";
+import type { Agent, Routine, Turn } from "@boto/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -35,7 +35,7 @@ describe("daemon operational logging", () => {
       agentsRoot,
       TOKEN,
       {
-        UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+        BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
         FAKE_ACP_STATE_DIR: stateDir,
       },
       true,
@@ -73,9 +73,9 @@ describe("daemon operational logging", () => {
       session.params as {
         mcpServers: { name: string; env: { name: string; value: string }[] }[];
       }
-    ).mcpServers.find((server) => server.name === "upbot");
-    if (!spec) throw new Error("upbot MCP server was not logged");
-    const tokenEntry = spec.env.find((entry) => entry.name === "UPBOT_BRIDGE_TOKEN");
+    ).mcpServers.find((server) => server.name === "boto");
+    if (!spec) throw new Error("boto MCP server was not logged");
+    const tokenEntry = spec.env.find((entry) => entry.name === "BOTO_BRIDGE_TOKEN");
     if (!tokenEntry) throw new Error("bridge token was not logged");
     const bridgeToken = tokenEntry.value;
     const secret = `leak-${crypto.randomUUID()}`;
@@ -153,7 +153,7 @@ describe("daemon operational logging", () => {
     (daemon.proc.stdin as { end: () => void }).end();
     await waitForExit(daemon.proc, 5000);
     const stderr = await stderrText(daemon);
-    const rejectionLogs = stderr.match(/\[upbotd\] auth\.rejected \{[^}]*\}/g) ?? [];
+    const rejectionLogs = stderr.match(/\[botod\] auth\.rejected \{[^}]*\}/g) ?? [];
     expect(stderr).toContain(routineA.id);
     expect(stderr).toContain(routineB.id);
     expect(rejectionLogs.filter((line) => line.includes(routineA.id))).toHaveLength(1);

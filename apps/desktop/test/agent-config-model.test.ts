@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { Routine } from "@upbot/protocol";
+import type { Routine } from "@boto/protocol";
 import type { AgentConfig, DraftRoutine } from "../src/lib/agent-config";
 import {
   abbreviatePath,
@@ -103,8 +103,8 @@ test("routine time validation accepts single-digit hours and rejects out-of-rang
 });
 
 test("workspace paths abbreviate Unix and Windows user homes", () => {
-  expect(abbreviatePath("/Users/ana/UpBot/agents/a1")).toBe("~/UpBot/agents/a1");
-  expect(abbreviatePath("C:\\Users\\Ana\\UpBot\\agents\\a1")).toBe("~\\UpBot\\agents\\a1");
+  expect(abbreviatePath("/Users/ana/Boto/agents/a1")).toBe("~/Boto/agents/a1");
+  expect(abbreviatePath("C:\\Users\\Ana\\Boto\\agents\\a1")).toBe("~\\Boto\\agents\\a1");
 });
 
 test("mutation plan skips old-provider config and diffs memories, routines, and computer access", () => {

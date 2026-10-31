@@ -8,8 +8,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { Agent } from "@upbot/protocol";
-import { ProviderId } from "@upbot/protocol";
+import type { Agent } from "@boto/protocol";
+import { ProviderId } from "@boto/protocol";
 import type { AgentStore } from "./agents";
 import { type ApprovalService, GateRejection } from "./approvals";
 import type { AppsService } from "./apps";
@@ -28,8 +28,8 @@ import type { SkillLibrary } from "./skills";
 import type { SubagentService } from "./subagents";
 import type { Vault } from "./vault";
 
-// Local MCP bridge: each provider session gets a `upbot` stdio MCP server
-// (`upbotd mcp-bridge`) that forwards tool calls to POST /bridge with a
+// Local MCP bridge: each provider session gets a `boto` stdio MCP server
+// (`botod mcp-bridge`) that forwards tool calls to POST /bridge with a
 // per-agent token, so agents can message each other and hand over files.
 
 export const MAX_HOPS = 6;
@@ -42,13 +42,13 @@ export const BRIDGE_TOOLS = [
   {
     name: "list_agents",
     description:
-      "List the other UpBot agents you can message (id, name, provider, status). Your own entry is marked you=true.",
+      "List the other Boto agents you can message (id, name, provider, status). Your own entry is marked you=true.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
     name: "send_message",
     description:
-      "Send a message to another UpBot agent. It is queued and the agent handles it as a new turn; replies arrive as messages to you.",
+      "Send a message to another Boto agent. It is queued and the agent handles it as a new turn; replies arrive as messages to you.",
     inputSchema: {
       type: "object",
       properties: {
@@ -76,7 +76,7 @@ export const BRIDGE_TOOLS = [
   },
   {
     name: "list_channels",
-    description: "List the UpBot channels you belong to, with owner, members and status.",
+    description: "List the Boto channels you belong to, with owner, members and status.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -207,7 +207,7 @@ export const BRIDGE_TOOLS = [
   },
   {
     name: "create_agent",
-    description: "Create a new UpBot agent with its own workspace.",
+    description: "Create a new Boto agent with its own workspace.",
     inputSchema: {
       type: "object",
       properties: {
@@ -272,7 +272,7 @@ export const BRIDGE_TOOLS = [
   {
     name: "request_takeover",
     description:
-      "Ask the user to take over the UpBot browser window for sign-in, 2FA, CAPTCHA, payment or identity checks. Blocks until the user clicks Done.",
+      "Ask the user to take over the Boto browser window for sign-in, 2FA, CAPTCHA, payment or identity checks. Blocks until the user clicks Done.",
     inputSchema: {
       type: "object",
       properties: { reason: { type: "string" } },
@@ -353,7 +353,7 @@ export const BRIDGE_TOOLS = [
     [
       [
         "browser_open",
-        "Open an http(s) URL in your own tab of the UpBot browser.",
+        "Open an http(s) URL in your own tab of the Boto browser.",
         { url: { type: "string" } },
         ["url"],
       ],
@@ -522,12 +522,12 @@ export class Bridge {
     const { command, args } = bridgeCommand();
     return [
       {
-        name: "upbot",
+        name: "boto",
         command,
         args,
         env: {
-          UPBOT_BRIDGE_URL: `http://127.0.0.1:${this.port}/bridge`,
-          UPBOT_BRIDGE_TOKEN: this.tokenFor(agentId),
+          BOTO_BRIDGE_URL: `http://127.0.0.1:${this.port}/bridge`,
+          BOTO_BRIDGE_TOKEN: this.tokenFor(agentId),
         },
       },
     ];
@@ -536,7 +536,7 @@ export class Bridge {
   async handle(agentId: string, body: Json): Promise<Json> {
     if (body.method === "tools/list") {
       const appTools = await this.apps?.toolsFor(agentId).catch((e) => {
-        console.error("[upbotd] bridge tools/list failed", { agentId, ...errorDiagnostics(e) });
+        console.error("[botod] bridge tools/list failed", { agentId, ...errorDiagnostics(e) });
         return [];
       });
       return { tools: [...BRIDGE_TOOLS, ...(appTools ?? [])] };
@@ -561,7 +561,7 @@ export class Bridge {
       const knownTool =
         BRIDGE_TOOLS.some((t) => t.name === name) ||
         (isApp && (this.apps?.hasAppTool?.(name) ?? false));
-      console.error("[upbotd] bridge tool failed", {
+      console.error("[botod] bridge tool failed", {
         agentId,
         tool: knownTool ? name : "<unregistered>",
         isApp,
@@ -737,7 +737,7 @@ export class Bridge {
           ...opt("file"),
         });
         return {
-          text: `published "${page.title}" (id ${page.id}, version ${page.version}); the user can open it in UpBot → Pages. File: ${page.path}`,
+          text: `published "${page.title}" (id ${page.id}, version ${page.version}); the user can open it in Boto → Pages. File: ${page.path}`,
         };
       }
       case "list_pages": {
@@ -815,7 +815,7 @@ export class Bridge {
           inReplyTo,
         });
         return {
-          text: `Draft ${d.id} is waiting for the user's review in UpBot. It is NOT sent; the user will Send or Discard it.`,
+          text: `Draft ${d.id} is waiting for the user's review in Boto. It is NOT sent; the user will Send or Discard it.`,
         };
       }
       case "email_draft_status": {

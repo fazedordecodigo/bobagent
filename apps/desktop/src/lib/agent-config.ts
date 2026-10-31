@@ -1,4 +1,4 @@
-import type { Agent, AgentAvatar, Memory, ProviderId, Routine } from "@upbot/protocol";
+import type { Agent, AgentAvatar, Memory, ProviderId, Routine } from "@boto/protocol";
 
 export type Effort = "low" | "medium" | "high";
 export type RoutineWhen = "demand" | "30m" | "daily" | "weekly" | "custom";

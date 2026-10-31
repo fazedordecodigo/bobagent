@@ -1,4 +1,4 @@
-import type { Agent } from "@upbot/protocol";
+import type { Agent } from "@boto/protocol";
 import { useCallback, useEffect, useState } from "react";
 import { useChatApi } from "../hooks/useChat";
 import type { AgentOverview } from "../hooks/useOverview";

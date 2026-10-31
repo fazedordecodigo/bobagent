@@ -1,5 +1,5 @@
 {
-  "name": "@upbot/protocol",
+  "name": "@boto/protocol",
   "version": "0.0.0",
   "license": "MIT",
   "private": true,

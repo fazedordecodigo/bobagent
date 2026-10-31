@@ -1,4 +1,4 @@
-import type { Agent, EmailAccount, EmailDraft, EmailProvider } from "@upbot/protocol";
+import type { Agent, EmailAccount, EmailDraft, EmailProvider } from "@boto/protocol";
 import { useState } from "react";
 import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { DaemonClient } from "../lib/daemon";

@@ -1,4 +1,4 @@
-import type { AgentStatusInfo, ChatItem, QueueState, Turn } from "@upbot/protocol";
+import type { AgentStatusInfo, ChatItem, QueueState, Turn } from "@boto/protocol";
 import {
   createContext,
   type ReactNode,

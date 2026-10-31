@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, ChatItem, ProviderId, Turn } from "@upbot/protocol";
+import type { Agent, ChatItem, ProviderId, Turn } from "@boto/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -79,11 +79,11 @@ describe("chat e2e (fake acp agent)", () => {
     agentsRoot = tmp("oa2-agents-");
     stateDir = tmp("oa2-fake-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
-      UPBOT_ACP_COMMAND_CURSOR: JSON.stringify(["bun", FAKE_AGENT]),
-      UPBOT_ACP_COMMAND_GROK: JSON.stringify(["bun", FAKE_AGENT]),
-      UPBOT_ACP_COMMAND_GEMINI: JSON.stringify(["definitely-not-a-binary-oa"]),
-      UPBOT_CANCEL_GRACE_MS: "1000",
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_CURSOR: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_GROK: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_GEMINI: JSON.stringify(["definitely-not-a-binary-oa"]),
+      BOTO_CANCEL_GRACE_MS: "1000",
       FAKE_ACP_STATE_DIR: stateDir,
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
@@ -126,12 +126,12 @@ describe("chat e2e (fake acp agent)", () => {
     const statuses = await c.request("agents.statuses", {});
     expect(statuses[agent.id]?.status).toBe("idle");
 
-    // env leak check: the provider child saw no UPBOT_* var and no token
+    // env leak check: the provider child saw no BOTO_* var and no token
     const envDump = JSON.parse(readFileSync(join(stateDir, "env.json"), "utf8")) as {
       keys: string[];
       env: Record<string, string>;
     };
-    expect(envDump.keys.some((k) => k.startsWith("UPBOT_"))).toBe(false);
+    expect(envDump.keys.some((k) => k.startsWith("BOTO_"))).toBe(false);
     expect(JSON.stringify(envDump.env)).not.toContain(TOKEN);
   });
 
@@ -149,7 +149,7 @@ describe("chat e2e (fake acp agent)", () => {
     await Bun.sleep(350); // > TEXT_FLUSH_MS: the timed flush must have persisted emitted chunks
 
     // the background timer persisted without any RPC
-    const ro = new Database(join(dataDir, "upbot.db"), { readonly: true });
+    const ro = new Database(join(dataDir, "boto.db"), { readonly: true });
     const row = ro
       .query("SELECT data_json FROM items WHERE agent_id = ? AND kind = 'agent_message'")
       .get(agent.id) as { data_json: string };
@@ -230,7 +230,7 @@ describe("chat e2e (fake acp agent)", () => {
     const prompts = log
       .filter((l) => l.method === "session/prompt")
       .map((l) => (l.params as { prompt: { text: string }[] }).prompt[0]?.text ?? "");
-    expect(prompts[prompts.length - 1]).toMatch(/^<upbot_context>\n/);
+    expect(prompts[prompts.length - 1]).toMatch(/^<boto_context>\n/);
     expect(prompts[prompts.length - 1]).toMatch(/Shared workspace for all bots: .*Workspace/);
     expect(prompts[prompts.length - 1]).toContain("<agent_instructions>\n");
     expect(prompts[prompts.length - 1]).toContain("Always answer in lowercase.");
@@ -364,7 +364,7 @@ describe("chat e2e (fake acp agent)", () => {
     const t3 = await waitTurnEnd(agent.id, 10000);
     expect(t3.status).toBe("cancelled");
     await waitForPidDead(pid);
-  });
+  }, 15_000);
 
   test("send during a running turn enqueues instead of busy", async () => {
     const agent = await newAgent("Busy", "devin");
@@ -449,11 +449,11 @@ describe("chat e2e (fake acp agent)", () => {
     daemon.proc.kill("SIGKILL");
     await daemon.proc.exited;
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
-      UPBOT_ACP_COMMAND_CURSOR: JSON.stringify(["bun", FAKE_AGENT]),
-      UPBOT_ACP_COMMAND_GROK: JSON.stringify(["bun", FAKE_AGENT]),
-      UPBOT_ACP_COMMAND_GEMINI: JSON.stringify(["definitely-not-a-binary-oa"]),
-      UPBOT_CANCEL_GRACE_MS: "1000",
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_CURSOR: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_GROK: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_GEMINI: JSON.stringify(["definitely-not-a-binary-oa"]),
+      BOTO_CANCEL_GRACE_MS: "1000",
       FAKE_ACP_STATE_DIR: stateDir,
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
@@ -558,7 +558,7 @@ describe("chat e2e (fake acp agent)", () => {
     const root2 = tmp("oa2-stall-agents-");
     const state2 = tmp("oa2-stall-fake-");
     const d = await startDaemon(dir2, root2, TOKEN, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: state2,
       FAKE_ACP_NEW_DELAY_MS: "600",
     });
@@ -651,7 +651,7 @@ describe("chat e2e (fake acp agent)", () => {
   test("v2 database migrates to v3 preserving agent model into config", async () => {
     const dir = tmp("oa2-v2-data-");
     const root = tmp("oa2-v2-agents-");
-    const db = new Database(join(dir, "upbot.db"));
+    const db = new Database(join(dir, "boto.db"));
     const { migrations: MIGRATIONS } = await import("../src/db/migrations");
     db.exec("BEGIN");
     db.exec(
@@ -670,8 +670,8 @@ describe("chat e2e (fake acp agent)", () => {
     ).run("agent-v2", "Two", join(root, "agent-v2"), Date.now(), Date.now());
     db.close();
     const d = await startDaemon(dir, root, TOKEN, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
-      UPBOT_ACP_COMMAND_CURSOR: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_CURSOR: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
     });
     try {
@@ -684,7 +684,7 @@ describe("chat e2e (fake acp agent)", () => {
       d.proc.kill("SIGKILL");
       await d.proc.exited;
     }
-    const db2 = new Database(join(dir, "upbot.db"), { readonly: true });
+    const db2 = new Database(join(dir, "boto.db"), { readonly: true });
     expect(
       (db2.query("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number }).n,
     ).toBe(21);
@@ -739,11 +739,11 @@ describe("chat e2e (fake acp agent)", () => {
     for (const pid of pidsBefore) await waitForPidDead(pid);
 
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
-      UPBOT_ACP_COMMAND_CURSOR: JSON.stringify(["bun", FAKE_AGENT]),
-      UPBOT_ACP_COMMAND_GROK: JSON.stringify(["bun", FAKE_AGENT]),
-      UPBOT_ACP_COMMAND_GEMINI: JSON.stringify(["definitely-not-a-binary-oa"]),
-      UPBOT_CANCEL_GRACE_MS: "1000",
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_CURSOR: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_GROK: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_GEMINI: JSON.stringify(["definitely-not-a-binary-oa"]),
+      BOTO_CANCEL_GRACE_MS: "1000",
       FAKE_ACP_STATE_DIR: stateDir,
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
@@ -778,11 +778,11 @@ describe("chat e2e (fake acp agent)", () => {
     await waitForPidDead(orphanPid);
 
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
-      UPBOT_ACP_COMMAND_CURSOR: JSON.stringify(["bun", FAKE_AGENT]),
-      UPBOT_ACP_COMMAND_GROK: JSON.stringify(["bun", FAKE_AGENT]),
-      UPBOT_ACP_COMMAND_GEMINI: JSON.stringify(["definitely-not-a-binary-oa"]),
-      UPBOT_CANCEL_GRACE_MS: "1000",
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_CURSOR: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_GROK: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_GEMINI: JSON.stringify(["definitely-not-a-binary-oa"]),
+      BOTO_CANCEL_GRACE_MS: "1000",
       FAKE_ACP_STATE_DIR: stateDir,
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
@@ -845,7 +845,7 @@ describe("chat e2e (fake acp agent)", () => {
   test("v1 database migrates to v2 preserving agents", async () => {
     const dir = tmp("oa2-mig-");
     const root = tmp("oa2-mig-agents-");
-    const db = new Database(join(dir, "upbot.db"));
+    const db = new Database(join(dir, "boto.db"));
     db.exec(`CREATE TABLE agents (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '',
       provider TEXT NOT NULL, model TEXT, workspace_path TEXT NOT NULL,
@@ -860,8 +860,8 @@ describe("chat e2e (fake acp agent)", () => {
     db.close();
 
     const d = await startDaemon(dir, root, TOKEN, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
-      UPBOT_ACP_COMMAND_CURSOR: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_CURSOR: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
     });
     try {
@@ -874,7 +874,7 @@ describe("chat e2e (fake acp agent)", () => {
       await d.proc.exited;
     }
 
-    const db2 = new Database(join(dir, "upbot.db"), { readonly: true });
+    const db2 = new Database(join(dir, "boto.db"), { readonly: true });
     const n = (db2.query("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number }).n;
     expect(n).toBe(21);
     db2.close();

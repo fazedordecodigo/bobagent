@@ -1,4 +1,4 @@
-import type { ConfigOption, PermissionOption, ToolCallStatus } from "@upbot/protocol";
+import type { ConfigOption, PermissionOption, ToolCallStatus } from "@boto/protocol";
 import { VERSION } from "../version";
 import {
   AUTH_RE,
@@ -28,7 +28,7 @@ import {
 } from "./types";
 
 // Codex App Server (`codex app-server --listen stdio://`): JSON-RPC without the
-// "jsonrpc" field, one message per line. Threads map to UpBot sessions.
+// "jsonrpc" field, one message per line. Threads map to Boto sessions.
 
 const REQUEST_TIMEOUT_MS = 30_000;
 
@@ -385,7 +385,7 @@ class CodexSession implements ProviderSession {
       default:
         writeJsonLine(this.proc.child, {
           id,
-          error: { code: -32601, message: `UpBot does not support ${method}` },
+          error: { code: -32601, message: `Boto does not support ${method}` },
         });
     }
   }
@@ -510,14 +510,14 @@ export class CodexDriver implements ProviderDriver {
       bin,
       args,
       cwd,
-      vmKey ? { CODEX_HOME: "/run/upbot/codex-home" } : undefined,
+      vmKey ? { CODEX_HOME: "/run/boto/codex-home" } : undefined,
       opts.remote,
     );
     const session = new CodexSession(proc, hooks, [cwd, ...(opts.extraDirs ?? [])], vmKey);
     try {
       await proc.waitForSpawn();
       await session.request("initialize", {
-        clientInfo: { name: "upbot", title: "UpBot", version: VERSION },
+        clientInfo: { name: "boto", title: "Boto", version: VERSION },
         capabilities: null,
       });
       session.notify("initialized");
@@ -584,7 +584,7 @@ export class CodexDriver implements ProviderDriver {
         models = Array.isArray(list.data) ? (list.data as Json[]) : [];
       } catch (e) {
         console.error(
-          "[upbotd] codex model/list failed:",
+          "[botod] codex model/list failed:",
           truncate(redactCredential((e as Error).message, vmKey), 500),
         );
       }

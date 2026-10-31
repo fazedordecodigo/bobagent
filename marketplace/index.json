@@ -1,13 +1,13 @@
 {
   "version": 1,
-  "name": "UpBot",
+  "name": "Boto",
   "items": [
     {
       "id": "code-review",
       "kind": "skill",
       "name": "code-review",
       "description": "Review a diff or branch for bugs, security issues and maintainability before it is merged",
-      "author": "UpBot",
+      "author": "Boto",
       "version": "1.0.0",
       "url": "skills/code-review.md",
       "sha256": "202393e67e7597cfc64a1f4fa086aee2ea1d047747dc32a33eee7c11fdb22c90"
@@ -17,7 +17,7 @@
       "kind": "skill",
       "name": "release-notes",
       "description": "Draft user-facing release notes from the commits and merged changes since the last tag",
-      "author": "UpBot",
+      "author": "Boto",
       "version": "1.0.0",
       "url": "skills/release-notes.md",
       "sha256": "d5d085b0aaa2ac79fc029094338a3170add5a1f84f2c3e17f1e292ccb9febae9"
@@ -27,7 +27,7 @@
       "kind": "skill",
       "name": "write-tests",
       "description": "Add focused automated tests for new or changed behaviour using the project's existing test setup",
-      "author": "UpBot",
+      "author": "Boto",
       "version": "1.0.0",
       "url": "skills/write-tests.md",
       "sha256": "917cadbad979417b4a82c04effc8923d4c9c1590b1101710573550548e10116e"
@@ -37,7 +37,7 @@
       "kind": "agent",
       "name": "Docs Writer",
       "description": "You write and maintain documentation: READMEs, guides, API references and release notes.",
-      "author": "UpBot",
+      "author": "Boto",
       "version": "1.0.0",
       "url": "agents/docs-writer.json",
       "sha256": "33a3d9aab212a83fad3ee2944e1083502ffc59c3af43fbe37cf8c899d0022571"
@@ -47,7 +47,7 @@
       "kind": "agent",
       "name": "Reviewer",
       "description": "You review code changes before they are merged.",
-      "author": "UpBot",
+      "author": "Boto",
       "version": "1.0.0",
       "url": "agents/reviewer.json",
       "sha256": "a2b0d08e22621a777bf2aa59251e6e478e75e1da43be15c5f6632ab06f21f065"
@@ -57,7 +57,7 @@
       "kind": "agent",
       "name": "Test Engineer",
       "description": "You improve test coverage and reliability.",
-      "author": "UpBot",
+      "author": "Boto",
       "version": "1.0.0",
       "url": "agents/test-engineer.json",
       "sha256": "546b55c8b49fd1c4af1a42e395036f25a2429c72b168f14bf207f916398a1233"

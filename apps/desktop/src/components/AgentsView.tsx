@@ -1,4 +1,4 @@
-import type { Agent, ProviderId } from "@upbot/protocol";
+import type { Agent, ProviderId } from "@boto/protocol";
 import { useMemo, useState } from "react";
 import type { AgentOverview } from "../hooks/useOverview";
 import { MonoAv, Pill, role, statusProvider } from "../lib/ui";

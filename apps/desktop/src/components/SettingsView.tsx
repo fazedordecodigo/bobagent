@@ -1,4 +1,4 @@
-import type { Agent } from "@upbot/protocol";
+import type { Agent } from "@boto/protocol";
 import { type ReactNode, useEffect, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
 import { moveControlFocus } from "../lib/keyboard";
@@ -106,7 +106,7 @@ export function SettingsView({
               <div className="set-group" data-od-id="settings-appearance">
                 <div>
                   <h2 style={{ fontSize: "var(--fs-h3)" }}>Tema</h2>
-                  <p>Escolha um tema fixo ou deixe o UpBot seguir o seu sistema.</p>
+                  <p>Escolha um tema fixo ou deixe o Boto seguir o seu sistema.</p>
                 </div>
                 <div>
                   <fieldset className="theme-opts">
@@ -196,7 +196,7 @@ export function SettingsView({
                   <p className="theme-note" aria-live="polite">
                     {theme === "auto" ? (
                       <>
-                        Seu sistema está no tema <b>{dark ? "escuro" : "claro"}</b>. O UpBot troca
+                        Seu sistema está no tema <b>{dark ? "escuro" : "claro"}</b>. O Boto troca
                         junto quando ele mudar.
                       </>
                     ) : (

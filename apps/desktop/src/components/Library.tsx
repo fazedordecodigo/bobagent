@@ -1,4 +1,4 @@
-import type { Agent, Gateway, GatewayKind, MarketplaceItem, ProviderId } from "@upbot/protocol";
+import type { Agent, Gateway, GatewayKind, MarketplaceItem, ProviderId } from "@boto/protocol";
 import { useEffect, useState } from "react";
 import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { DaemonClient } from "../lib/daemon";
@@ -178,7 +178,7 @@ export function BrowserView({ client, agents }: { client: DaemonClient; agents: 
       <p className="text-xs text-zinc-500">
         {state.available
           ? "Bots drive a separate Chromium window (own profile) with the browser_* tools; each bot gets its own tab. You can watch and use that window directly."
-          : "No Chromium-based browser found. Install Google Chrome or set UPBOT_BROWSER_PATH."}
+          : "No Chromium-based browser found. Install Google Chrome or set BOTO_BROWSER_PATH."}
       </p>
       <ul className="space-y-2">
         {state.tabs.map((t) => (
@@ -852,7 +852,7 @@ export function TeamView({ client, agents }: { client: DaemonClient; agents: Age
       >
         <h2 className="text-lg font-semibold">Team</h2>
         <p className="text-xs text-zinc-500">
-          Join a UpBot team relay to share bots with teammates and message theirs. Host one with{" "}
+          Join a Boto team relay to share bots with teammates and message theirs. Host one with{" "}
           <code>bun run relay -- --data ./relay-data</code> and invite members with its admin token.
         </p>
         <input

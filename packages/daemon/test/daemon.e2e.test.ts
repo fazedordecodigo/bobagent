@@ -23,8 +23,8 @@ describe("daemon e2e", () => {
   let createdAgentId = "";
 
   beforeAll(async () => {
-    dataDir = tmp("upbotd-data-");
-    agentsRoot = tmp("upbotd-agents-");
+    dataDir = tmp("botod-data-");
+    agentsRoot = tmp("botod-agents-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN);
   });
 
@@ -150,14 +150,14 @@ describe("daemon e2e", () => {
       await daemon2.proc.exited;
     }
 
-    const db = new Database(join(dataDir, "upbot.db"), { readonly: true });
+    const db = new Database(join(dataDir, "boto.db"), { readonly: true });
     const rows = db.query("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number };
     expect(rows.n).toBe(21);
     db.close();
   });
 
   test("daemon without a stdin token exits non-zero", async () => {
-    const d = tmp("upbotd-notok-");
+    const d = tmp("botod-notok-");
     const proc = Bun.spawn(["bun", DAEMON, "--data-dir", d, "--agents-root", tmp("oa-nt-")], {
       env: { ...process.env },
       stdin: "pipe",
@@ -171,14 +171,14 @@ describe("daemon e2e", () => {
   });
 
   test("closing stdin makes the daemon exit", async () => {
-    const d = await startDaemon(tmp("upbotd-data2-"), tmp("upbotd-agents2-"), TOKEN);
+    const d = await startDaemon(tmp("botod-data2-"), tmp("botod-agents2-"), TOKEN);
     (d.proc.stdin as { end: () => void }).end();
     await waitForExit(d.proc, 5000);
   });
 
   test("logs auth rejections and the shutdown reason to stderr", async () => {
-    const authDataDir = tmp("upbotd-data3-");
-    const authAgentsRoot = tmp("upbotd-agents3-");
+    const authDataDir = tmp("botod-data3-");
+    const authAgentsRoot = tmp("botod-agents3-");
     let d: DaemonHandle | undefined;
 
     try {
@@ -214,15 +214,15 @@ describe("daemon e2e", () => {
     expect(existsSync(authAgentsRoot)).toBe(false);
   });
 
-  test("fresh install seeds the default UpBot bot once, not again after delete + restart", async () => {
-    const freshDataDir = tmp("upbotd-default-bot-data-");
-    const freshAgentsRoot = tmp("upbotd-default-bot-agents-");
+  test("fresh install seeds the default Boto bot once, not again after delete + restart", async () => {
+    const freshDataDir = tmp("botod-default-bot-data-");
+    const freshAgentsRoot = tmp("botod-default-bot-agents-");
     let freshDaemon: DaemonHandle | undefined;
     let freshClient: DaemonClient | undefined;
 
     try {
       freshDaemon = await startDaemon(freshDataDir, freshAgentsRoot, TOKEN, {
-        UPBOT_DEFAULT_BOT: "on",
+        BOTO_DEFAULT_BOT: "on",
       });
       freshClient = await DaemonClient.connect(freshDaemon.port, TOKEN);
       const agents = await freshClient.request("agents.list", {});
@@ -239,7 +239,7 @@ describe("daemon e2e", () => {
       freshClient = undefined;
 
       freshDaemon = await startDaemon(freshDataDir, freshAgentsRoot, TOKEN, {
-        UPBOT_DEFAULT_BOT: "on",
+        BOTO_DEFAULT_BOT: "on",
       });
       freshClient = await DaemonClient.connect(freshDaemon.port, TOKEN);
       expect(await freshClient.request("agents.list", {})).toEqual([]);

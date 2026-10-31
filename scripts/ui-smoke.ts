@@ -45,9 +45,9 @@ async function main() {
   const daemon = Bun.spawn(["bun", DAEMON, "--data-dir", dataDir, "--agents-root", agentsRoot], {
     env: {
       ...process.env,
-      UPBOT_DEFAULT_BOT: "off",
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
-      UPBOT_CANCEL_GRACE_MS: "2000",
+      BOTO_DEFAULT_BOT: "off",
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_CANCEL_GRACE_MS: "2000",
       FAKE_ACP_STATE_DIR: stateDir,
     },
     stdin: "pipe",

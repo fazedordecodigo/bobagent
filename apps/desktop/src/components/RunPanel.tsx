@@ -1,4 +1,4 @@
-import type { Agent, ApprovalRule } from "@upbot/protocol";
+import type { Agent, ApprovalRule } from "@boto/protocol";
 import { useMemo, useRef, useState } from "react";
 import { useChatApi } from "../hooks/useChat";
 import { useDaemonQuery } from "../hooks/useDaemonQuery";

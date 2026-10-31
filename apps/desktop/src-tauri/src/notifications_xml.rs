@@ -42,7 +42,7 @@ pub fn toast(notification: &Notification) -> String {
             )
         })
         .collect::<String>();
-    format!("<toast launch=\"review|{id}\"{scenario}><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual><actions>{buttons}<action placement=\"contextMenu\" content=\"Silenciar o UpBot por 1 hora\" arguments=\"mute|{id}\" activationType=\"foreground\"/><action placement=\"contextMenu\" content=\"Abrir Apps conectados\" arguments=\"apps|{id}\" activationType=\"foreground\"/></actions>{}</toast>",
+    format!("<toast launch=\"review|{id}\"{scenario}><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual><actions>{buttons}<action placement=\"contextMenu\" content=\"Silenciar o Boto por 1 hora\" arguments=\"mute|{id}\" activationType=\"foreground\"/><action placement=\"contextMenu\" content=\"Abrir Apps conectados\" arguments=\"apps|{id}\" activationType=\"foreground\"/></actions>{}</toast>",
         escape(&notification.title), escape(&notification.body), if notification.muted { "<audio silent=\"true\"/>" } else { "" })
 }
 

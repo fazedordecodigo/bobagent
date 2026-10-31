@@ -2,8 +2,8 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, Approval, ConnectedApp } from "@upbot/protocol";
-import { defaultAppPermissions } from "@upbot/protocol";
+import type { Agent, Approval, ConnectedApp } from "@boto/protocol";
+import { defaultAppPermissions } from "@boto/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -50,10 +50,10 @@ describe("approvals e2e", () => {
     agentsRoot = tmp("appr-agents-");
     stateDir = tmp("appr-fake-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
-      UPBOT_VAULT_KEY: "12".repeat(32),
-      UPBOT_APPROVAL_TTL_MS: "2000",
+      BOTO_VAULT_KEY: "12".repeat(32),
+      BOTO_APPROVAL_TTL_MS: "2000",
     });
     const stderrReader = (daemon.proc.stderr as ReadableStream<Uint8Array>).getReader();
     daemonStderrRead = (async () => {
@@ -297,7 +297,7 @@ describe("approvals e2e", () => {
   }, 30000);
 
   test("persists the approval audit trail through daemon RPC", async () => {
-    const dbPath = join(dataDir, "upbot.db");
+    const dbPath = join(dataDir, "boto.db");
     let db: Database;
     try {
       db = new Database(dbPath, { readonly: true });
@@ -424,7 +424,7 @@ describe("approvals e2e", () => {
   }, 30000);
 
   test("secret approval keeps corrupt vault allowlist contents out of stderr and audit", async () => {
-    const db = new Database(join(dataDir, "upbot.db"));
+    const db = new Database(join(dataDir, "boto.db"));
     db.exec("PRAGMA busy_timeout = 5000");
     try {
       const startSeq =
@@ -490,7 +490,7 @@ describe("approvals e2e", () => {
       expect(auditJson).not.toContain(marker);
       expect(auditJson).not.toContain(secretValue);
 
-      const logEvent = "[upbotd] approval.secret_allowlist_read_failed";
+      const logEvent = "[botod] approval.secret_allowlist_read_failed";
       const deadline = Date.now() + 5000;
       while (!daemonStderr.slice(stderrStart).includes(logEvent) && Date.now() < deadline)
         await Bun.sleep(10);
@@ -532,7 +532,7 @@ describe("approvals e2e", () => {
     const name = "shared.key";
     await c.request("vault.set", { name, value: "original", agentIds: [reader.id] });
     await c.request("vault.set", { name: "unrelated.key", value: "unused", agentIds: [] });
-    const db = new Database(join(dataDir, "upbot.db"));
+    const db = new Database(join(dataDir, "boto.db"));
     try {
       db.query("UPDATE vault SET agent_ids = ? WHERE name = ?").run("[", "unrelated.key");
       for (const value of ["updated", "rotated"]) {
@@ -582,7 +582,7 @@ describe("approvals e2e", () => {
     test(`secret approvals do not notify vault subscribers or change storage on ${failure}`, async () => {
       const name = "unchanged.key";
       await c.request("vault.set", { name, value: "original", agentIds: [a.id] });
-      const db = new Database(join(dataDir, "upbot.db"));
+      const db = new Database(join(dataDir, "boto.db"));
       try {
         if (failure === "write-failure") {
           db.exec(`CREATE TRIGGER reject_secret_update BEFORE UPDATE ON vault
@@ -616,7 +616,7 @@ describe("approvals e2e", () => {
   test("a secret vault read failure rejects the RPC, denies the bridge request and preserves storage", async () => {
     const name = "unreadable.key";
     await c.request("vault.set", { name, value: "original", agentIds: [a.id] });
-    const db = new Database(join(dataDir, "upbot.db"));
+    const db = new Database(join(dataDir, "boto.db"));
     try {
       db.query("UPDATE vault SET agent_ids = ? WHERE name = ?").run("[", name);
       const before = db.query("SELECT * FROM vault WHERE name = ?").get(name);

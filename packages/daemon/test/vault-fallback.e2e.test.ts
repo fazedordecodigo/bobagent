@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
-import type { Agent, ChatItem, Turn } from "@upbot/protocol";
+import type { Agent, ChatItem, Turn } from "@boto/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -46,8 +46,8 @@ async function testFallback(platform: Platform) {
   const binDir = tmp("vault-fallback-bin-");
   const logFile = join(binDir, "security.log");
   const env: Record<string, string> = {
-    UPBOT_VAULT_KEY: "",
-    UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+    BOTO_VAULT_KEY: "",
+    BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
     FAKE_ACP_STATE_DIR: stateDir,
   };
   if (platform === "darwin") {
@@ -112,18 +112,18 @@ async function testFallback(platform: Platform) {
 
       if (run === 0) {
         if (platform === "darwin") {
-          expect(stderr).toContain("[upbotd] keychain add failed (exit 45)");
+          expect(stderr).toContain("[botod] keychain add failed (exit 45)");
           expect(stderr).toContain(
-            "UpBot could not use the platform secure store; storing the vault key in a plaintext file.",
+            "Boto could not use the platform secure store; storing the vault key in a plaintext file.",
           );
         } else if (platform === "win32") {
           expect(stderr).toMatch(
-            /UpBot could not use Windows DPAPI \(.+\); storing the vault key in a plaintext file\./,
+            /Boto could not use Windows DPAPI \(.+\); storing the vault key in a plaintext file\./,
           );
           expect(existsSync(join(dataDir, "vault.key.dpapi"))).toBe(false);
         } else {
           expect(stderr).toContain(
-            "UpBot could not use the platform secure store; storing the vault key in a plaintext file.",
+            "Boto could not use the platform secure store; storing the vault key in a plaintext file.",
           );
         }
       } else {

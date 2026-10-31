@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, ConnectedApp } from "@upbot/protocol";
+import type { Agent, ConnectedApp } from "@boto/protocol";
 import { appToolNames } from "../src/apps";
 import {
   DaemonClient,
@@ -39,9 +39,9 @@ describe("connected apps (MCP) e2e", () => {
     agentsRoot = tmp("apps-agents-");
     stateDir = tmp("apps-fake-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
-      UPBOT_VAULT_KEY: "ef".repeat(32),
+      BOTO_VAULT_KEY: "ef".repeat(32),
     });
     const stderrReader = (daemon.proc.stderr as ReadableStream<Uint8Array>).getReader();
     const stderrDecoder = new TextDecoder();
@@ -265,7 +265,7 @@ process.stdin.on("data", (chunk) => {
       let failedStarts = 0;
       for (let i = 0; i < 80; i++) {
         failedStarts = daemonStderr
-          .split("[upbotd] app start failed")
+          .split("[botod] app start failed")
           .slice(1)
           .filter((entry) => entry.includes(rotating.id)).length;
         if (failedStarts >= 2) break;
@@ -288,8 +288,8 @@ process.stdin.on("data", (chunk) => {
     const timeoutStateDir = tmp("apps-timeout-state-");
     const timeoutToken = `apps-timeout-${crypto.randomUUID()}`;
     const timeoutDaemon = await startDaemon(timeoutDataDir, timeoutAgentsRoot, timeoutToken, {
-      UPBOT_APP_START_TIMEOUT_MS: "1500",
-      UPBOT_VAULT_KEY: "ef".repeat(32),
+      BOTO_APP_START_TIMEOUT_MS: "1500",
+      BOTO_VAULT_KEY: "ef".repeat(32),
     });
     const timeoutClient = await DaemonClient.connect(timeoutDaemon.port, timeoutToken);
     const stderrReader = (timeoutDaemon.proc.stderr as ReadableStream<Uint8Array>).getReader();

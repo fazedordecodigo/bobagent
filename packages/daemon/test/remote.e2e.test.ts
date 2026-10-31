@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, RemoteHost } from "@upbot/protocol";
+import type { Agent, RemoteHost } from "@boto/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -49,8 +49,8 @@ describe.skipIf(process.platform === "win32")("remote hosts + subagents e2e", ()
     sshHome = tmp("rh-home-");
     sshLog = join(tmp("rh-log-"), "ssh.jsonl");
     daemon = await startDaemon(dataDir, tmp("rh-agents-"), TOKEN, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
-      UPBOT_SSH_COMMAND: JSON.stringify(["bun", FAKE_SSH]),
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_SSH_COMMAND: JSON.stringify(["bun", FAKE_SSH]),
       FAKE_ACP_STATE_DIR: stateDir,
       FAKE_SSH_HOME: sshHome,
       FAKE_SSH_LOG: sshLog,
@@ -84,9 +84,15 @@ describe.skipIf(process.platform === "win32")("remote hosts + subagents e2e", ()
     await expect(
       c.request("placements.set", { agentId: boss.id, hostId: host.id, isolation: "none" }),
     ).rejects.toThrow(/not installed/);
+    mkdirSync(join(sshHome, ".upbot", "agents"), { recursive: true });
+    writeFileSync(join(sshHome, ".upbot", "agents", "preserved"), "existing workspace");
     host = await c.request("hosts.install", { id: host.id });
-    expect(existsSync(join(sshHome, ".upbot/bin/upbot-host.ts"))).toBe(true);
-    expect(host.root).toBe(join(sshHome, ".upbot"));
+    expect(existsSync(join(sshHome, ".boto/bin/boto-host.ts"))).toBe(true);
+    expect(existsSync(join(sshHome, ".upbot"))).toBe(false);
+    expect(readFileSync(join(sshHome, ".boto", "agents", "preserved"), "utf8")).toBe(
+      "existing workspace",
+    );
+    expect(host.root).toBe(join(sshHome, ".boto"));
     const pre = host.preflight;
     expect(pre?.firecrackerReady).toBe(
       process.platform === "linux" &&
@@ -100,6 +106,17 @@ describe.skipIf(process.platform === "win32")("remote hosts + subagents e2e", ()
     expect(call.target).toBe("bob@vps.example.com");
     expect(call.opts).toContain("BatchMode=yes");
     expect(call.opts.join(" ")).toContain("-p 2222");
+  });
+
+  test("reinstall never merges a legacy root into an existing Boto root", async () => {
+    mkdirSync(join(sshHome, ".upbot"));
+    writeFileSync(join(sshHome, ".upbot", "preserved"), "other workspace");
+    host = await c.request("hosts.install", { id: host.id });
+    expect(readFileSync(join(sshHome, ".upbot", "preserved"), "utf8")).toBe("other workspace");
+    expect(readFileSync(join(sshHome, ".boto", "agents", "preserved"), "utf8")).toBe(
+      "existing workspace",
+    );
+    expect(existsSync(join(sshHome, ".boto", "preserved"))).toBe(false);
   });
 
   test("firecracker placement is refused when preflight is not ready", async () => {
@@ -121,7 +138,7 @@ describe.skipIf(process.platform === "win32")("remote hosts + subagents e2e", ()
     expect(p.hostId).toBe(host.id);
     expect((await turn(boss.id, "echo:hello-vps")).status).toBe("completed");
     expect(await lastText(boss.id)).toBe("hello-vps");
-    expect(existsSync(join(sshHome, ".upbot/agents", boss.id))).toBe(true);
+    expect(existsSync(join(sshHome, ".boto/agents", boss.id))).toBe(true);
     const run = sshCalls().find((l) => l.remoteCmd.includes(" run"))!;
     expect(run.opts).toContain("-R");
     for (const l of sshCalls()) expect(l.leakedEnv).toEqual([]);
@@ -162,7 +179,7 @@ describe.skipIf(process.platform === "win32")("remote hosts + subagents e2e", ()
     const agents = await c.request("agents.list", {});
     for (const s of subs) {
       expect(agents.some((a) => a.id === s.agentId)).toBe(false);
-      expect(existsSync(join(sshHome, ".upbot/agents", s.agentId))).toBe(true);
+      expect(existsSync(join(sshHome, ".boto/agents", s.agentId))).toBe(true);
     }
     // turns overlapped: children started before the last one finished
     const starts = subs.map((s) => s.createdAt);

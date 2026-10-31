@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import type { Skill } from "@upbot/protocol";
+import type { Skill } from "@boto/protocol";
 
 // Local skills library shared by all agents: <shared>/Skills/<name>/SKILL.md with a
 // `name`/`description`/`author` frontmatter. Revisions keep the previous file in .history/.
@@ -107,6 +107,6 @@ export class SkillLibrary {
     const skills = this.list();
     if (skills.length === 0) return "";
     const lines = skills.slice(0, 100).map((s) => `- ${s.name}: ${s.description}`);
-    return `<skills_library>\nReusable skills shared by all UpBot agents. Load one with the upbot read_skill tool when it fits the task; create_skill/revise_skill to save what you learn.\n${lines.join("\n")}\n</skills_library>\n\n`;
+    return `<skills_library>\nReusable skills shared by all Boto agents. Load one with the boto read_skill tool when it fits the task; create_skill/revise_skill to save what you learn.\n${lines.join("\n")}\n</skills_library>\n\n`;
   }
 }

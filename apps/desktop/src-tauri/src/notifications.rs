@@ -120,7 +120,7 @@ pub fn setup(app: &AppHandle) -> Result<(), String> {
 pub fn respond(app: &AppHandle, id: String, action: String) {
     app.state::<NotificationState>()
         .enqueue(NotificationResponse { id, action });
-    let _ = app.emit_to("main", "upbot://notification-actions", ());
+    let _ = app.emit_to("main", "boto://notification-actions", ());
 }
 
 async fn on_main<T: Send + 'static>(
@@ -221,7 +221,7 @@ pub fn notifications_take_actions(
 pub fn notifications_open(app: AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
-        .ok_or("A janela do UpBot não está disponível.")?;
+        .ok_or("A janela do Boto não está disponível.")?;
     window.unminimize().map_err(|error| error.to_string())?;
     window.show().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())
@@ -242,10 +242,10 @@ mod tests {
             action: "task".into(),
         });
         for values in [
-            vec!["UpBot.exe", "-ToastActivated", "task|approval-id"],
-            vec!["UpBot.exe", "-toastactivated=task|approval-id"],
-            vec!["UpBot.exe", "-ToastActivated", "task", "approval-id"],
-            vec!["UpBot.exe", "-ToastActivated=task", "approval-id"],
+            vec!["Boto.exe", "-ToastActivated", "task|approval-id"],
+            vec!["Boto.exe", "-toastactivated=task|approval-id"],
+            vec!["Boto.exe", "-ToastActivated", "task", "approval-id"],
+            vec!["Boto.exe", "-ToastActivated=task", "approval-id"],
         ] {
             assert_eq!(launch_activation(&args(&values)), expected);
         }
@@ -254,13 +254,13 @@ mod tests {
     #[test]
     fn invalid_or_payload_free_launch_waits_for_com() {
         for values in [
-            vec!["UpBot.exe"],
-            vec!["UpBot.exe", "task|approval-id"],
-            vec!["UpBot.exe", "-ToastActivated"],
-            vec!["UpBot.exe", "-ToastActivated", "always|approval-id"],
-            vec!["UpBot.exe", "-ToastActivated", "task|"],
-            vec!["UpBot.exe", "-ToastActivated", "task|id|extra"],
-            vec!["UpBot.exe", "-ToastActivated", "task|id\n"],
+            vec!["Boto.exe"],
+            vec!["Boto.exe", "task|approval-id"],
+            vec!["Boto.exe", "-ToastActivated"],
+            vec!["Boto.exe", "-ToastActivated", "always|approval-id"],
+            vec!["Boto.exe", "-ToastActivated", "task|"],
+            vec!["Boto.exe", "-ToastActivated", "task|id|extra"],
+            vec!["Boto.exe", "-ToastActivated", "task|id\n"],
         ] {
             assert!(launch_activation(&args(&values)).is_none());
             assert!(NotificationState::from_args(&args(&values))
@@ -272,7 +272,7 @@ mod tests {
     #[test]
     fn startup_queue_survives_until_drain_and_deduplicates_com_response() {
         let state =
-            NotificationState::from_args(&args(&["UpBot.exe", "-ToastActivated", "task|id"]));
+            NotificationState::from_args(&args(&["Boto.exe", "-ToastActivated", "task|id"]));
         assert_eq!(
             state.actions.lock().unwrap().as_slice(),
             &[NotificationResponse {

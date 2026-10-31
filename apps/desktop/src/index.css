@@ -1,7 +1,7 @@
 @import "tailwindcss";
 @source inline("sr-only");
 @import "./styles/tokens.css";
-@import "./styles/upbot.css";
+@import "./styles/boto.css";
 
 dialog {
   margin: auto;

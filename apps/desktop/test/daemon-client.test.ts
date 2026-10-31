@@ -62,7 +62,7 @@ async function waitFor(predicate: () => boolean) {
 
 test("reports daemon termination after re-resolving and stops retrying", async () => {
   const server = serve();
-  const exitMessage = "upbotd exited: TerminatedPayload { code: Some(1), signal: None }";
+  const exitMessage = "botod exited: TerminatedPayload { code: Some(1), signal: None }";
   invokeCount = 0;
   socketAttempts = 0;
   resolveConnection = async () => {

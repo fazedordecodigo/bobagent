@@ -1,6 +1,6 @@
-# Contributing to UpBot
+# Contributing to Boto
 
-Thanks for helping. UpBot is a macOS app (Tauri 2 + React) with a Bun daemon; read
+Thanks for helping. Boto is a macOS app (Tauri 2 + React) with a Bun daemon; read
 [AGENTS.md](AGENTS.md) for the architecture before larger changes.
 
 ## Setup

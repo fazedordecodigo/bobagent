@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, Turn } from "@upbot/protocol";
+import type { Agent, Turn } from "@boto/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -43,17 +43,17 @@ describe("runtime turn-lifecycle logging", () => {
 
   async function waitForLog(event: string, turnId: string): Promise<string> {
     const deadline = Date.now() + LOG_TIMEOUT_MS;
-    const marker = `[upbotd] ${event}`;
+    const marker = `[botod] ${event}`;
     while (Date.now() < deadline) {
       const start = stderrText.indexOf(marker);
       if (start >= 0) {
-        const next = stderrText.indexOf("[upbotd] ", start + marker.length);
+        const next = stderrText.indexOf("[botod] ", start + marker.length);
         const entry = stderrText.slice(start, next < 0 ? undefined : next);
         if (entry.includes(turnId)) return entry;
       }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    throw new Error(`daemon stderr did not contain [upbotd] ${event} for turn ${turnId}`);
+    throw new Error(`daemon stderr did not contain [botod] ${event} for turn ${turnId}`);
   }
 
   beforeAll(async () => {
@@ -61,9 +61,9 @@ describe("runtime turn-lifecycle logging", () => {
     agentsRoot = tmp("runtime-logging-agents-");
     stateDir = tmp("runtime-logging-fake-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
-      UPBOT_CANCEL_GRACE_MS: "500",
+      BOTO_CANCEL_GRACE_MS: "500",
     });
     const stderr = daemon.proc.stderr;
     if (!stderr || typeof stderr === "number") throw new Error("daemon stderr is unavailable");
@@ -110,7 +110,7 @@ describe("runtime turn-lifecycle logging", () => {
   test("skipping invalid saved config does not log the value or provider option ID", async () => {
     const secret = "sk-test-SECRETVALUE123";
     const agent = await newAgent("Runtime logging invalid config");
-    const db = new Database(join(dataDir, "upbot.db"));
+    const db = new Database(join(dataDir, "boto.db"));
     try {
       db.query("UPDATE agents SET config_json = ? WHERE id = ?").run(
         JSON.stringify({ mode: secret }),

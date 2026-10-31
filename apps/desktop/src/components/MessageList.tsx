@@ -1,4 +1,4 @@
-import type { Agent, ChatItem } from "@upbot/protocol";
+import type { Agent, ChatItem } from "@boto/protocol";
 import { memo, type ReactNode, useEffect, useRef } from "react";
 import { MonoAv, role, type UiStatus } from "../lib/ui";
 import { CopyButton } from "./CopyButton";

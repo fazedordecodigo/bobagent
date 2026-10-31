@@ -5,7 +5,7 @@ import type {
   Subagent,
   VmCredentialKind,
   VmCredentialProvider,
-} from "@upbot/protocol";
+} from "@boto/protocol";
 import { useCallback, useEffect, useState } from "react";
 import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { DaemonClient } from "../lib/daemon";
@@ -229,9 +229,9 @@ export function HostsView({ client, agents }: { client: DaemonClient; agents: Ag
       <div>
         <h2 className="text-lg font-semibold">Remote hosts</h2>
         <p className="text-xs text-zinc-500">
-          Run bots on a Linux VPS over SSH instead of this Mac. UpBot uses your system{" "}
+          Run bots on a Linux VPS over SSH instead of this Mac. Boto uses your system{" "}
           <code>ssh</code> (keys from <code>~/.ssh</code> or the agent; nothing is stored here) and
-          uploads a small helper to <code>~/.upbot</code> on the host. With KVM and the guest image
+          uploads a small helper to <code>~/.boto</code> on the host. With KVM and the guest image
           installed, each bot and subagent runs in its own Firecracker microVM.
         </p>
       </div>

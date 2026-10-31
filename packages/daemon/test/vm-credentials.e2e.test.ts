@@ -27,7 +27,7 @@ test.each([
 
   const token = crypto.randomUUID();
   const daemon = await startDaemon(dataDir, tmp("vmcred-agents-"), token, {
-    UPBOT_VAULT_KEY: key,
+    BOTO_VAULT_KEY: key,
   });
   const stderr = new Response(daemon.proc.stderr as ReadableStream<Uint8Array>).text();
   let client: DaemonClient | undefined;
@@ -52,5 +52,5 @@ test.each([
   }
   const logs = await stderr;
   expect(logs).not.toContain("CorruptSecretSentinel");
-  expect(logs).toContain("UpBot could not read");
+  expect(logs).toContain("Boto could not read");
 });

@@ -1,5 +1,5 @@
 [package]
-name = "upbot-desktop"
+name = "boto-desktop"
 version = "0.3.0"
 license = "MIT"
 edition = "2021"

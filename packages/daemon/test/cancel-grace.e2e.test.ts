@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import type { Agent, Turn } from "@upbot/protocol";
+import type { Agent, Turn } from "@boto/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -15,7 +15,7 @@ import {
 const TOKEN = `cancel-grace-${crypto.randomUUID()}`;
 const DEFAULT_GRACE_MS = 10_000;
 
-describe("UPBOT_CANCEL_GRACE_MS=0 (fake acp agent)", () => {
+describe("BOTO_CANCEL_GRACE_MS=0 (fake acp agent)", () => {
   let dataDir: string;
   let agentsRoot: string;
   let stateDir: string;
@@ -23,12 +23,12 @@ describe("UPBOT_CANCEL_GRACE_MS=0 (fake acp agent)", () => {
   let c: DaemonClient;
 
   beforeAll(async () => {
-    dataDir = tmp("upbot-grace-data-");
-    agentsRoot = tmp("upbot-grace-agents-");
-    stateDir = tmp("upbot-grace-fake-");
+    dataDir = tmp("boto-grace-data-");
+    agentsRoot = tmp("boto-grace-agents-");
+    stateDir = tmp("boto-grace-fake-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
-      UPBOT_CANCEL_GRACE_MS: "0",
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_CANCEL_GRACE_MS: "0",
       FAKE_ACP_STATE_DIR: stateDir,
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);

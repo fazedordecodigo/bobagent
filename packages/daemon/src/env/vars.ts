@@ -19,7 +19,7 @@ export function envOverride(name: string): string[] | null {
 }
 
 /**
- * Shared reader for numeric `UPBOT_*` environment variables.
+ * Shared reader for numeric `BOTO_*` environment variables.
  *
  * Returns `fallback` when the variable is unset, empty, not a finite number, or
  * outside the allowed range, so a malformed value can never turn into NaN and

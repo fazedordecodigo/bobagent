@@ -23,7 +23,7 @@ export class TelegramTransport implements Transport {
   private abort: AbortController | null = null;
   // 0 keeps the short-poll behavior for whoever disables long-polling on purpose;
   // an invalid value falls back to 25 instead of serializing as `timeout: null`.
-  private readonly pollSeconds = envNumber("UPBOT_TELEGRAM_POLL_SECONDS", 25, { min: 0 });
+  private readonly pollSeconds = envNumber("BOTO_TELEGRAM_POLL_SECONDS", 25, { min: 0 });
 
   constructor(
     private token: string,
@@ -31,7 +31,7 @@ export class TelegramTransport implements Transport {
   ) {}
 
   private url(method: string) {
-    return `${process.env.UPBOT_TELEGRAM_API ?? "https://api.telegram.org"}/bot${this.token}/${method}`;
+    return `${process.env.BOTO_TELEGRAM_API ?? "https://api.telegram.org"}/bot${this.token}/${method}`;
   }
 
   private async call<T>(method: string, body: unknown, signal?: AbortSignal): Promise<T> {

@@ -1,5 +1,5 @@
+import type { DaemonEventMap, MethodName, MethodParams, MethodResult } from "@boto/protocol";
 import { invoke } from "@tauri-apps/api/core";
-import type { DaemonEventMap, MethodName, MethodParams, MethodResult } from "@upbot/protocol";
 import {
   DAEMON_NOT_CONNECTED,
   DAEMON_SOCKET_CLOSED,

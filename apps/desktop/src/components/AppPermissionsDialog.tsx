@@ -3,7 +3,7 @@ import {
   type AppPermissions,
   type ConnectedApp,
   isSensitivePermission,
-} from "@upbot/protocol";
+} from "@boto/protocol";
 import { useEffect, useRef, useState } from "react";
 import { permissionDescriptions, permissionLabels } from "../lib/app-permissions";
 import type { DaemonClient } from "../lib/daemon";

@@ -1,4 +1,4 @@
-export const READY_PREFIX = "UPBOT_READY ";
+export const READY_PREFIX = "BOTO_READY ";
 
 /** The line the daemon prints on stdout once it is listening on 127.0.0.1. */
 export function readyLine(port: number): string {

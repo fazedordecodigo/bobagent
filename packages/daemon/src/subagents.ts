@@ -5,7 +5,7 @@
 // are deleted afterwards, which stops their provider process and microVM.
 
 import type { Database } from "bun:sqlite";
-import type { Agent, Subagent, Turn } from "@upbot/protocol";
+import type { Agent, Subagent, Turn } from "@boto/protocol";
 import type { AgentStore } from "./agents";
 import type { ChatStore, QueueRow, QueueStore } from "./chat-store";
 import { envNumber } from "./env/vars";
@@ -26,7 +26,7 @@ type Row = {
 
 export const MAX_SUBAGENTS_PER_CALL = 8;
 export const MAX_SUBAGENT_DEPTH = 2;
-const maxActive = () => envNumber("UPBOT_MAX_SUBAGENTS", 8, { integer: true });
+const maxActive = () => envNumber("BOTO_MAX_SUBAGENTS", 8, { integer: true });
 
 export class SubagentService {
   constructor(

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { rmSync } from "node:fs";
-import type { Agent, TeamMessage, TeamStatus } from "@upbot/protocol";
+import type { Agent, TeamMessage, TeamStatus } from "@boto/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -108,9 +108,9 @@ describe("team relay frame validation e2e", () => {
     agentsRoot = tmp("team-frames-agents-");
     stateDir = tmp("team-frames-fake-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
-      UPBOT_VAULT_KEY: "ef".repeat(32),
+      BOTO_VAULT_KEY: "ef".repeat(32),
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
     agent = (await c.request("agents.create", {

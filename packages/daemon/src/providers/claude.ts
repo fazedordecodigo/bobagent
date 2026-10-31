@@ -1,4 +1,4 @@
-import type { ConfigOption, PermissionOption } from "@upbot/protocol";
+import type { ConfigOption, PermissionOption } from "@boto/protocol";
 import {
   AUTH_RE,
   authMessage,

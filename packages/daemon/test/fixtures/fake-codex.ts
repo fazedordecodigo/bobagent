@@ -127,7 +127,7 @@ function complete(threadId: string, turnId: string, status: string, error: J | n
 async function runTurn(threadId: string, turnId: string, params: J) {
   const input = (params.input as J[])[0] as J;
   const text = String(input.text)
-    .replace(/^[\s\S]*<\/(conversation_history|agent_instructions|upbot_context)>\s*/, "")
+    .replace(/^[\s\S]*<\/(conversation_history|agent_instructions|boto_context)>\s*/, "")
     .trim();
   notify("turn/started", {
     threadId,

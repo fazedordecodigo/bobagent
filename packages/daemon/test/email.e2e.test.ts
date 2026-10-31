@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Agent, EmailAccount } from "@upbot/protocol";
+import type { Agent, EmailAccount } from "@boto/protocol";
 import { SMTPServer } from "smtp-server";
 import {
   DaemonClient,
@@ -96,11 +96,11 @@ describe("email connector e2e", () => {
       ]),
     );
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
-      UPBOT_VAULT_KEY: "cd".repeat(32),
-      UPBOT_EMAIL_FAKE_MAILBOX: mailbox,
-      UPBOT_EMAIL_PLAINTEXT: "1",
+      BOTO_VAULT_KEY: "cd".repeat(32),
+      BOTO_EMAIL_FAKE_MAILBOX: mailbox,
+      BOTO_EMAIL_PLAINTEXT: "1",
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
     a = await c.request("agents.create", {
@@ -228,7 +228,7 @@ describe("email connector e2e", () => {
       smtpPort,
       smtpSecure: false,
     })) as EmailAccount;
-    const db = new Database(join(dataDir, "upbot.db"));
+    const db = new Database(join(dataDir, "boto.db"));
     try {
       db.exec("PRAGMA busy_timeout=5000");
       db.exec(

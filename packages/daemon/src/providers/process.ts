@@ -1,5 +1,5 @@
 import type { ChildProcess } from "node:child_process";
-import type { ProviderId } from "@upbot/protocol";
+import type { ProviderId } from "@boto/protocol";
 import { resolveCommand, spawnEnv } from "../env/login-path";
 import { spawnChild, waitForChildSpawn } from "../env/spawn";
 import { envOverride } from "../env/vars";
@@ -62,7 +62,7 @@ export function logResumeFailed(
   credential: string | null,
 ): void {
   const detail = error instanceof Error ? error.message : String(error);
-  console.error("[upbotd] provider.resume_failed", {
+  console.error("[botod] provider.resume_failed", {
     provider,
     resumeSessionId,
     error: truncate(redactCredential(detail, credential), 500),
@@ -136,13 +136,13 @@ export function classifyStartupError(
   );
 }
 
-/** Spawn command for a provider; `UPBOT_PROVIDER_COMMAND_<P>` (or the older
- * `UPBOT_ACP_COMMAND_<P>`) holds a JSON array that replaces the default. */
+/** Spawn command for a provider; `BOTO_PROVIDER_COMMAND_<P>` (or the older
+ * `BOTO_ACP_COMMAND_<P>`) holds a JSON array that replaces the default. */
 export function commandFor(provider: ProviderId): string[] | null {
   const key = provider.toUpperCase().replace(/-/g, "_");
   return (
-    envOverride(`UPBOT_PROVIDER_COMMAND_${key}`) ??
-    envOverride(`UPBOT_ACP_COMMAND_${key}`) ??
+    envOverride(`BOTO_PROVIDER_COMMAND_${key}`) ??
+    envOverride(`BOTO_ACP_COMMAND_${key}`) ??
     DEFAULT_COMMANDS[provider]
   );
 }

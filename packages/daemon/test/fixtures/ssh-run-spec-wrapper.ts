@@ -48,7 +48,7 @@ process.stdin.on("data", (chunk: Buffer) => {
               hasFakeCredential: entries.some(
                 ([key, value]) => credentialKeys.includes(key) && value.includes("-fake-"),
               ),
-              upbotKeys: entries.map(([key]) => key).filter((key) => key.startsWith("UPBOT_")),
+              botoKeys: entries.map(([key]) => key).filter((key) => key.startsWith("BOTO_")),
               apiKeyKeys: entries.map(([key]) => key).filter((key) => credentialKeys.includes(key)),
               hasSentinelValue: entries.some(
                 ([, value]) => value === "leak" || value === "sk-sentinel-leak",

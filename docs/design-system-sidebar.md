@@ -1,8 +1,8 @@
 # Main-window sidebar
 
-Reference: supplied 1568×1089 image. The new `upbot-handoff.zip` was extracted to
-`/Users/devin/sidebar-handoff/upbot-handoff`; recursive comparison with the earlier
-handoff found no differences. Layout comes from `prototipos/upbot-desktop-app.html`.
+Reference: supplied 1568×1089 image. The new `boto-handoff.zip` was extracted to
+`/Users/devin/sidebar-handoff/boto-handoff`; recursive comparison with the earlier
+handoff found no differences. Layout comes from `prototipos/boto-desktop-app.html`.
 The image scales the prototype's 248px sidebar to approximately 270px; this app uses
 270px, 15px navigation/bot titles, 13px subtitles, token radii and semantic colors.
 
@@ -31,7 +31,7 @@ other UI terminology continues to say bot.
 
 No existing personal profile/OS-user API was found. The allowed settings-value fallback
 is an editable **Seu nome** field in general settings, persisted locally as
-`upbot.profile.name`. Until configured the footer truthfully says **Você**, rather than
+`boto.profile.name`. Until configured the footer truthfully says **Você**, rather than
 inventing an identity. Screenshots configure the fixture profile as Marina.
 
 The drawer retains its dialog semantics, inert background, Tab containment, Escape,

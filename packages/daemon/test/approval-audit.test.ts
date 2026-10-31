@@ -30,10 +30,10 @@ async function withApprovals(
     db: Database;
   }) => Promise<void>,
 ) {
-  const savedTtl = process.env.UPBOT_APPROVAL_TTL_MS;
-  const savedKey = process.env.UPBOT_VAULT_KEY;
-  process.env.UPBOT_APPROVAL_TTL_MS = "50";
-  process.env.UPBOT_VAULT_KEY = "12".repeat(32);
+  const savedTtl = process.env.BOTO_APPROVAL_TTL_MS;
+  const savedKey = process.env.BOTO_VAULT_KEY;
+  process.env.BOTO_APPROVAL_TTL_MS = "50";
+  process.env.BOTO_VAULT_KEY = "12".repeat(32);
   const db = new Database(":memory:");
   try {
     for (const sql of migrations) db.exec(sql);
@@ -66,10 +66,10 @@ async function withApprovals(
     );
     await run({ approvals, apps, vault, db });
   } finally {
-    if (savedTtl === undefined) delete process.env.UPBOT_APPROVAL_TTL_MS;
-    else process.env.UPBOT_APPROVAL_TTL_MS = savedTtl;
-    if (savedKey === undefined) delete process.env.UPBOT_VAULT_KEY;
-    else process.env.UPBOT_VAULT_KEY = savedKey;
+    if (savedTtl === undefined) delete process.env.BOTO_APPROVAL_TTL_MS;
+    else process.env.BOTO_APPROVAL_TTL_MS = savedTtl;
+    if (savedKey === undefined) delete process.env.BOTO_VAULT_KEY;
+    else process.env.BOTO_VAULT_KEY = savedKey;
     db.close();
   }
 }
@@ -284,7 +284,7 @@ test("secret approval logs and audits a vault read failure without the secret va
     expect(await secret).toContain("did not provide stripe.key (denied)");
 
     const logged = stderr.mock.calls.find(
-      (c) => c[0] === "[upbotd] approval.secret_allowlist_read_failed",
+      (c) => c[0] === "[botod] approval.secret_allowlist_read_failed",
     );
     expect(logged?.[1]).toMatchObject({
       approvalId: pending.id,

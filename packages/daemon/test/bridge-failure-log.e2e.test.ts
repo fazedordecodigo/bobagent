@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { rmSync } from "node:fs";
-import type { Agent, Turn } from "@upbot/protocol";
+import type { Agent, Turn } from "@boto/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
@@ -116,8 +116,8 @@ function readMcpSpec(stateDir: string): McpSpec {
     .filter((entry) => entry.method === "session/new")
     .at(-1);
   const params = session?.params as { mcpServers?: { name: string }[] } | undefined;
-  const spec = params?.mcpServers?.find((server) => server.name === "upbot") as McpSpec | undefined;
-  if (!spec) throw new Error("upbot MCP server spec missing from session/new");
+  const spec = params?.mcpServers?.find((server) => server.name === "boto") as McpSpec | undefined;
+  if (!spec) throw new Error("boto MCP server spec missing from session/new");
   return spec;
 }
 
@@ -136,7 +136,7 @@ describe("bridge failure diagnostics", () => {
     agentsRoot = tmp("bridge-failure-agents-");
     stateDir = tmp("bridge-failure-fake-");
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
     });
     const reader = (daemon.proc.stderr as ReadableStream<Uint8Array>).getReader();
@@ -182,7 +182,7 @@ describe("bridge failure diagnostics", () => {
   test("reject and failed bridge requests log only allowlisted diagnostics", async () => {
     const spec = readMcpSpec(stateDir);
     const wrongToken = `wrong-SENTINEL-${crypto.randomUUID()}`;
-    const rejected = await runMcpBridge(spec, { UPBOT_BRIDGE_TOKEN: wrongToken }, [
+    const rejected = await runMcpBridge(spec, { BOTO_BRIDGE_TOKEN: wrongToken }, [
       {
         jsonrpc: "2.0",
         id: 1,
@@ -192,7 +192,7 @@ describe("bridge failure diagnostics", () => {
     ]);
     expect(rejected.replies[0]?.result).toMatchObject({ isError: true });
     expect(rejected.stderr).toContain(
-      "upbotd mcp-bridge: method=tools/call tool=unlisted status=401",
+      "botod mcp-bridge: method=tools/call tool=unlisted status=401",
     );
     expect(rejected.stderr).not.toContain(wrongToken);
     expect(rejected.stderr).not.toContain("sk-live-SENTINEL");
@@ -235,7 +235,7 @@ describe("bridge failure diagnostics", () => {
     try {
       const failedForward = await runMcpBridge(
         spec,
-        { UPBOT_BRIDGE_URL: `http://127.0.0.1:${server.port}/bridge` },
+        { BOTO_BRIDGE_URL: `http://127.0.0.1:${server.port}/bridge` },
         [
           { jsonrpc: "2.0", id: 1, method: "tools/list" },
           {
@@ -252,7 +252,7 @@ describe("bridge failure diagnostics", () => {
       };
       expect(failedResult.content[0]?.text).toContain(`no agent named "${SECRET}"`);
       expect(failedForward.stderr).toContain(
-        "upbotd mcp-bridge: method=tools/call tool=send_message status=400",
+        "botod mcp-bridge: method=tools/call tool=send_message status=400",
       );
       expect(failedForward.stderr).not.toContain(SECRET);
     } finally {
@@ -264,7 +264,7 @@ describe("bridge failure diagnostics", () => {
     const spec = readMcpSpec(stateDir);
     const startedAt = Date.now();
     await expect(
-      runMcpBridge(spec, { UPBOT_BRIDGE_TOKEN: "" }, [
+      runMcpBridge(spec, { BOTO_BRIDGE_TOKEN: "" }, [
         { jsonrpc: "2.0", id: 1, method: "tools/list" },
       ]),
     ).rejects.toThrow(/mcp-bridge exited/);

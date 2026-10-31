@@ -18,7 +18,7 @@ if (process.env.FAKE_SSH_LOG) {
       opts,
       target,
       remoteCmd,
-      leakedEnv: Object.keys(process.env).filter((k) => k.startsWith("UPBOT_")),
+      leakedEnv: Object.keys(process.env).filter((k) => k.startsWith("BOTO_")),
     })}\n`,
   );
 }

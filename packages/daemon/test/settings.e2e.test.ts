@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { Agent, ChatItem, Turn } from "@upbot/protocol";
+import type { Agent, ChatItem, Turn } from "@boto/protocol";
 import { openDatabase } from "../src/db";
 import {
   DaemonClient,
@@ -72,11 +72,11 @@ describe("settings consumers e2e", () => {
       marketplace_sources: '"x"',
     });
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
-      UPBOT_DEFAULT_BOT: "",
-      UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
+      BOTO_DEFAULT_BOT: "",
+      BOTO_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
-      UPBOT_MOBILE_HOST: "127.0.0.1",
-      UPBOT_VAULT_KEY: "12".repeat(32),
+      BOTO_MOBILE_HOST: "127.0.0.1",
+      BOTO_VAULT_KEY: "12".repeat(32),
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
   });
@@ -184,7 +184,7 @@ describe("malformed mobile setting e2e", () => {
     agentsRoot = tmp("settings-malformed-agents-");
     seedSettings(dataDir, { mobile: "not-json" });
     daemon = await startDaemon(dataDir, agentsRoot, token, {
-      UPBOT_MOBILE_HOST: "127.0.0.1",
+      BOTO_MOBILE_HOST: "127.0.0.1",
     });
     c = await DaemonClient.connect(daemon.port, token);
   });
