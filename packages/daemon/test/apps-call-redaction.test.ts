@@ -28,7 +28,14 @@ function setup(): { apps: AppsService; db: Database } {
     }),
   );
   const vault = new Vault(db, mkdtempSync(join(tmpdir(), "boto-vault-")));
-  vault.set("app.leaky.TOKEN", SECRET, []);
+  const previousKey = process.env.BOTO_VAULT_KEY;
+  try {
+    process.env.BOTO_VAULT_KEY = "ab".repeat(32);
+    vault.set("app.leaky.TOKEN", SECRET, []);
+  } finally {
+    if (previousKey === undefined) delete process.env.BOTO_VAULT_KEY;
+    else process.env.BOTO_VAULT_KEY = previousKey;
+  }
   return { apps: new AppsService(db, vault, () => {}), db };
 }
 
