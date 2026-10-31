@@ -23,6 +23,7 @@ import { MemoryStore } from "./memories";
 import { MobileServer } from "./mobile";
 import { PageLibrary } from "./pages";
 import { seedDefaultBot, upbotContext } from "./persona";
+import { readyLine } from "./ready";
 import { VmCredentials } from "./remote/credentials";
 import { HostStore } from "./remote/hosts";
 import { RoutineService } from "./routines";
@@ -32,9 +33,9 @@ import { SkillLibrary } from "./skills";
 import { SubagentService } from "./subagents";
 import { TeamClient } from "./team";
 import { Vault } from "./vault";
+import { VERSION } from "./version";
 import { Voice } from "./voice";
 
-const VERSION = "0.3.0";
 const ORIGIN_ALLOWLIST = new Set([
   "tauri://localhost",
   "http://tauri.localhost",
@@ -69,6 +70,22 @@ function log(...args: unknown[]) {
   console.error("[upbotd]", ...args);
 }
 
+const LOGGED_ERROR_TYPES = new Set(["Error", "TypeError", "SyntaxError", "RangeError", "RpcError"]);
+function errorType(e: unknown): string {
+  const name = e instanceof Error ? e.name : "";
+  return LOGGED_ERROR_TYPES.has(name) ? name : "Error";
+}
+
+/** Emits at most one line per key per minute so rejected-auth loops can't spam stderr. */
+const LOG_LIMIT_MS = 60_000;
+const logLimitedLast = new Map<string, number>();
+function logLimited(event: string, key: string, fields: Record<string, unknown>) {
+  const now = Date.now();
+  if (now - (logLimitedLast.get(key) ?? 0) < LOG_LIMIT_MS) return;
+  logLimitedLast.set(key, now);
+  log(event, fields);
+}
+
 /** Reads the auth token from the first stdin line; refuses to start without one. */
 function readTokenFromStdin(): Promise<string | null> {
   return new Promise((resolve) => {
@@ -84,7 +101,7 @@ function readTokenFromStdin(): Promise<string | null> {
       clearTimeout(timer);
       finish(line.trim() || null);
       // keep watching stdin for EOF (parent death)
-      rl.on("close", () => shutdown(0));
+      rl.on("close", () => shutdown(0, "stdin EOF"));
     });
     rl.once("close", () => finish(null));
     void timer;
@@ -95,10 +112,15 @@ let shuttingDown = false;
 let dbRef: { close(): void } | null = null;
 let serverRef: { stop(): void } | null = null;
 let runtimesRef: { closeAll(): Promise<void> } | null = null;
+let gatewaysRef: { stopAll(): void } | null = null;
 
-function shutdown(code: number) {
+function shutdown(code: number, reason: string) {
   if (shuttingDown) return;
   shuttingDown = true;
+  log("shutting down", { reason, code });
+  try {
+    gatewaysRef?.stopAll();
+  } catch {}
   const done = () => {
     try {
       serverRef?.stop();
@@ -109,8 +131,11 @@ function shutdown(code: number) {
     process.exit(code);
   };
   const p = runtimesRef?.closeAll() ?? Promise.resolve();
-  p.catch(() => {}).finally(() => setTimeout(done, 50));
-  setTimeout(() => process.exit(code), 4000).unref();
+  p.catch((e) => log("closeAll failed", e)).finally(() => setTimeout(done, 50));
+  setTimeout(() => {
+    log("forced exit after 4s");
+    process.exit(code);
+  }, 4000).unref();
 }
 
 async function main() {
@@ -197,7 +222,7 @@ async function main() {
   bridge.email = email;
   const apps = new AppsService(db, vault, broadcast);
   bridge.apps = apps;
-  const approvals = new ApprovalService(db, vault, () => runtimes, broadcast);
+  const approvals = new ApprovalService(db, vault, () => runtimes, broadcast, apps);
   bridge.approvals = approvals;
   const pages = new PageLibrary(db, workspaceRoot, broadcast);
   bridge.pages = pages;
@@ -207,6 +232,7 @@ async function main() {
   const mobile = new MobileServer(db);
   const team = new TeamClient(db, store, chat, () => runtimes, vault, broadcast);
   const gateways = new GatewayService(db, store, chat, () => runtimes, vault, broadcast);
+  gatewaysRef = gateways;
   const rpc = new Rpc(
     store,
     chat,
@@ -240,9 +266,10 @@ async function main() {
   const path = mergedPath();
   log(`PATH resolved (${path.split(":").length} entries)`);
 
-  function checkOrigin(req: Request): Response | null {
+  function checkOrigin(req: Request, route: string): Response | null {
     const origin = req.headers.get("origin");
     if (origin !== null && !ORIGIN_ALLOWLIST.has(origin)) {
+      logLimited("auth.rejected", `${route}:403`, { route, status: 403, reason: "origin" });
       return new Response("forbidden origin", { status: 403 });
     }
     return null;
@@ -254,10 +281,11 @@ async function main() {
     fetch(req, srv) {
       const url = new URL(req.url);
       if (url.pathname === "/ws") {
-        const denied = checkOrigin(req);
+        const denied = checkOrigin(req, "/ws");
         if (denied) return denied;
         const reqToken = url.searchParams.get("token") ?? "";
         if (!tokenEqual(reqToken, token)) {
+          logLimited("auth.rejected", "/ws:401", { route: "/ws", status: 401 });
           return new Response("unauthorized", { status: 401 });
         }
         if (srv.upgrade(req)) return undefined;
@@ -266,34 +294,74 @@ async function main() {
       if (url.pathname === "/bridge") {
         // called only by our mcp-bridge child processes, never by a browser
         if (req.method !== "POST" || req.headers.get("origin") !== null) {
+          logLimited("auth.rejected", "/bridge:403", {
+            route: "/bridge",
+            status: 403,
+            reason: req.headers.get("origin") !== null ? "origin" : "method",
+          });
           return new Response("forbidden", { status: 403 });
         }
         const auth = req.headers.get("authorization") ?? "";
-        const agentId = bridge.agentForToken(auth.startsWith("Bearer ") ? auth.slice(7) : "");
-        if (!agentId) return new Response("unauthorized", { status: 401 });
+        const presented = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+        const agentId = bridge.agentForToken(presented);
+        if (!agentId) {
+          const tokenFp = presented
+            ? createHash("sha256").update(presented).digest("hex").slice(0, 8)
+            : "none";
+          logLimited("auth.rejected", `/bridge:401:${tokenFp}`, {
+            route: "/bridge",
+            status: 401,
+            tokenFp,
+          });
+          return new Response("unauthorized", { status: 401 });
+        }
         return req
           .json()
           .then((body) => bridge.handle(agentId, body as Record<string, unknown>))
           .then(
             (r) => Response.json(r),
-            (e) => new Response((e as Error).message, { status: 400 }),
+            (e) => {
+              const message = (e as Error).message;
+              logLimited("bridge.error", `/bridge:error:${agentId}`, {
+                agentId,
+                errorType: errorType(e),
+              });
+              return new Response(message, { status: 400 });
+            },
           );
       }
       const hook = /^\/hooks\/([\w-]+)$/.exec(url.pathname);
       if (hook) {
+        const routineId = hook[1] ?? "";
         // local webhook trigger for a routine (curl, scripts); never from a browser page
         if (req.method !== "POST" || req.headers.get("origin") !== null) {
+          const label = routines.exists(routineId) ? routineId : "unknown";
+          logLimited("auth.rejected", `/hooks/:id:403:${label}`, {
+            route: "/hooks/:id",
+            status: 403,
+            reason: req.headers.get("origin") !== null ? "origin" : "method",
+            routineId: label,
+          });
           return new Response("forbidden", { status: 403 });
         }
         const auth = req.headers.get("authorization") ?? "";
-        const id = routines.webhookRoutine(
-          hook[1]!,
+        const authz = routines.webhookAuth(
+          routineId,
           auth.startsWith("Bearer ") ? auth.slice(7) : "",
         );
-        if (!id) return new Response("unauthorized", { status: 401 });
+        if (authz.kind === "notFound") return new Response("not found", { status: 404 });
+        if (authz.kind === "unauthorized") {
+          const label = authz.known ? routineId : "unknown";
+          logLimited("auth.rejected", `/hooks/:id:401:${label}`, {
+            route: "/hooks/:id",
+            status: 401,
+            routineId: label,
+          });
+          return new Response("unauthorized", { status: 401 });
+        }
         return req.text().then(
           (payload) => {
-            const run = routines.run(id, "webhook", payload);
+            const run = routines.run(authz.routineId, "webhook", payload);
             return Response.json(run, { status: run.error ? 409 : 202 });
           },
           () => new Response("bad request", { status: 400 }),
@@ -304,11 +372,12 @@ async function main() {
         return pages.serve(pageMatch[1]!, url.searchParams.get("token") ?? "");
       }
       if (url.pathname === "/health") {
-        const denied = checkOrigin(req);
+        const denied = checkOrigin(req, "/health");
         if (denied) return denied;
         const auth = req.headers.get("authorization") ?? "";
         const reqToken = auth.startsWith("Bearer ") ? auth.slice(7) : "";
         if (!tokenEqual(reqToken, token)) {
+          logLimited("auth.rejected", "/health:401", { route: "/health", status: 401 });
           return new Response("unauthorized", { status: 401 });
         }
         return Response.json({ ok: true, version: VERSION });
@@ -344,11 +413,11 @@ async function main() {
   mobile.rpc = (raw) => rpc.handle(raw);
   mobile.start();
   team.start();
-  console.log(`UPBOT_READY {"port":${server.port}}`);
+  console.log(readyLine(server.port ?? 0));
   log(`listening on 127.0.0.1:${server.port}, data dir ${dataDir}`);
 
-  process.on("SIGTERM", () => shutdown(0));
-  process.on("SIGINT", () => shutdown(0));
+  process.on("SIGTERM", () => shutdown(0, "SIGTERM"));
+  process.on("SIGINT", () => shutdown(0, "SIGINT"));
 }
 
 main().catch((e) => {

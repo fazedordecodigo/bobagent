@@ -10,10 +10,11 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@upbot/protocol": "workspace:*",
     "@tauri-apps/api": "2.12.4",
+    "@tauri-apps/plugin-log": "2.10.1",
     "@tauri-apps/plugin-opener": "2.7.2",
     "@tauri-apps/plugin-updater": "2.14.0",
+    "@upbot/protocol": "workspace:*",
     "react": "19.1.10",
     "react-dom": "19.1.10",
     "react-markdown": "10.1.0",

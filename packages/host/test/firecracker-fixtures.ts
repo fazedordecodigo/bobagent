@@ -67,7 +67,7 @@ export function makeFirecrackerHostRoot(
       injectGuestFile(rootfs, file.source, file.destination, file.mode);
     return root;
   } catch (e) {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     throw e;
   }
 }
@@ -104,7 +104,7 @@ export async function removeFirecrackerHostRoot(root: string): Promise<void> {
   }
   const deadline = Date.now() + 3000;
   while (pids.some(pidAlive) && Date.now() < deadline) await Bun.sleep(50);
-  rmSync(root, { recursive: true, force: true });
+  rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 
 export function firecrackerPids(root: string): number[] {
@@ -121,16 +121,6 @@ export function firecrackerRunDirs(root: string, agentId: string): string[] {
 
 export function recordedFirecrackerPid(runDir: string): number {
   return Number(readFileSync(join(runDir, "firecracker.pid"), "utf8"));
-}
-
-export function recordedFirecrackerAlive(runDir: string): boolean {
-  const pid = recordedFirecrackerPid(runDir);
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code !== "ESRCH";
-  }
 }
 
 export function assertGuestInitExecutable(rootfs: string): void {

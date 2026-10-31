@@ -1,7 +1,7 @@
 import type { Agent, Channel, ChannelMessage } from "@upbot/protocol";
 import { useEffect, useRef, useState } from "react";
 import type { DaemonClient } from "../lib/daemon";
-import { MonoAv } from "../lib/ui";
+import { errorMessage } from "../lib/errors";
 import { btnCls, inputCls } from "./AgentSettings";
 import { CopyButton } from "./CopyButton";
 import { Icon } from "./icons";
@@ -33,7 +33,7 @@ export function ChannelView({
       .then((r) => {
         if (alive) setMessages(r.messages);
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(errorMessage(e)));
     const off = client.on("channel.message", (m) => {
       if (m.channelId !== channel.id) return;
       setMessages((prev) => (prev.some((p) => p.id === m.id) ? prev : [...prev, m]));
@@ -54,7 +54,7 @@ export function ChannelView({
     try {
       await fn();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   };
 
@@ -102,7 +102,7 @@ export function ChannelView({
         : { className: "", dot: "s-idle", label: "Arquivada" };
   return (
     <div className="main channel-view" style={{ flex: 1 }}>
-      <header className="main-head channel-head">
+      <header className="main-head channel-head" data-tauri-drag-region>
         <span className="mono-av lg">#</span>
         <div className="title">
           <h2>{channel.name}</h2>
@@ -217,15 +217,6 @@ export function ChannelView({
                   </div>
                 ) : (
                   <div className="msg-agent">
-                    <MonoAv
-                      agent={
-                        agents.find((agent) => agent.id === m.authorAgentId) ?? {
-                          name: "?",
-                          avatar: null,
-                        }
-                      }
-                      dot={false}
-                    />
                     <div className="body">
                       <div className="who">
                         {name(m.authorAgentId)}
@@ -316,29 +307,32 @@ export function ChannelView({
               ))}
             </div>
           )}
-          <textarea
-            ref={inputRef}
-            rows={1}
-            aria-label={`Mensagem para #${channel.name}`}
-            placeholder={
-              active
-                ? `Mensagem para #${channel.name}`
-                : archived
-                  ? "Conversa em grupo arquivada"
-                  : "Conversa em grupo parada"
-            }
-            disabled={!active}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                send();
+          <div className="composer-row">
+            <textarea
+              ref={inputRef}
+              rows={1}
+              aria-label={`Mensagem para #${channel.name}`}
+              placeholder={
+                active
+                  ? `Mensagem para #${channel.name}`
+                  : archived
+                    ? "Conversa em grupo arquivada"
+                    : "Conversa em grupo parada"
               }
-            }}
-          />
-          <div className="composer-bar">
-            <span className="grow" />
+              disabled={!active}
+              value={text}
+              onChange={(e) => {
+                setText(e.target.value);
+                e.target.style.height = "auto";
+                e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
+            />
             <button
               type="submit"
               className="send"
@@ -376,7 +370,7 @@ export function ChannelCreateForm({
         e.preventDefault();
         setError(null);
         onSubmit({ name: name.trim(), memberIds: members, ownerId: owner }).catch((err) =>
-          setError(err instanceof Error ? err.message : String(err)),
+          setError(errorMessage(err)),
         );
       }}
     >

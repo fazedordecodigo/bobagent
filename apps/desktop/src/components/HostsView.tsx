@@ -3,12 +3,13 @@ import type {
   AgentPlacement,
   RemoteHost,
   Subagent,
-  VmCredential,
   VmCredentialKind,
   VmCredentialProvider,
 } from "@upbot/protocol";
 import { useCallback, useEffect, useState } from "react";
+import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 import { btnCls, inputCls } from "./AgentSettings";
 
 function Preflight({ h }: { h: RemoteHost }) {
@@ -55,19 +56,20 @@ function VmCredentials({
   client: DaemonClient;
   onError: (e: unknown) => void;
 }) {
-  const [creds, setCreds] = useState<VmCredential[]>([]);
+  const {
+    data: credsData,
+    error: credsError,
+    reload,
+  } = useDaemonQuery(client, "vmCredentials.list", {}, { events: { "hosts.changed": true } });
+  const creds = credsData ?? [];
+  useEffect(() => {
+    onError(credsError);
+  }, [credsError, onError]);
   const [form, setForm] = useState<{
     provider: VmCredentialProvider;
     kind: VmCredentialKind;
     value: string;
   }>({ provider: "claude", kind: "oauth_token", value: "" });
-  const reload = useCallback(() => {
-    client.request("vmCredentials.list", {}).then(setCreds).catch(onError);
-  }, [client, onError]);
-  useEffect(() => {
-    reload();
-    return client.on("hosts.changed", reload);
-  }, [client, reload]);
   const kinds = Object.keys(CRED_HINT[form.provider]) as VmCredentialKind[];
   return (
     <section className="space-y-2">
@@ -161,10 +163,7 @@ export function HostsView({ client, agents }: { client: DaemonClient; agents: Ag
   const [form, setForm] = useState({ name: "", target: "", port: "22", identityFile: "" });
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const fail = useCallback(
-    (e: unknown) => setError(e instanceof Error ? e.message : String(e)),
-    [],
-  );
+  const fail = useCallback((e: unknown) => setError(e === null ? null : errorMessage(e)), []);
 
   const reload = useCallback(() => {
     client.request("hosts.list", {}).then(setHosts).catch(fail);

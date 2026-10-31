@@ -1,13 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import type { Agent, AgentUsage, ChatItem, Turn } from "@upbot/protocol";
+import type { Agent, ChatItem } from "@upbot/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
   FAKE_AGENT,
   readLog,
-  readPids,
+  sendAndWait,
   startDaemon,
+  stopDaemon,
   tmp,
 } from "./helpers";
 
@@ -21,20 +22,13 @@ describe("usage + compaction e2e", () => {
   let c: DaemonClient;
   let a: Agent;
 
-  async function turn(agentId: string, text: string): Promise<Turn> {
-    const { queueId } = (await c.request("chat.send", { agentId, text })) as { queueId: string };
-    return (await c.waitForEventWhere(
-      "turn.ended",
-      (d) => (d as Turn).queueId === queueId,
-      20000,
-    )) as Turn;
-  }
+  const turn = (agentId: string, text: string) => sendAndWait(c, agentId, text, 20000);
 
   const compactionDone = (agentId: string, reason: string) =>
     c.waitForEventWhere(
       "item.updated",
       (d) => {
-        const i = d as ChatItem;
+        const i = d;
         return (
           i.agentId === agentId &&
           i.kind === "compaction" &&
@@ -60,24 +54,17 @@ describe("usage + compaction e2e", () => {
       UPBOT_COMPACT_THRESHOLD: "0.8",
     });
     c = await DaemonClient.connect(daemon.port, TOKEN);
-    a = (await c.request("agents.create", {
+    a = await c.request("agents.create", {
       name: "U",
       provider: "devin",
       instructions: "",
-    })) as Agent;
+    });
   });
 
-  afterAll(() => {
-    c?.close();
-    try {
-      daemon.proc.kill("SIGKILL");
-    } catch {}
-    for (const pid of readPids(stateDir)) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {}
-    }
-    for (const d of [dataDir, agentsRoot, stateDir]) rmSync(d, { recursive: true, force: true });
+  afterAll(async () => {
+    await stopDaemon(daemon, c, stateDir);
+    for (const d of [dataDir, agentsRoot, stateDir])
+      rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   test("compact with no history is rejected", async () => {
@@ -87,14 +74,10 @@ describe("usage + compaction e2e", () => {
   });
 
   test("usage updates are accumulated, broadcast and persisted", async () => {
-    const ev = c.waitForEventWhere(
-      "agent.usage",
-      (d) => (d as AgentUsage).inputTokens === 100,
-      20000,
-    );
+    const ev = c.waitForEventWhere("agent.usage", (d) => d.inputTokens === 100, 20000);
     await turn(a.id, "usage:1000/10000");
     await ev;
-    const u = (await c.request("agents.usage", { agentId: a.id })) as AgentUsage;
+    const u = await c.request("agents.usage", { agentId: a.id });
     expect(u).toMatchObject({
       usedTokens: 1000,
       contextWindow: 10000,
@@ -102,7 +85,7 @@ describe("usage + compaction e2e", () => {
       outputTokens: 20,
     });
     await turn(a.id, "usage:2000/10000");
-    const u2 = (await c.request("agents.usage", { agentId: a.id })) as AgentUsage;
+    const u2 = await c.request("agents.usage", { agentId: a.id });
     expect(u2).toMatchObject({
       usedTokens: 2000,
       inputTokens: 200,
@@ -118,7 +101,7 @@ describe("usage + compaction e2e", () => {
     const item = await done;
     expect(item.status).toBe("completed");
     expect(item.summary).toBe("SUMMARY: 2 earlier prompts");
-    const u = (await c.request("agents.usage", { agentId: a.id })) as AgentUsage;
+    const u = await c.request("agents.usage", { agentId: a.id });
     expect(u.usedTokens).toBeNull();
     expect(u.compactions).toBe(1);
     await turn(a.id, "echo:after");
@@ -133,7 +116,7 @@ describe("usage + compaction e2e", () => {
     const done = compactionDone(a.id, "auto");
     await turn(a.id, "usage:9000/10000");
     expect((await done).status).toBe("completed");
-    const u = (await c.request("agents.usage", { agentId: a.id })) as AgentUsage;
+    const u = await c.request("agents.usage", { agentId: a.id });
     expect(u.compactions).toBe(2);
     expect((await turn(a.id, "echo:still works")).status).toBe("completed");
   });
@@ -141,12 +124,10 @@ describe("usage + compaction e2e", () => {
   test("queued messages wait for compaction to finish", async () => {
     const done = compactionDone(a.id, "auto");
     await c.request("chat.send", { agentId: a.id, text: "usage:9500/10000" });
-    const { queueId } = (await c.request("chat.send", { agentId: a.id, text: "echo:queued" })) as {
-      queueId: string;
-    };
-    const ended = c.waitForEventWhere("turn.ended", (d) => (d as Turn).queueId === queueId, 20000);
+    const { queueId } = await c.request("chat.send", { agentId: a.id, text: "echo:queued" });
+    const ended = c.waitForEventWhere("turn.ended", (d) => d.queueId === queueId, 20000);
     await done;
-    expect(((await ended) as Turn).status).toBe("completed");
+    expect((await ended).status).toBe("completed");
     expect(lastPrompt()).toContain("conversation_summary");
   });
 });

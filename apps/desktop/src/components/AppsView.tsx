@@ -1,7 +1,13 @@
-import type { Agent, AppCatalogEntry, ConnectedApp } from "@upbot/protocol";
+import type { Agent, AppCatalogEntry, AppPermissionKind, ConnectedApp } from "@upbot/protocol";
 import { useCallback, useEffect, useState } from "react";
+import { permissionLabels } from "../lib/app-permissions";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 import { btnCls, inputCls } from "./AgentSettings";
+import { AppPermissionsDialog } from "./AppPermissionsDialog";
+import { AppApprovalCards } from "./ApprovalsView";
+import s from "./AppsView.module.css";
+import { ScopeTag } from "./ds/controls";
 
 const dot = (s: ConnectedApp["status"]) =>
   s === "ready"
@@ -50,7 +56,9 @@ export function AppsView({ client, agents }: { client: DaemonClient; agents: Age
   const [secrets, setSecrets] = useState<Record<string, string>>({});
   const [custom, setCustom] = useState({ name: "", command: "", url: "", key: "", value: "" });
   const [error, setError] = useState<string | null>(null);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const [permissionsId, setPermissionsId] = useState<string | null>(null);
+  const permissionsApp = apps.find((app) => app.id === permissionsId);
+  const fail = (e: unknown) => setError(errorMessage(e));
   const load = useCallback(() => {
     client
       .request("apps.list", {})
@@ -72,21 +80,29 @@ export function AppsView({ client, agents }: { client: DaemonClient; agents: Age
     setCustom({ name: "", command: "", url: "", key: "", value: "" });
   };
   return (
-    <div className="mx-auto max-w-2xl space-y-4 p-6">
-      <h2 className="text-lg font-semibold">Connected apps</h2>
+    <div className={s.page}>
+      <h2 className={s.title}>Apps conectados</h2>
       <p className="text-xs text-zinc-500">
-        Connect an app once and your bots can use its tools. UpBot runs each app's MCP server
-        itself; tokens are encrypted in the vault and never shown to bots.
+        Conecte um app para seus bots usarem suas ferramentas. O UpBot executa o servidor MCP de
+        cada app. Os tokens ficam criptografados no cofre e não são mostrados aos bots.
       </p>
+      <AppApprovalCards client={client} agents={agents} primary={!picked} />
+      <h3>Seus apps</h3>
       <ul className="space-y-2">
         {apps.map((a) => (
-          <li key={a.id} className="space-y-2 rounded border border-zinc-800 p-3 text-sm">
+          <li key={a.id} className="space-y-2 rounded-2xl border border-zinc-800 p-3 text-sm">
             <div className="flex items-center gap-2">
               <span className={`inline-block h-2 w-2 rounded-full ${dot(a.status)}`} />
-              <span className="font-medium">{a.name}</span>
+              <button
+                type="button"
+                className="font-medium min-h-11"
+                onClick={() => setPermissionsId(a.id)}
+              >
+                {a.name}
+              </button>
               <span className="text-xs text-zinc-500">
                 {a.status}
-                {a.status === "ready" ? ` · ${a.tools.length} tools` : ""}
+                {a.status === "ready" ? ` · ${a.tools.length} ferramentas` : ""}
               </span>
               <label className="ml-auto flex items-center gap-1 text-xs text-zinc-400">
                 <input
@@ -98,24 +114,34 @@ export function AppsView({ client, agents }: { client: DaemonClient; agents: Age
                       .catch(fail)
                   }
                 />
-                on
+                Ativo
               </label>
               <button
                 type="button"
                 className="text-xs text-sky-400 hover:text-sky-300"
                 onClick={() => client.request("apps.refresh", { id: a.id }).catch(fail)}
               >
-                Restart
+                Reiniciar
               </button>
               <button
                 type="button"
                 className="text-xs text-zinc-500 hover:text-red-400"
-                onClick={() => client.request("apps.delete", { id: a.id }).catch(fail)}
+                onClick={() => setPermissionsId(a.id)}
               >
-                Remove
+                Permissões
               </button>
             </div>
             {a.error && <div className="text-xs text-red-400">{a.error}</div>}
+            <div className={s.scopes}>
+              {Object.entries(a.permissions)
+                .filter(([, level]) => level !== "off")
+                .map(([kind, level]) => (
+                  <ScopeTag key={kind} ask={level === "ask"}>
+                    {permissionLabels[kind as AppPermissionKind]}
+                    {level === "ask" ? " · pergunta" : ""}
+                  </ScopeTag>
+                ))}
+            </div>
             {a.tools.length > 0 && (
               <div className="text-xs text-zinc-500" title={a.tools.map((t) => t.name).join(", ")}>
                 {a.tools
@@ -134,31 +160,39 @@ export function AppsView({ client, agents }: { client: DaemonClient; agents: Age
             />
           </li>
         ))}
-        {apps.length === 0 && <li className="text-sm text-zinc-500">No apps connected yet.</li>}
+        {apps.length === 0 && <li className="text-sm text-zinc-500">Nenhum app conectado.</li>}
       </ul>
-      <h3 className="text-sm font-semibold text-zinc-300">Add an app</h3>
+      {permissionsApp && (
+        <AppPermissionsDialog
+          app={permissionsApp}
+          client={client}
+          onClose={() => setPermissionsId(null)}
+        />
+      )}
+      <h3 className="text-sm font-semibold text-zinc-300">Adicionar app</h3>
       <div className="grid grid-cols-2 gap-2">
         {[
           ...catalog,
           {
             id: "custom-stdio",
-            name: "Custom MCP (command)",
-            description: "Any stdio MCP server, e.g. npx -y <package>",
+            name: "MCP personalizado (comando)",
+            description: "Servidor MCP por comando, como npx -y <pacote>",
           },
           {
             id: "custom-http",
-            name: "Custom MCP (URL)",
-            description: "A remote streamable-HTTP MCP server",
+            name: "MCP personalizado (URL)",
+            description: "Servidor MCP remoto por HTTP",
           },
         ].map((e) => (
           <button
             key={e.id}
             type="button"
+            aria-pressed={picked === e.id}
             onClick={() => {
               reset();
               setPicked(e.id);
             }}
-            className={`rounded border p-2 text-left text-sm hover:bg-zinc-900 ${
+            className={`app-choice rounded border p-2 text-left text-sm hover:bg-zinc-900 ${
               picked === e.id ? "border-sky-500" : "border-zinc-800"
             }`}
           >
@@ -225,7 +259,7 @@ export function AppsView({ client, agents }: { client: DaemonClient; agents: Age
               <input
                 className={inputCls}
                 required
-                placeholder="Name"
+                placeholder="Nome"
                 value={custom.name}
                 onChange={(e) => setCustom({ ...custom, name: e.target.value })}
               />
@@ -251,8 +285,8 @@ export function AppsView({ client, agents }: { client: DaemonClient; agents: Age
                   className={`${inputCls} font-mono`}
                   placeholder={
                     picked === "custom-http"
-                      ? "Token name (Bearer header)"
-                      : "Env var name (optional)"
+                      ? "Nome do token (cabeçalho Bearer)"
+                      : "Variável de ambiente (opcional)"
                   }
                   value={custom.key}
                   onChange={(e) => setCustom({ ...custom, key: e.target.value })}
@@ -261,7 +295,7 @@ export function AppsView({ client, agents }: { client: DaemonClient; agents: Age
                   className={inputCls}
                   type="password"
                   autoComplete="off"
-                  placeholder="Secret value"
+                  placeholder="Valor do segredo"
                   value={custom.value}
                   onChange={(e) => setCustom({ ...custom, value: e.target.value })}
                 />
@@ -271,14 +305,14 @@ export function AppsView({ client, agents }: { client: DaemonClient; agents: Age
           {error && <div className="text-xs text-red-400">{error}</div>}
           <div className="flex gap-2">
             <button type="submit" className={`${btnCls} bg-sky-600 hover:bg-sky-500`}>
-              Connect
+              Conectar
             </button>
             <button
               type="button"
               className={`${btnCls} bg-zinc-700 hover:bg-zinc-600`}
               onClick={reset}
             >
-              Cancel
+              Cancelar
             </button>
           </div>
         </form>

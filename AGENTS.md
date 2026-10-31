@@ -1,6 +1,6 @@
 # UpBot
 
-Local-first macOS desktop hub for a team of collaborating general-purpose AI bots
+Local-first cross-platform desktop hub for a team of collaborating general-purpose AI bots
 (web, files, email, connected apps). Code and RPC names still say "agent"; the UI says "bot".
 Renamed from BobAgent: `src/legacy.ts` moves `~/BobAgent` -> `~/UpBot` and repoints
 workspace paths; Rust moves the `com.bobagent.desktop` data dir; the vault key falls back to
@@ -40,14 +40,37 @@ vault as `app.<id>.<KEY>` (hidden from `vault.list`); tool output has secrets re
 The bridge appends app tools to `tools/list` as `<slug>-<tool>` and routes calls to them
 (`agentIds` empty = every bot). RPC `apps.catalog/list/connect/update/refresh/delete`, event
 `apps.changed`; UI Settings → Apps. Tests: `test/apps.e2e.test.ts` + `fixtures/fake-mcp-server.ts`.
+Migration 19 adds `permissions_json`: `read | write | send | pay | book | del` map to
+`off | ask | allow`. New and migrated apps default to read=allow and all others=ask.
+Sensitive kinds (send/pay/book/del) reject allow in both protocol schemas and AppsService.
+`apps.connect/update` accept partial permissions. `classifyAppTool` in `@upbot/protocol`
+(shared with the desktop UI) classifies the
+operation after `<slug>-` on underscores, hyphens and camelCase. The leading verb determines
+the kind; verbs after and/or/then can escalate it (del > pay > book > send > write > read).
+Read-object nouns do not escalate. An unknown leading token falls back to known verbs
+anywhere in the name; no known verb fails closed to write.
+This is a naming heuristic, not argument or semantic inspection.
+The Apps permissions dialog edits stored levels; disconnect confirms removal of saved
+secrets, while enable/disable remains reversible. No account or last-used data is invented.
 Grok rejects `__` in MCP tool names because it uses that separator to qualify server and tool names.
 
 ## Approvals (UpBot)
 
 `src/approvals.ts` (`ApprovalService`): every bridge tool call passes `gate()`. Rules
 (`settings.approval_rules`, glob on tool names, per bot or `agentId: null`): "ask" beats
-"allow"; with no rule, connected-app tools whose operation looks like a write ask first.
-A lone `*` allow does not bypass that connected-app write default; only a matching non-`*` allow does.
+"allow". App permissions are authoritative: off denies without an approval, allow passes
+only for read/write, ask creates an approval. Explicit ask rules still require review;
+neither specific nor wildcard allow rules bypass app permissions. Sensitive app tools
+always ask unless off (then deny). App-tool approvals carry appId, appName and permission.
+Unknown operations use write (ask by default), never the default read allow.
+For app requests, `task` approves once and grants the same app+kind for the current turn
+only (non-sensitive kinds); turn end clears grants. `always` sets a non-sensitive app
+kind to allow and returns previousLevel for undo via apps.update. For sensitive kinds,
+task/always approve only this call, leave ask unchanged and never create an allow rule.
+Non-app approvals retain tool-name-rule behavior. Decisions emit approval.updated;
+permission changes also emit apps.changed. Apps, composer, Approvals and RunPanel
+refresh from these events. Undo restores only the previous preference, never an executed
+external action; task and deny expose no undo.
 A pending approval blocks the call; background turns (from another bot, routine, gateway,
 team or group chat — `AgentRuntime.currentTurn().background`) expire after
 `UPBOT_APPROVAL_BACKGROUND_TTL_MS` (10 min), others after `UPBOT_APPROVAL_TTL_MS` (60 min);
@@ -56,7 +79,38 @@ vault allowlisted to the bot) and `request_takeover` (user uses the bot browser,
 RPC `approvals.list/respond/rules/setRules` (also allowed for mobile), events
 `approval.updated`, `approvals.rulesChanged`. Codex gets `tool_timeout_sec = 3600` for MCP
 servers so waits do not time out. UI: `ApprovalCards` above the composer, Settings →
-Approvals. Tests: `test/approvals.e2e.test.ts`.
+Approvals. Tests: `test/approvals.e2e.test.ts`, `test/approval-audit.test.ts`.
+Every terminal decision persists to `approval_audit` (migration 21): `approval.decided`
+(status, decision, kind, tool, app/permission, ageMs — never args or secret values),
+`approval.auto_denied` for off permissions, `approval.permission_escalated` for
+`always` escalations (app previousLevel or created ruleId), `approval.rules_changed`
+(added/removed/changed rule ids) and `approval.app_permissions_changed` (source connect/update/
+restore, per-kind from/to). Failed or overridden decisions include requestedDecision, reason
+and failure. `approval.secret_allowlist_read_failed` records vault allowlist failures; error
+details in the audit and stderr are limited to code/name, never message or stack. Tests:
+`test/approval-audit.test.ts` and
+`test/approvals.e2e.test.ts` cover the audit trail.
+
+Desktop notifications: `apps/desktop/src/lib/notifications.ts` owns approval eligibility,
+bounded summaries, actions, persisted one-hour mute and daemon decisions. Only pending
+approvals notify; unknown/incomplete/oversized details, secrets, takeover, pay, book and del
+open the app. Notifications never offer always. Permission buttons are deny/task;
+sends require recipient and full content. Closing a notification does not decide it.
+Inline results replace the same identifier; only a real preference undo can offer
+Desfazer for six seconds. Current once/task/deny decisions have no undo.
+macOS uses objc2 UserNotifications categories/delegate only in a real .app bundle;
+unbundled development is a no-op. Muting skips macOS delivery (not replayed on unmute).
+Windows uses WinRT ToastNotification XML (reminder requests), the app's AUMID and
+per-user COM activation registration; mute uses SuppressPopup plus silent audio and
+is also in the toast context menu. General settings expose mute on every platform.
+Native callbacks queue actions until the main frontend can drain them; the daemon
+remains authoritative. Optional dock/taskbar badges are not implemented.
+Pending approvals and their blocked calls are memory-only: after daemon shutdown,
+toast decisions cannot recover them. Missing IDs open Settings → Approvals with an
+unavailable notice and remove the toast, without retrying or fabricating approval.
+Windows registers its COM activator before spawning the daemon; `-ToastActivated`
+payloads and COM callbacks share the native queue. The single-instance plugin forwards
+second-launch arguments and focuses the existing window before another daemon starts.
 
 ## Pages (UpBot)
 
@@ -67,6 +121,8 @@ old versions in `.history/v<n>.html`. Served at `GET /pages/<id>?token=<viewToke
 per daemon start, CSP `default-src 'none'`, no network); UI `PagesView` (sidebar "Pages")
 shows them in `<iframe sandbox="allow-scripts">` (Tauri CSP `frame-src http://127.0.0.1:*`).
 RPC `pages.list/delete`, event `pages.changed`. Tests: `test/pages.e2e.test.ts`.
+Titles are capped at 200 and descriptions at 1000 UTF-16 units on create and update
+(including legacy values), without splitting a surrogate pair.
 
 ## Group chat + navigation (UpBot)
 
@@ -74,8 +130,9 @@ Channels are "Group chats" in the UI. `ChannelService.post(channelId, text, repl
 `@Name` sends to those members, `@everyone`/`@all` to every member, a reply to a bot's
 message goes to that bot (quoted as `<in_reply_to>`), otherwise the owner. Member replies are
 forwarded to the owner only for bot-originated work (`queue.from_agent_id`). Migration 18 adds
-`channel_messages.reply_to`. UI: `CommandPalette` (⌘K all, ⌘⇧F bots) and shortcuts in
-`App.tsx` (⌘N new bot, ⌘1–9 switch bot, ⌘, settings, ⌘P pages).
+`channel_messages.reply_to`. UI: `CommandPalette` (⌘K all, ⌘⇧F bots on macOS; Ctrl+K and
+Ctrl+Shift+F elsewhere) and shortcuts in `App.tsx` (⌘N new bot, ⌘1–9 switch bot, ⌘, settings,
+⌘P pages on macOS; Ctrl equivalents elsewhere).
 
 ## ACP providers in microVMs
 
@@ -108,7 +165,10 @@ devin/grok need a custom image plus `UPBOT_PROVIDER_COMMAND_<PROVIDER>`.
   stdout when listening on 127.0.0.1; all other logs go to stderr.
   Exits on SIGTERM/SIGINT and on stdin EOF. Migrations live in `src/db/migrations.ts`
   (ordered SQL array, tracked in `schema_migrations`). Agent delete is a soft delete;
-  workspace folders are never removed.
+  workspace folders are never removed. Settings use `src/db/settings.ts` (zod-validated;
+  invalid rows throw `InvalidSettingError`, surfaced over RPC as `internal` naming the key;
+  boot-time mobile/team consumers keep the feature off and log; `default_bot_seeded` is a
+  presence check). Tests: `test/settings.e2e.test.ts`.
 - `apps/desktop` — Tauri 2 + React 19 + Vite + Tailwind 4. Rust spawns the sidecar via
   `tauri-plugin-shell`, parses the READY line, and exposes `daemon_connection` ->
   `{port, token}`. Frontend WS client: `src/lib/daemon.ts`.
@@ -135,7 +195,8 @@ stdin EOF afterwards = shutdown. `spawnEnv` strips all `UPBOT_*` vars.
 Env vars (daemon):
 - `UPBOT_ACP_COMMAND_<PROVIDER>` — JSON array overriding the spawn command per
   provider (e.g. `UPBOT_ACP_COMMAND_DEVIN='["bun","path/to/agent.ts"]'`).
-- `UPBOT_CANCEL_GRACE_MS` — ms after `chat.cancel` before the process is killed.
+- `UPBOT_CANCEL_GRACE_MS` — ms after `chat.cancel` before the process is killed
+  (`0` kills immediately).
 
 Sign-in commands surfaced on auth errors: `devin auth login`, `agent login`,
 `grok login`, `opencode auth login`, `claude auth login`, `codex login` (all verified via --help). Gemini: `gemini`
@@ -212,7 +273,7 @@ spawns the real bridge and calls the tool).
 
 `src/channels.ts` (`ChannelService`, migration 6: `channels`, `channel_members`,
 `channel_messages`, `queue.channel_id` + `queue.prompt`). RPC `channels.list/create/
-history/post/stop/resume/archive/restore/reassign/setMembers`; events `channel.created`,
+history/post/stop/resume/archive/restore/reassign`; events `channel.created`,
 `channel.updated`, `channel.message`. A user post goes to the owner (default: first
 member) as a queue item whose provider prompt (`queue.prompt`) carries a
 `<channel_context>` block with role and recent transcript. When a channel turn ends
@@ -239,7 +300,9 @@ Tests: `test/usage.e2e.test.ts`.
 
 ## Avatars, memories, skills, agent creation (Phase 8)
 
-`Agent.avatar` (`{emoji,color}` or null, `agents.avatar_json`, migration 8). `agents.draft
+`Agent.avatar` (`{emoji,color}`, `{icon}` with `sym|mail|receipt|plane|chart|cal|sheet`, or
+null; `agents.avatar_json`, migration 8). `agents.restore {id}` restores a soft-deleted agent
+and emits `agent.created` so clients add it back to their lists. `agents.draft
 {prompt}` (`src/draft.ts`, deterministic) proposes name/instructions/avatar for the create
 form. Memories: `memories` table, `MemoryStore` (`src/memories.ts`), RPC
 `memories.list/add/update/delete`, event `memories.changed`. Skills library:
@@ -248,21 +311,28 @@ in `.history/` (`src/skills.ts`), RPC `skills.list/get/save/delete`, event `skil
 Bridge tools: `remember`, `forget`, `list_memories`, `list_skills`, `read_skill`,
 `create_skill`, `revise_skill`, `create_agent`. The first prompt of every fresh session is
 prefixed with `<agent_memories>` and `<skills_library>` (index only). UI:
-`components/Library.tsx`. Tests: `test/phase8.e2e.test.ts`.
+`components/Library.tsx`; the saved agent configuration screen is
+`apps/desktop/src/components/AgentConfigScreen.tsx`. Tests: `test/phase8.e2e.test.ts`.
 
 ## Routines + attachments (Phase 9)
 
 Routines (`src/routines.ts`, migration 9: `routines`, `routine_runs`) are saved prompts sent
 to an agent with `trigger` schedule|webhook|manual. Schedules: `every <n>m|h|d`, `daily HH:MM`,
 `weekly <day> HH:MM` (local time); the scheduler ticks every `UPBOT_ROUTINE_TICK_MS`
-(default 30000) and collapses missed runs into one. Webhooks: `POST /hooks/<routineId>` with
+(default 30000), skips soft-deleted agents, and collapses missed runs into one. Manual and
+webhook triggers also reject routines whose agent is soft-deleted; restoring the agent resumes
+scheduled runs. Webhooks: `POST /hooks/<routineId>` with
 `Authorization: Bearer <webhookToken>` (per-routine token; Origin rejected), body passed as
 `<webhook_payload>` (20 KB cap). RPC `routines.list/create/update/delete/run/runs`, events
 `routine.updated`/`routine.deleted`. The prompt is wrapped in `<routine name trigger>`;
-`queue.meta_json` puts `routine`/`attachments` on the user_message item.
+`queue.meta_json` puts `routine`/`attachments` on the user_message item. `readQueueMeta`
+validates each known field (routine/gateway/team/attachments entries) independently; invalid
+ones are dropped (no reply destination is invented), unknown keys are ignored, and an invalid
+or unparseable origin keeps the turn background.
 Attachments: `chat.send {attachments:[{name,mime,dataBase64}]}` (max 10, 25 MB total) are
 written to `<workspace>/attachments/<id>/` (`src/attachments.ts`, basename-sanitized, ZIPs
-extracted with `unzip`) and listed in an `<attachments>` block. Tests: `test/phase9.e2e.test.ts`.
+extracted with `unzip` or Windows `tar`, with unsafe archive paths rejected) and listed in an
+`<attachments>` block. Tests: `test/phase9.e2e.test.ts`.
 
 ## Agent browser (Phase 10)
 
@@ -279,9 +349,14 @@ browser is installed).
 
 ## Vault, connectors, Computer Use, voice (Phase 11)
 
-Vault (`src/vault.ts`, migration 10 `vault` + `settings`): AES-256-GCM secrets; key in the
-macOS Keychain (service `UpBot`, account `vault-key`), else `<data-dir>/vault.key`;
-`UPBOT_VAULT_KEY` (64 hex) overrides for tests. Per-secret agent allowlist. RPC
+Vault (`src/vault.ts`, migration 10 `vault` + `settings`): AES-256-GCM secrets; key precedence
+is `UPBOT_VAULT_KEY` (64 hex, tests), macOS Keychain (service `UpBot`, account `vault-key`),
+an existing `<data-dir>/vault.key`, then Windows DPAPI or Linux Secret Service. Linux writes
+`vault.key.location` after a successful Secret Service store so a locked/unavailable keyring
+cannot silently orphan secrets; when secure storage is unavailable, a 0600 plaintext key file
+is used with a warning. Fallback diagnostics are covered by `test/vault-platform.test.ts` and
+`test/vault-fallback.e2e.test.ts`. Existing plaintext keys are kept without migration.
+Per-secret agent allowlist. RPC
 `vault.list/set/setAccess/delete` (values never returned), event `vault.changed`; bridge
 `vault_list`, `vault_get`. Connectors (`src/connectors.ts`) use shared secrets without
 returning them: `connector.github` -> `github_api` (REST proxy, token redacted,
@@ -292,7 +367,7 @@ Computer Use (`src/computer.ts`, macOS): off per agent until `computer.setAccess
 `computer_screenshot` (screencapture), `computer_click` (CoreGraphics via JXA),
 `computer_type`, `computer_key` (System Events, whitelisted keys/modifiers);
 `UPBOT_COMPUTER_DRYRUN=<file>` logs commands instead (tests).
-Voice (`src/voice.ts`): `voice.speak/stop` (`say`, or `UPBOT_TTS_COMMAND` with text on
+Voice (`src/voice.ts`): `voice.speak` (`say`, or `UPBOT_TTS_COMMAND` with text on
 stdin), `voice.transcribe` (`UPBOT_STT_COMMAND` with `{file}`, or `whisper` on PATH),
 `voice.status`. UI: Vault view, Computer Use toggle, composer mic, read-aloud button;
 `src-tauri/Info.plist` has the microphone usage string. Tests: `test/phase11.e2e.test.ts`.
@@ -307,9 +382,14 @@ from `vault.list`, never shared with agents). Only `allowedUsers` reach the agen
 their id back); `@AgentName text` routes to another agent; in Slack/Discord channels only
 mentions count, DMs always. Prompt is wrapped in `<external_message>`; the queue
 `meta_json.gateway` drives the reply on `turn.ended`. RPC `gateways.list/create/update/delete`,
-events `gateway.updated/deleted`; UI `GatewaysView`. Test base URLs:
+events `gateway.updated/deleted`; UI `GatewaysView`. Daemon shutdown (SIGTERM/SIGINT/stdin EOF)
+calls `GatewayService.stopAll()` before closing runtimes. Test base URLs:
 `UPBOT_TELEGRAM_API`, `UPBOT_SLACK_API`, `UPBOT_DISCORD_API`.
-Tests: `test/gateways.e2e.test.ts`.
+Stderr logs use `[upbotd] gateway.<event> <json>` for error/disconnected/connected (recovery
+includes `downtimeMs` and `errorAttempts`), send_failed/send_recovered, deliver_failed and unauthorized_user.
+Error strings (including `status.error`) redact token values/shapes and URL paths, strip controls and cap at
+300 characters; later successful sends clear send-caused errors. Tests: `test/gateways.e2e.test.ts`,
+`test/gateways-shutdown.e2e.test.ts`, `test/gateways-telemetry.e2e.test.ts`.
 
 ## Marketplace (Phase 12b)
 
@@ -338,18 +418,29 @@ RPC `mobile.status/enable/pair/revoke`; UI `MobileView`. Tests: `test/mobile.e2e
 self-hostable Bun relay: admin token (`RELAY_ADMIN_TOKEN` or `<data>/admin-token`) manages
 members (`POST/GET /members`, `DELETE /members/:id`, tokens stored hashed in `team.json`);
 members connect to `/ws?token=` and exchange `share` / `send` / `incoming` / `reply` frames.
+Share entries are validated (string id/name/provider; avatar via protocol `AgentAvatar`, otherwise null).
 No chat content is stored on the relay. Daemon side `src/team.ts` (`settings.team`, token in
 the vault as `team.token`, hidden from `vault.list`, migration 13 `team_messages`): shares
 selected agents, runs incoming messages as `<team_message>` turns and replies on `turn.ended`.
+An incoming row is `completed` once the reply is handed to an open relay socket; if the socket
+is down it is `failed` and logged (`team reply not delivered`). The relay has no delivery ack
+and drops replies to offline members, so a sender's `out` row still `pending` after
+`UPBOT_TEAM_REPLY_TTL_MS` (default 30 min; checked at start and periodically) becomes `failed`;
+a late reply still overwrites it. No relay protocol change, nothing stored on the relay.
 RPC `team.status/connect/disconnect/share/send/messages`, events `team.updated/message`;
-UI `TeamView`. Tests: `test/team.e2e.test.ts` (spawns the relay).
+UI `TeamView`. Tests: `test/team.e2e.test.ts` (spawns the relay). Relay audit logs are JSON
+lines on stderr and never include member-supplied identifiers (only relay-known member IDs,
+fixed route labels, and socket IP); limits are 20 lines per actor per window across event types,
+with periodic `relay.audit_suppressed` summaries (`RELAY_AUDIT_WINDOW_MS`).
 
 ## CI, releases, updates, branding
 
-- `.github/workflows/ci.yml` (macos-14): lint, typecheck, test, build:daemon, cargo check, vite build.
-- `.github/workflows/release.yml`: on `v*` tags, tauri-action builds `.app` + `.dmg` with
-  `createUpdaterArtifacts`, publishes a GitHub release with `latest.json`. Updater signing
-  uses the `TAURI_SIGNING_PRIVATE_KEY` repo secret (pubkey in `tauri.conf.json`
+- `.github/workflows/ci.yml`: lint/typecheck on Ubuntu; tests, daemon build, Rust check and
+  desktop build on macOS, Linux and Windows.
+- `.github/workflows/release.yml`: on `v*` tags, tauri-action builds macOS `.app`/`.dmg`,
+  Linux `.AppImage`/`.deb` and an unsigned per-user Windows NSIS `.exe` into a draft release.
+  It composes `latest.json` from each platform's updater asset and signature before publishing.
+  Updater signing uses the `TAURI_SIGNING_PRIVATE_KEY` repo secret (pubkey in `tauri.conf.json`
   `plugins.updater`); Apple signing/notarization turn on when `APPLE_CERTIFICATE`,
   `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` (+ `APPLE_ID`, `APPLE_PASSWORD`,
   `APPLE_TEAM_ID`) secrets exist. Bump `version` in `tauri.conf.json` before tagging.
@@ -360,7 +451,7 @@ UI `TeamView`. Tests: `test/team.e2e.test.ts` (spawns the relay).
 ## Remote hosts, Firecracker, subagents
 
 `src/remote/hosts.ts` (`HostStore`, migration 14: `hosts`, `agent_placement`, `subagents`).
-RPC `hosts.list/create/update/delete/install/check`, `placements.list/set`, `subagents.list`;
+RPC `hosts.list/create/delete/install/check`, `placements.list/set`, `subagents.list`;
 events `hosts.changed`, `placement.updated`, `subagent.updated`; UI `components/HostsView.tsx`
 (Settings → Hosts). SSH runs the system `ssh` with `BatchMode=yes`,
 `StrictHostKeyChecking=accept-new`, keepalives, `-p`, optional `-i`, then `--` and the target
@@ -390,7 +481,8 @@ per-run root disk on session end. With `setpriv` installed, Firecracker runs wit
 `--pdeathsig KILL`. On the Linux x86_64/KVM test host, boot to first guest output measured 1.7
 seconds. The proxy resolves DNS once, rejects a hostname if any IPv4 answer is non-public, and
 connects to the approved address. CONNECT requests are audited at `vms/<agentId>/proxy.log`
-(rotated to `.1` above 1 MiB); provider processes drop inherited `UPBOT_*` variables while
+(rotated to `.1` above 1 MiB) with allow/deny decisions plus `connected`/`upstream error`
+outcomes per destination; provider processes drop inherited `UPBOT_*` variables while
 retaining explicit RunSpec env.
 MicroVM sign-in (`src/remote/credentials.ts`): `vmCredentials.list/set/delete` store
 `vmcred.<provider>` in the vault (hidden from `vault.list`, never on an allowlist):
@@ -431,12 +523,15 @@ configs, so it does not reflect stock defaults. Gemini's config path is unverifi
 ## Verified commands (run from repo root)
 
 - `bun install` — install workspace deps.
-- `bun run build:daemon` — compile `upbotd-aarch64-apple-darwin` into
-  `apps/desktop/src-tauri/binaries/` (Tauri externalBin naming).
+- `bun run build:daemon` — compile the daemon for the host OS/architecture into
+  `apps/desktop/src-tauri/binaries/` (Tauri externalBin naming);
+  `bun scripts/build-daemon.ts --target <rust-triple>` selects a supported cross-build target.
 - `bun run dev` — build the sidecar, then `tauri dev` (Vite on :1420).
-- `bun run build:app` — `tauri build --debug --bundles app` ->
-  `apps/desktop/src-tauri/target/debug/bundle/macos/UpBot.app`.
-- `bun run test` — `bun test packages/daemon packages/host` (daemon e2e: spawns the real daemon).
+- `bun run build:app` — build the debug desktop bundle for the host platform (macOS app,
+  Linux AppImage/deb, or Windows NSIS).
+- `bun run test` — `bun test packages/daemon packages/host apps/desktop/test` (daemon e2e and desktop browser tests).
+- Computer Use and built-in `say` voice are macOS-only; Linux uses Secret Service for the
+  vault key when available, while Windows uses DPAPI.
 - `bun run lint` — `biome check .`
 - `bun run typecheck` — `tsc -p` for protocol, daemon, relay, host, desktop (sequential).
 - `cd apps/desktop/src-tauri && cargo check` — Rust side.
@@ -444,6 +539,10 @@ configs, so it does not reflect stock defaults. Gemini's config path is unverifi
 ## Conventions
 
 - Dependencies are pinned to exact versions.
+- Windows command lookup follows PATHEXT and searches PATH directories in order; environment
+  PATH keys are case-insensitive and Windows provider CLI launches use `cross-spawn`.
+- On Windows, `mergedPath` skips login shells. On Linux it uses `$SHELL`, falling back to
+  `/bin/bash`; macOS falls back to `/bin/zsh`.
 - All client→daemon calls validate params with the protocol schemas; unknown methods
   and invalid params return `bad_request`.
 - The daemon requires `Authorization: Bearer <token>` on `/health` and `?token=` on

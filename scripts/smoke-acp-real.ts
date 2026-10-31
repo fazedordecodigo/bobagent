@@ -12,9 +12,15 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Agent, ChatItem, PendingPermission, Turn } from "@upbot/protocol";
+import { readReadyPort } from "../packages/daemon/src/ready";
+import { daemonTarget } from "../packages/daemon/src/target";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const BINARY = join(ROOT, "apps/desktop/src-tauri/binaries/upbotd-aarch64-apple-darwin");
+const BINARY = join(
+  ROOT,
+  "apps/desktop/src-tauri/binaries",
+  `upbotd-${daemonTarget(process.platform, process.arch).rustTriple}`,
+);
 const TOKEN = `smoke-${crypto.randomUUID()}`;
 const TURN_TIMEOUT_MS = 180_000;
 const PROVIDERS = ["devin", "cursor", "grok", "opencode"] as const;
@@ -115,33 +121,10 @@ async function startDaemon(
     stdout: "pipe",
     stderr: "pipe",
   });
-  const sink = proc.stdin as { write: (s: string) => void; flush: () => void };
-  sink.write(`${TOKEN}\n`);
-  sink.flush();
-  const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
-  let buf = "";
-  const port = await new Promise<number>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error("no READY")), 20000);
-    const pump = async () => {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) return reject(new Error("stdout closed"));
-        buf += new TextDecoder().decode(value);
-        const i = buf.indexOf("\n");
-        if (i >= 0) {
-          const line = buf.slice(0, i);
-          buf = buf.slice(i + 1);
-          if (line.startsWith("UPBOT_READY ")) {
-            clearTimeout(t);
-            resolve(JSON.parse(line.slice(16)).port);
-            return;
-          }
-        }
-      }
-    };
-    pump().catch(reject);
+  const port = await readReadyPort(proc, TOKEN, 20000).catch((error) => {
+    proc.kill();
+    throw error;
   });
-  reader.releaseLock();
   return { proc, port };
 }
 
@@ -185,11 +168,17 @@ async function main() {
         )
         .then(async (p) => {
           const perm = p as PendingPermission;
-          rec.permissionRequest = { title: perm.title, answered: "reject_once" };
-          await c.request("permissions.respond", {
-            requestId: perm.requestId,
-            optionId: "reject_once",
-          });
+          const pr: Record<string, unknown> = { title: perm.title };
+          rec.permissionRequest = pr;
+          try {
+            await c.request("permissions.respond", {
+              requestId: perm.requestId,
+              optionId: "reject_once",
+            });
+            pr.answered = "reject_once";
+          } catch (e) {
+            rec.permissionRespondError = String(e);
+          }
         })
         .catch(() => {});
       void permWatch;

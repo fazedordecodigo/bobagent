@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import type { Agent, BrowserTab } from "@upbot/protocol";
 import type { Subprocess } from "bun";
 import type { Broadcast } from "./rpc";
@@ -7,23 +7,88 @@ import type { Broadcast } from "./rpc";
 // Agent-controllable browser: one Chromium-family browser (Chrome/Chromium/Edge/Brave) with
 // its own profile, driven over the Chrome DevTools Protocol. Each agent gets its own tab.
 
-const CANDIDATES = [
+const MAC_CANDIDATES = [
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   "/Applications/Chromium.app/Contents/MacOS/Chromium",
   "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
   "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+];
+const LINUX_CANDIDATES = [
   "/usr/bin/google-chrome",
+  "/usr/bin/google-chrome-stable",
   "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
+  "/snap/bin/chromium",
+  "/usr/bin/microsoft-edge",
+  "/usr/bin/brave-browser",
 ];
 const NAV_TIMEOUT = 20_000;
 const SNAPSHOT_CHARS = 15_000;
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 type Json = Record<string, unknown>;
+
+export async function waitForBrowserPort(
+  read: () => string,
+  alive: () => boolean,
+  timeout = 20_000,
+) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline && alive()) {
+    try {
+      const contents = read();
+      if (contents.split("\n").length >= 2) return contents;
+    } catch (error) {
+      if (!["ENOENT", "EBUSY", "EPERM"].includes((error as NodeJS.ErrnoException).code ?? ""))
+        throw error;
+    }
+    await Bun.sleep(100);
+  }
+  throw new Error("the browser did not start");
+}
+
+function envValue(env: Record<string, string | undefined>, key: string): string | undefined {
+  return Object.entries(env).find(([name]) => name.toLowerCase() === key.toLowerCase())?.[1];
+}
+
+export function browserCandidates(
+  platform: string,
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  if (platform === "darwin") return MAC_CANDIDATES;
+  if (platform === "linux") return LINUX_CANDIDATES;
+  if (platform !== "win32") return [];
+
+  const roots = [
+    envValue(env, "ProgramFiles"),
+    envValue(env, "ProgramFiles(x86)"),
+    envValue(env, "LOCALAPPDATA"),
+  ].filter((value): value is string => Boolean(value));
+  const chrome = roots.map((root) =>
+    win32.join(root, "Google", "Chrome", "Application", "chrome.exe"),
+  );
+  const edge = [envValue(env, "ProgramFiles"), envValue(env, "ProgramFiles(x86)")]
+    .filter((value): value is string => Boolean(value))
+    .map((root) => win32.join(root, "Microsoft", "Edge", "Application", "msedge.exe"));
+  const brave = roots.map((root) =>
+    win32.join(root, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+  );
+  return [...chrome, ...edge, ...brave];
+}
 
 export function findBrowser(): string | null {
   const override = process.env.UPBOT_BROWSER_PATH;
   if (override) return existsSync(override) ? override : null;
-  return CANDIDATES.find((p) => existsSync(p)) ?? null;
+  return browserCandidates(process.platform).find((p) => existsSync(p)) ?? null;
 }
 
 class Cdp {
@@ -148,10 +213,10 @@ export class BrowserService {
       throw new Error(
         "no Chromium-based browser found (install Google Chrome or set UPBOT_BROWSER_PATH)",
       );
+    await this.close();
     mkdirSync(this.profileDir, { recursive: true });
     const portFile = join(this.profileDir, "DevToolsActivePort");
     rmSync(portFile, { force: true });
-    this.kill();
     const headless = process.env.UPBOT_BROWSER_HEADLESS === "1";
     this.proc = Bun.spawn(
       [
@@ -163,17 +228,24 @@ export class BrowserService {
         ...(headless ? ["--headless=new"] : []),
         "about:blank",
       ],
-      { stdout: "ignore", stderr: "ignore", stdin: "ignore" },
+      {
+        stdout: "ignore",
+        stderr: "ignore",
+        stdin: "ignore",
+        windowsHide: process.platform === "win32",
+      },
     );
-    const deadline = Date.now() + 20_000;
-    while (!existsSync(portFile) || readFileSync(portFile, "utf8").split("\n").length < 2) {
-      if (Date.now() > deadline || this.proc.exitCode !== null) {
-        this.kill();
-        throw new Error("the browser did not start");
-      }
-      await Bun.sleep(100);
+    let contents: string;
+    try {
+      contents = await waitForBrowserPort(
+        () => readFileSync(portFile, "utf8"),
+        () => this.proc !== null && this.proc.exitCode === null,
+      );
+    } catch (error) {
+      await this.close();
+      throw error;
     }
-    const [port, path] = readFileSync(portFile, "utf8").split("\n");
+    const [port, path] = contents.split("\n");
     const cdp = await Cdp.connect(`ws://127.0.0.1:${port}${path}`);
     cdp.onClose = () => {
       this.cdp = null;
@@ -184,18 +256,41 @@ export class BrowserService {
     return cdp;
   }
 
-  private kill() {
+  private kill(proc = this.proc) {
+    if (!proc) return;
     try {
-      this.proc?.kill();
+      if (process.platform === "win32") {
+        Bun.spawnSync(["taskkill", "/pid", String(proc.pid), "/T", "/F"], {
+          stdout: "ignore",
+          stderr: "ignore",
+          windowsHide: true,
+        });
+      } else {
+        proc.kill();
+      }
     } catch {}
-    this.proc = null;
+    if (this.proc === proc) this.proc = null;
   }
 
   async close(): Promise<void> {
-    this.cdp?.close();
+    const cdp = this.cdp;
+    const proc = this.proc;
+    if (cdp && !cdp.closed) {
+      await withTimeout(
+        cdp.send("Browser.close").catch(() => null),
+        1_000,
+      );
+    }
+    cdp?.close();
     this.cdp = null;
     this.tabs.clear();
-    this.kill();
+    if (proc) {
+      if ((await withTimeout(proc.exited, 5_000)) === null) {
+        this.kill(proc);
+        if ((await withTimeout(proc.exited, 5_000)) === null)
+          throw new Error("the browser did not exit");
+      } else if (this.proc === proc) this.proc = null;
+    }
     this.emit();
   }
 

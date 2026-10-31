@@ -1,8 +1,11 @@
-import type { Agent, AgentPlacement, ApprovalRule } from "@upbot/protocol";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useChat } from "../hooks/useChat";
+import type { Agent, ApprovalRule } from "@upbot/protocol";
+import { useMemo, useRef, useState } from "react";
+import { useChatApi } from "../hooks/useChat";
+import { useDaemonQuery } from "../hooks/useDaemonQuery";
+import { useLayerFocus, useMediaQuery } from "../hooks/useLayerFocus";
 import type { AgentOverview } from "../hooks/useOverview";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
 import { Pill, type UiStatus } from "../lib/ui";
 import { Icon, type IconName } from "./icons";
 import { UsageBar } from "./UsageBar";
@@ -31,68 +34,49 @@ export function RunPanel({
   overview,
   onClose,
   onOpenApps,
+  overlayOpen,
 }: {
   client: DaemonClient;
   agent: Agent;
   overview: AgentOverview;
   onClose: () => void;
   onOpenApps: () => void;
+  overlayOpen: boolean;
 }) {
-  const chat = useChat(client, agent.id);
-  const [rules, setRules] = useState<ApprovalRule[]>([]);
-  const [placement, setPlacement] = useState<AgentPlacement | null>(null);
-  const [memories, setMemories] = useState<{ id: string; text: string }[]>([]);
+  const panelRef = useRef<HTMLElement>(null);
+  const overlay = useMediaQuery("(max-width: 1180px)");
+  useLayerFocus(panelRef, overlay && overlayOpen);
+  const chat = useChatApi();
+  const {
+    data: rules = [],
+    error: rulesLoadError,
+    loaded: rulesLoaded,
+    reload: reloadRules,
+  } = useDaemonQuery(
+    client,
+    "approvals.rules",
+    {},
+    {
+      events: { "approvals.rulesChanged": true },
+    },
+  );
+  const { data: memories = [] } = useDaemonQuery(
+    client,
+    "memories.list",
+    { agentId: agent.id },
+    { events: { "memories.changed": (event) => event.agentId === agent.id } },
+  );
+  const { data: placements } = useDaemonQuery(
+    client,
+    "placements.list",
+    {},
+    {
+      events: { "placement.updated": (next) => next.agentId === agent.id },
+    },
+  );
+  const placement = placements?.find((item) => item.agentId === agent.id) ?? null;
   const [rulesError, setRulesError] = useState<string | null>(null);
   const [rulesBusy, setRulesBusy] = useState(false);
-
-  const loadRules = useCallback(() => {
-    client
-      .request("approvals.rules", {})
-      .then(setRules)
-      .catch(() => {});
-  }, [client]);
-  const loadMemories = useCallback(() => {
-    client
-      .request("memories.list", { agentId: agent.id })
-      .then(setMemories)
-      .catch(() => {});
-  }, [agent.id, client]);
-
-  useEffect(() => {
-    loadRules();
-    loadMemories();
-    const offRules = client.on("approvals.rulesChanged", loadRules);
-    const offMemory = client.on("memories.changed", (event) => {
-      if (event.agentId === agent.id) loadMemories();
-    });
-    return () => {
-      offRules();
-      offMemory();
-    };
-  }, [agent.id, client, loadMemories, loadRules]);
-
-  useEffect(() => {
-    let alive = true;
-    let receivedEvent = false;
-    setPlacement(null);
-    const off = client.on("placement.updated", (next) => {
-      if (next.agentId !== agent.id) return;
-      receivedEvent = true;
-      setPlacement(next);
-    });
-    client
-      .request("placements.list", {})
-      .then((placements) => {
-        if (alive && !receivedEvent) {
-          setPlacement(placements.find((item) => item.agentId === agent.id) ?? null);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-      off();
-    };
-  }, [agent.id, client]);
 
   const currentTurnId = chat.runningTurn?.id ?? overview.latestTurn?.id;
   const turns = chat.items.filter(
@@ -112,23 +96,24 @@ export function RunPanel({
     setRulesBusy(true);
     setRulesError(null);
     try {
-      setRules(await client.request("approvals.setRules", { rules: next }));
+      // approvals.setRules replaces the whole list; the rulesChanged event it
+      // broadcasts refreshes `rules` through the query above.
+      await client.request("approvals.setRules", { rules: next });
     } catch (e) {
-      setRulesError(e instanceof Error ? e.message : String(e));
+      setRulesError(errorMessage(e));
     } finally {
       setRulesBusy(false);
     }
   };
 
   const toggleGlobal = () => {
-    const existing = rules.find((rule) => rule.pattern === "*" && rule.agentId === agent.id);
-    if (existing?.action === "allow") {
-      void saveRules(rules.filter((rule) => rule.id !== existing.id));
+    if (globalRule?.action === "allow") {
+      void saveRules(rules.filter((rule) => rule.id !== globalRule.id));
       return;
     }
-    if (existing) {
+    if (globalRule) {
       void saveRules(
-        rules.map((rule) => (rule.id === existing.id ? { ...rule, action: "allow" } : rule)),
+        rules.map((rule) => (rule.id === globalRule.id ? { ...rule, action: "allow" } : rule)),
       );
     } else {
       void saveRules([
@@ -174,13 +159,27 @@ export function RunPanel({
   ];
 
   return (
-    <aside className="panel" id="panel" aria-label="Execução" data-od-id="run-panel">
+    <aside
+      ref={panelRef}
+      className="panel"
+      id="panel"
+      aria-label="Execução"
+      data-od-id="run-panel"
+      {...(overlay && overlayOpen ? { role: "dialog" as const, "aria-modal": true } : {})}
+    >
       <div className="panel-head">
         <h3>Execução</h3>
         <button type="button" className="icon-btn" aria-label="Fechar painel" onClick={onClose}>
           <Icon name="x" />
         </button>
       </div>
+      {(["history", "status"] as const).map((source) =>
+        chat.errors[source] ? (
+          <p className="notice is-err" key={source} role="alert">
+            {chat.errors[source]}
+          </p>
+        ) : null,
+      )}
       <div className="panel-sec" data-od-id="panel-progress">
         <p className="eyebrow">Tarefa atual</p>
         <h3 className="panel-task">{overview.task ?? "Nenhuma tarefa em andamento"}</h3>
@@ -289,7 +288,7 @@ export function RunPanel({
             role="switch"
             aria-checked={globalRule?.action === "allow"}
             aria-label="Agir sem perguntar"
-            disabled={rulesBusy}
+            disabled={rulesBusy || !rulesLoaded}
             onClick={toggleGlobal}
           />
         </div>
@@ -305,12 +304,20 @@ export function RunPanel({
               role="switch"
               aria-checked={rule.action === "allow"}
               aria-label={rule.pattern}
-              disabled={rulesBusy}
+              disabled={rulesBusy || !rulesLoaded}
               onClick={() => toggleRule(rule)}
             />
           </div>
         ))}
         {rulesError && <p className="meta">{rulesError}</p>}
+        {rulesLoadError && (
+          <p className="meta">
+            Não foi possível carregar as regras.{" "}
+            <button type="button" className="btn btn-ghost btn-sm" onClick={reloadRules}>
+              Tentar novamente
+            </button>
+          </p>
+        )}
       </div>
       <div className="panel-sec memory" data-od-id="panel-memory">
         <p className="eyebrow" style={{ margin: 0 }}>

@@ -1,6 +1,9 @@
 import type { Agent, EmailAccount, EmailDraft, EmailProvider } from "@upbot/protocol";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+import { useDaemonQuery } from "../hooks/useDaemonQuery";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
+import { errorFields, logWarn } from "../lib/log";
 import { btnCls, inputCls } from "./AgentSettings";
 
 const PROVIDER_HINTS: Record<EmailProvider, string> = {
@@ -19,20 +22,15 @@ const splitList = (s: string) =>
     .filter(Boolean);
 
 function useDrafts(client: DaemonClient, agentId?: string) {
-  const [drafts, setDrafts] = useState<EmailDraft[]>([]);
-  const load = useCallback(() => {
-    client
-      .request("email.drafts.list", agentId ? { agentId, pendingOnly: true } : {})
-      .then(setDrafts)
-      .catch(() => {});
-  }, [client, agentId]);
-  useEffect(() => {
-    load();
-    return client.on("email.draft.updated", (d) => {
-      if (!agentId || d.agentId === agentId) load();
-    });
-  }, [client, agentId, load]);
-  return drafts;
+  return useDaemonQuery(
+    client,
+    "email.drafts.list",
+    agentId ? { agentId, pendingOnly: true } : {},
+    {
+      events: { "email.draft.updated": (d) => !agentId || d.agentId === agentId },
+      onError: (e) => logWarn("email.drafts.list_failed", { agentId, ...errorFields(e) }),
+    },
+  );
 }
 
 export function DraftCard({
@@ -61,7 +59,10 @@ export function DraftCard({
       subject,
       body,
     });
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (scope: string) => (e: unknown) => {
+    logWarn(scope, errorFields(e));
+    setError(errorMessage(e));
+  };
   return (
     <div
       className="space-y-2 rounded-lg border border-sky-800/60 bg-sky-950/20 p-3 text-sm"
@@ -112,9 +113,13 @@ export function DraftCard({
             className={`${btnCls} bg-sky-600 hover:bg-sky-500`}
             onClick={() => {
               setError(null);
-              save()
-                .then(() => client.request("email.drafts.send", { id: draft.id }))
-                .catch(fail);
+              save().then(
+                () =>
+                  client
+                    .request("email.drafts.send", { id: draft.id })
+                    .catch(fail("email.drafts.send_failed")),
+                fail("email.drafts.update_failed"),
+              );
             }}
           >
             Send
@@ -124,7 +129,7 @@ export function DraftCard({
             className={`${btnCls} bg-zinc-700 hover:bg-zinc-600`}
             onClick={() => {
               setError(null);
-              save().catch(fail);
+              save().catch(fail("email.drafts.update_failed"));
             }}
           >
             Save
@@ -132,7 +137,11 @@ export function DraftCard({
           <button
             type="button"
             className={`${btnCls} ml-auto bg-zinc-800 hover:bg-red-900`}
-            onClick={() => client.request("email.drafts.discard", { id: draft.id }).catch(fail)}
+            onClick={() =>
+              client
+                .request("email.drafts.discard", { id: draft.id })
+                .catch(fail("email.drafts.discard_failed"))
+            }
           >
             Discard
           </button>
@@ -143,27 +152,27 @@ export function DraftCard({
 }
 
 function useAccounts(client: DaemonClient) {
-  const [accounts, setAccounts] = useState<EmailAccount[]>([]);
-  const load = useCallback(() => {
-    client
-      .request("email.accounts.list", {})
-      .then(setAccounts)
-      .catch(() => {});
-  }, [client]);
-  useEffect(() => {
-    load();
-    return client.on("email.accounts.changed", load);
-  }, [client, load]);
-  return accounts;
+  return useDaemonQuery(
+    client,
+    "email.accounts.list",
+    {},
+    {
+      events: { "email.accounts.changed": true },
+      onError: (e) => logWarn("email.accounts.list_failed", errorFields(e)),
+    },
+  );
 }
 
 /** Pending drafts of one bot, shown above the composer. */
 export function DraftCards({ client, agentId }: { client: DaemonClient; agentId: string }) {
-  const drafts = useDrafts(client, agentId);
-  const accounts = useAccounts(client);
+  const { data: drafts = [], error } = useDrafts(client, agentId);
+  const { data: accounts = [] } = useAccounts(client);
+  if (error && !drafts.length)
+    return <div className="border-t border-zinc-800 px-4 py-2 text-xs text-red-400">{error}</div>;
   if (!drafts.length) return null;
   return (
     <div className="max-h-[50vh] space-y-2 overflow-y-auto border-t border-zinc-800 px-4 py-2">
+      {error && <p className="px-4 py-1 text-xs text-red-400">{error}</p>}
       {drafts.map((d) => (
         <DraftCard key={`${d.id}:${d.updatedAt}`} client={client} draft={d} accounts={accounts} />
       ))}
@@ -172,8 +181,8 @@ export function DraftCards({ client, agentId }: { client: DaemonClient; agentId:
 }
 
 export function EmailView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
-  const accounts = useAccounts(client);
-  const drafts = useDrafts(client);
+  const { data: accounts = [], error: accountsError } = useAccounts(client);
+  const { data: drafts = [], error: draftsError } = useDrafts(client);
   const [provider, setProvider] = useState<EmailProvider>("gmail");
   const [form, setForm] = useState({
     address: "",
@@ -186,7 +195,10 @@ export function EmailView({ client, agents }: { client: DaemonClient; agents: Ag
   });
   const [error, setError] = useState<string | null>(null);
   const [tests, setTests] = useState<Record<string, string>>({});
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (scope: string) => (e: unknown) => {
+    logWarn(scope, errorFields(e));
+    setError(errorMessage(e));
+  };
   const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? "deleted bot";
   return (
     <div className="mx-auto max-w-2xl space-y-4 p-6">
@@ -219,7 +231,7 @@ export function EmailView({ client, agents }: { client: DaemonClient; agents: Ag
                           : [r.imap, r.smtp].filter((x) => x !== "ok").join(" · "),
                       })),
                     )
-                    .catch(fail);
+                    .catch(fail("email.accounts.test_failed"));
                 }}
               >
                 Test
@@ -227,7 +239,11 @@ export function EmailView({ client, agents }: { client: DaemonClient; agents: Ag
               <button
                 type="button"
                 className="text-xs text-zinc-500 hover:text-red-400"
-                onClick={() => client.request("email.accounts.delete", { id: a.id }).catch(fail)}
+                onClick={() =>
+                  client
+                    .request("email.accounts.delete", { id: a.id })
+                    .catch(fail("email.accounts.delete_failed"))
+                }
               >
                 Remove
               </button>
@@ -256,7 +272,7 @@ export function EmailView({ client, agents }: { client: DaemonClient; agents: Ag
                             address: a.address,
                             agentIds,
                           })
-                          .catch(fail);
+                          .catch(fail("email.accounts.save_failed"));
                       }}
                     />
                     {b.name}
@@ -291,7 +307,7 @@ export function EmailView({ client, agents }: { client: DaemonClient; agents: Ag
                 : {}),
             })
             .then(() => setForm({ ...form, address: "", password: "", label: "" }))
-            .catch(fail);
+            .catch(fail("email.accounts.save_failed"));
         }}
       >
         <h3 className="text-sm font-semibold text-zinc-300">Connect an account</h3>
@@ -362,7 +378,9 @@ export function EmailView({ client, agents }: { client: DaemonClient; agents: Ag
           </div>
         )}
         <p className="text-xs text-zinc-500">{PROVIDER_HINTS[provider]}</p>
-        {error && <div className="text-xs text-red-400">{error}</div>}
+        {(error || accountsError || draftsError) && (
+          <div className="text-xs text-red-400">{error ?? accountsError ?? draftsError}</div>
+        )}
         <button type="submit" className={`${btnCls} bg-sky-600 hover:bg-sky-500`}>
           Connect
         </button>

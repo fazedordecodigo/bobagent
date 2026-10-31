@@ -1,3 +1,7 @@
+import type { ChildProcess } from "node:child_process";
+import { resolveCommand, spawnEnv } from "./env/login-path";
+import { spawnChild } from "./env/spawn";
+import { envStringArray } from "./env/vars";
 import type { Vault } from "./vault";
 
 // Connectors use vault secrets the agent was granted, without returning the secret itself:
@@ -7,38 +11,40 @@ import type { Vault } from "./vault";
 const OUTPUT_LIMIT = 50_000;
 const BW_FIELDS = new Set(["password", "username", "notes", "totp", "uri", "item"]);
 
-function command(envName: string, fallback: string[]): string[] {
-  const raw = process.env[envName];
-  if (raw) {
-    try {
-      const v = JSON.parse(raw);
-      if (Array.isArray(v) && v.every((x) => typeof x === "string")) return v;
-    } catch {}
-  }
-  return fallback;
-}
-
 async function run(cmd: string[], env: Record<string, string>): Promise<string> {
-  let proc: ReturnType<typeof Bun.spawn>;
+  let proc: ChildProcess;
   try {
-    proc = Bun.spawn(cmd, {
-      env: { ...process.env, ...env },
-      stdout: "pipe",
-      stderr: "pipe",
-      stdin: "ignore",
+    proc = spawnChild(resolveCommand(cmd[0]!) ?? cmd[0]!, cmd.slice(1), {
+      env: spawnEnv(env),
+      stdio: ["ignore", "pipe", "pipe"],
     });
   } catch {
     throw new Error(`${cmd[0]} is not installed`);
   }
+  const outPromise = new Promise<string>((resolve) => {
+    const chunks: Buffer[] = [];
+    proc.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
+    proc.stdout?.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    if (!proc.stdout) resolve("");
+  });
+  const errPromise = new Promise<string>((resolve) => {
+    const chunks: Buffer[] = [];
+    proc.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk));
+    proc.stderr?.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    if (!proc.stderr) resolve("");
+  });
+  const codePromise = new Promise<number>((resolve, reject) => {
+    proc.once("error", reject);
+    proc.once("close", (exitCode) => resolve(exitCode ?? 1));
+  });
   const timer = setTimeout(() => proc.kill(), 30_000);
-  const [out, err, code] = await Promise.all([
-    new Response(proc.stdout as ReadableStream).text(),
-    new Response(proc.stderr as ReadableStream).text(),
-    proc.exited,
-  ]);
-  clearTimeout(timer);
-  if (code !== 0) throw new Error(`${cmd[0]} failed: ${(err || out).trim().slice(0, 500)}`);
-  return out.trimEnd();
+  try {
+    const [out, err, code] = await Promise.all([outPromise, errPromise, codePromise]);
+    if (code !== 0) throw new Error(`${cmd[0]} failed: ${(err || out).trim().slice(0, 500)}`);
+    return out.trimEnd();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export class Connectors {
@@ -76,7 +82,7 @@ export class Connectors {
     const token = this.secret("connector.1password", agentId).trim();
     if (!/^op:\/\/[^\s]+$/.test(reference))
       throw new Error("`reference` must look like op://vault/item/field");
-    return run([...command("UPBOT_OP_COMMAND", ["op"]), "read", reference], {
+    return run([...(envStringArray("UPBOT_OP_COMMAND") ?? ["op"]), "read", reference], {
       ...(token && token !== "desktop" ? { OP_SERVICE_ACCOUNT_TOKEN: token } : {}),
     });
   }
@@ -86,7 +92,7 @@ export class Connectors {
     if (!BW_FIELDS.has(field))
       throw new Error(`\`field\` must be one of ${[...BW_FIELDS].join(", ")}`);
     if (!item.trim()) throw new Error("`item` is required");
-    return run([...command("UPBOT_BW_COMMAND", ["bw"]), "get", field, item], {
+    return run([...(envStringArray("UPBOT_BW_COMMAND") ?? ["bw"]), "get", field, item], {
       BW_SESSION: session,
     });
   }

@@ -51,6 +51,7 @@ const VSOCK_EXEC_PORT = 1024;
 const VSOCK_BRIDGE_PORT = 5000;
 const VSOCK_PROXY_PORT = 3128;
 const PROVIDER_CLIS = ["claude", "codex", "devin", "agent", "grok", "opencode", "gemini"];
+const HOST_VERSION = "0.3.0";
 
 const die = (msg: string, code = 1): never => {
   process.stderr.write(`upbot-host: ${msg}\n`);
@@ -95,13 +96,11 @@ const safeId = (id: string) => {
   return id;
 };
 
-function which(cmd: string): string | null {
-  return Bun.which(cmd) ?? null;
-}
-
 export function firecrackerBin(): string | null {
   const local = join(ROOT, "firecracker", "firecracker");
-  return process.env.UPBOT_FIRECRACKER_BIN || (existsSync(local) ? local : which("firecracker"));
+  return (
+    process.env.UPBOT_FIRECRACKER_BIN || (existsSync(local) ? local : Bun.which("firecracker"))
+  );
 }
 
 export function buildGuestProviderEnv(
@@ -163,7 +162,7 @@ function preflight() {
   const rootfs = join(ROOT, "firecracker", "rootfs.ext4");
   const kernelImage = existsSync(kernel) ? kernel : null;
   const rootfsImage = existsSync(rootfs) ? rootfs : null;
-  const mkfsExt4 = which("mkfs.ext4");
+  const mkfsExt4 = Bun.which("mkfs.ext4");
   let guestHelperCurrent: boolean | null = null;
   const helperStampPath = join(ROOT, "firecracker", "guest-helper.sha256");
   if (existsSync(helperStampPath)) {
@@ -177,7 +176,7 @@ function preflight() {
     }
   }
   const providers: Record<string, string | null> = {};
-  for (const c of PROVIDER_CLIS) providers[c] = which(c);
+  for (const c of PROVIDER_CLIS) providers[c] = Bun.which(c);
   const report = {
     root: ROOT,
     os: platform(),
@@ -330,7 +329,7 @@ export function appendProxyLog(path: string, destination: string, decision: stri
 }
 
 /** Minimal HTTP CONNECT proxy for the guest (public destinations only). */
-export function proxyServer(logPath?: string): Server {
+export function proxyServer(logPath?: string, resolveTarget = proxyTarget): Server {
   const log = (destination: string, decision: string) => {
     if (logPath) appendProxyLog(logPath, destination, decision);
   };
@@ -353,7 +352,7 @@ export function proxyServer(logPath?: string): Server {
         return;
       }
       const destination = `${m[1]}:${m[2]}`;
-      const target = await proxyTarget(m[1]!);
+      const target = await resolveTarget(m[1]!);
       if (!target) {
         log(destination, "denied blocked or unresolved destination");
         conn.end("HTTP/1.1 403 Forbidden\r\n\r\n");
@@ -365,12 +364,16 @@ export function proxyServer(logPath?: string): Server {
         port: Number(m[2]),
       });
       upstream.once("connect", () => {
+        log(destination, `connected ${target}`);
         conn.write("HTTP/1.1 200 Connection Established\r\n\r\n");
         const extra = head.subarray(end + 4);
         if (extra.length) upstream.write(extra);
         conn.pipe(upstream).pipe(conn);
       });
-      upstream.on("error", () => conn.end("HTTP/1.1 502 Bad Gateway\r\n\r\n"));
+      upstream.on("error", (e) => {
+        log(destination, `upstream error ${(e as NodeJS.ErrnoException).code ?? e.message}`);
+        conn.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+      });
       conn.on("error", () => upstream.destroy());
     };
     conn.on("data", onData);
@@ -378,11 +381,54 @@ export function proxyServer(logPath?: string): Server {
   });
 }
 
+export function relayErrorReporter(
+  targetPath: string,
+  write: (line: string) => void = (line) => process.stderr.write(line),
+  windowMs = 10_000,
+): (error: NodeJS.ErrnoException) => void {
+  let lastErrorLog: number | undefined;
+  let suppressedErrors = 0;
+  let flushTimer: ReturnType<typeof setTimeout> | undefined;
+  const flush = () => {
+    flushTimer = undefined;
+    if (!suppressedErrors) return;
+    write(
+      `upbot-host bridge relay: cannot reach ${targetPath}: ${suppressedErrors} more failure(s) suppressed in the last ${windowMs / 1000}s\n`,
+    );
+    suppressedErrors = 0;
+  };
+  return (error) => {
+    const now = Date.now();
+    if (lastErrorLog !== undefined && now - lastErrorLog < windowMs) {
+      suppressedErrors++;
+      if (!flushTimer) {
+        flushTimer = setTimeout(flush, Math.max(0, lastErrorLog + windowMs - now));
+        flushTimer.unref();
+      }
+      return;
+    }
+    if (flushTimer) clearTimeout(flushTimer);
+    lastErrorLog = now;
+    const extra = suppressedErrors ? ` (+${suppressedErrors} more)` : "";
+    suppressedErrors = 0;
+    flushTimer = undefined;
+    const code =
+      typeof error.code === "string" && /^[A-Za-z0-9_]{1,40}$/.test(error.code)
+        ? error.code
+        : "error";
+    write(`upbot-host bridge relay: cannot reach ${targetPath}: ${code}${extra}\n`);
+  };
+}
+
 function relayServer(targetPath: string): Server {
+  const logRelayError = relayErrorReporter(targetPath);
   return createServer((conn) => {
     const up = createConnection({ path: targetPath });
     conn.pipe(up).pipe(conn);
-    up.on("error", () => conn.destroy());
+    up.on("error", (e) => {
+      logRelayError(e);
+      conn.destroy();
+    });
     conn.on("error", () => up.destroy());
   });
 }
@@ -503,7 +549,7 @@ function ensureWorkspaceDisk(path: string): void {
   if (existsSync(path)) return;
   const size = Number(process.env.UPBOT_VM_WORKSPACE_MIB ?? 8192);
   if (!Number.isInteger(size) || size < 1) die("UPBOT_VM_WORKSPACE_MIB must be a positive integer");
-  const mkfs = which("mkfs.ext4") ?? die("mkfs.ext4 not found; install e2fsprogs on the host");
+  const mkfs = Bun.which("mkfs.ext4") ?? die("mkfs.ext4 not found; install e2fsprogs on the host");
   const truncate = spawnSync("truncate", ["-s", `${size}M`, path]);
   if (truncate.status !== 0)
     die(`cannot create workspace disk: ${truncate.stderr.toString().trim()}`);
@@ -516,6 +562,10 @@ function ensureWorkspaceDisk(path: string): void {
 
 async function runFirecracker(spec: RunSpec, rest: Buffer) {
   const id = safeId(spec.agentId);
+  const rawBootTimeout = process.env.UPBOT_VM_BOOT_TIMEOUT_MS?.trim();
+  const bootTimeoutMs = rawBootTimeout ? Number(rawBootTimeout) : 60000;
+  if (!Number.isFinite(bootTimeoutMs) || bootTimeoutMs <= 0)
+    die("UPBOT_VM_BOOT_TIMEOUT_MS must be a positive number");
   const fc = firecrackerBin() ?? die("firecracker binary not found (run `upbot-host preflight`)");
   const base = join(ROOT, "firecracker", "rootfs.ext4");
   if (!existsSync(base)) die(`missing ${base}`);
@@ -560,11 +610,12 @@ async function runFirecracker(spec: RunSpec, rest: Buffer) {
   const configPath = join(vmDir, "vm.json");
   writeFileSync(configPath, JSON.stringify(vmConfig(spec, disk, uds, workspaceDisk), null, 2));
   const logPath = join(vmDir, "console.log");
+  const consoleTail = () => (existsSync(logPath) ? readFileSync(logPath, "utf8").slice(-1500) : "");
   const log = openSync(logPath, "w");
   const vmArgs = ["--no-api", "--config-file", configPath, "--id", id];
-  const setpriv = which("setpriv");
+  const setpriv = Bun.which("setpriv");
   const vm: ChildProcess = spawn(
-    setpriv ?? (fc as string),
+    setpriv ?? fc,
     setpriv ? ["--pdeathsig", "KILL", "--", fc, ...vmArgs] : vmArgs,
     {
       stdio: ["ignore", log, log],
@@ -587,7 +638,7 @@ async function runFirecracker(spec: RunSpec, rest: Buffer) {
   };
   const onVmExit = (code: number | null, signal: NodeJS.Signals | null) => {
     vmAlive = false;
-    const tail = existsSync(logPath) ? readFileSync(logPath, "utf8").slice(-1500) : "";
+    const tail = consoleTail();
     cleanup();
     die(
       `microVM exited (code ${code}${signal ? `, signal ${signal}` : ""})${tail ? `\n${tail}` : ""}`,
@@ -625,15 +676,15 @@ async function runFirecracker(spec: RunSpec, rest: Buffer) {
   process.stdout.once("close", onHostDisconnect);
   process.stdout.once("error", onHostDisconnect);
   let guest: Socket;
+  const bootStart = Date.now();
   try {
-    guest = await connectGuest(
-      uds,
-      Number(process.env.UPBOT_VM_BOOT_TIMEOUT_MS || 60000),
-      () => vmAlive,
-    );
+    guest = await connectGuest(uds, bootTimeoutMs, () => vmAlive);
   } catch (e) {
+    const tail = consoleTail();
     cleanup();
-    return die(`cannot reach the guest: ${(e as Error).message}`);
+    return die(
+      `cannot reach the guest: ${(e as Error).message} (agent ${id}, after ${Date.now() - bootStart}ms)${tail ? `\n${tail}` : ""}`,
+    );
   }
   guest.write(`${JSON.stringify({ cmd: spec.cmd, env: spec.env ?? {}, cwd: "/workspace" })}\n`);
   guest.pipe(process.stdout);
@@ -705,6 +756,7 @@ async function bridge() {
   if (!token) die("UPBOT_BRIDGE_TOKEN missing", 2);
   const send = (m: unknown) => process.stdout.write(`${JSON.stringify(m)}\n`);
   type Msg = { id?: number | string; method?: string; params?: unknown };
+  const listedTools = new Set<string>();
   const forward = async (method: string, params: unknown) => {
     const res = await fetch("http://localhost/bridge", {
       unix: sock,
@@ -712,7 +764,10 @@ async function bridge() {
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ method, params }),
     } as RequestInit);
-    if (!res.ok) throw new Error(`daemon returned ${res.status}: ${await res.text()}`);
+    if (!res.ok)
+      throw Object.assign(new Error(`daemon returned ${res.status}: ${await res.text()}`), {
+        status: res.status,
+      });
     return res.json();
   };
   const rl = createInterface({ input: process.stdin, terminal: false });
@@ -733,27 +788,66 @@ async function bridge() {
           result: {
             protocolVersion: v ?? "2025-06-18",
             capabilities: { tools: {} },
-            serverInfo: { name: "upbot", version: "0.3.0" },
+            serverInfo: { name: "upbot", version: HOST_VERSION },
           },
         });
       } else if (m.method === "ping") send({ jsonrpc: "2.0", id: m.id, result: {} });
-      else if (m.method === "tools/list" || m.method === "tools/call")
-        send({ jsonrpc: "2.0", id: m.id, result: await forward(m.method, m.params ?? {}) });
-      else
+      else if (m.method === "tools/list" || m.method === "tools/call") {
+        const result = await forward(m.method, m.params ?? {});
+        if (m.method === "tools/list") {
+          listedTools.clear();
+          const tools =
+            result && typeof result === "object" && "tools" in result
+              ? (result as { tools?: unknown }).tools
+              : undefined;
+          if (Array.isArray(tools))
+            for (const tool of tools)
+              if (
+                tool &&
+                typeof tool === "object" &&
+                "name" in tool &&
+                typeof tool.name === "string"
+              )
+                listedTools.add(tool.name);
+        }
+        send({ jsonrpc: "2.0", id: m.id, result });
+      } else
         send({
           jsonrpc: "2.0",
           id: m.id,
           error: { code: -32601, message: `method not found: ${m.method}` },
         });
     } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      const method =
+        m.method === "initialize" ||
+        m.method === "ping" ||
+        m.method === "tools/list" ||
+        m.method === "tools/call"
+          ? m.method
+          : "other";
+      const name = (m.params as { name?: unknown } | undefined)?.name;
+      const tool =
+        method === "tools/call"
+          ? typeof name === "string" && listedTools.has(name)
+            ? name
+            : "unlisted"
+          : "-";
+      const errorStatus = (err as Error & { status?: unknown }).status;
+      const errorCode = (err as NodeJS.ErrnoException).code;
+      const status = Number.isInteger(errorStatus)
+        ? String(errorStatus)
+        : typeof errorCode === "string" && /^[A-Za-z0-9_]{1,40}$/.test(errorCode)
+          ? errorCode
+          : "-";
+      process.stderr.write(`upbot-host bridge: method=${method} tool=${tool} status=${status}\n`);
       if (m.method === "tools/call")
         send({
           jsonrpc: "2.0",
           id: m.id,
-          result: { content: [{ type: "text", text: (e as Error).message }], isError: true },
+          result: { content: [{ type: "text", text: err.message }], isError: true },
         });
-      else
-        send({ jsonrpc: "2.0", id: m.id, error: { code: -32603, message: (e as Error).message } });
+      else send({ jsonrpc: "2.0", id: m.id, error: { code: -32603, message: err.message } });
     }
   });
   await new Promise<void>((r) => rl.on("close", () => r()));
@@ -765,6 +859,6 @@ if (import.meta.main) {
   else if (cmd === "run") await run();
   else if (cmd === "bridge") await bridge();
   else if (cmd === "guest-exec") await guestExec();
-  else if (cmd === "version") process.stdout.write("upbot-host 0.3.0\n");
+  else if (cmd === "version") process.stdout.write(`upbot-host ${HOST_VERSION}\n`);
   else die("usage: upbot-host preflight|run|bridge|guest-exec|version", 2);
 }

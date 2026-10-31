@@ -1,13 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import type { Agent, Channel, ChannelMessage, Turn } from "@upbot/protocol";
+import type { Agent, Channel, ChannelMessage } from "@upbot/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
   FAKE_AGENT,
   readLog,
-  readPids,
   startDaemon,
+  stopDaemon,
   tmp,
 } from "./helpers";
 
@@ -24,7 +24,7 @@ describe("channels e2e", () => {
   let ch: Channel;
 
   const newAgent = async (name: string) =>
-    (await c.request("agents.create", { name, provider: "devin", instructions: "" })) as Agent;
+    c.request("agents.create", { name, provider: "devin", instructions: "" });
 
   const messageFrom = (
     authorAgentId: string | null,
@@ -33,11 +33,11 @@ describe("channels e2e", () => {
     c.waitForEventWhere(
       "channel.message",
       (d) => {
-        const m = d as ChannelMessage;
+        const m = d;
         return m.channelId === ch.id && m.authorAgentId === authorAgentId && pred(m);
       },
       20000,
-    ) as Promise<ChannelMessage>;
+    );
 
   beforeAll(async () => {
     dataDir = tmp("ch-data-");
@@ -53,17 +53,10 @@ describe("channels e2e", () => {
     bob = await newAgent("Bob");
   });
 
-  afterAll(() => {
-    c?.close();
-    try {
-      daemon.proc.kill("SIGKILL");
-    } catch {}
-    for (const pid of readPids(stateDir)) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {}
-    }
-    for (const d of [dataDir, agentsRoot, stateDir]) rmSync(d, { recursive: true, force: true });
+  afterAll(async () => {
+    await stopDaemon(daemon, c, stateDir);
+    for (const d of [dataDir, agentsRoot, stateDir])
+      rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   test("create validates members and defaults the owner", async () => {
@@ -73,13 +66,13 @@ describe("channels e2e", () => {
     await expect(
       c.request("channels.create", { name: "X", memberIds: ["nope"] }),
     ).rejects.toMatchObject({ code: "not_found" });
-    ch = (await c.request("channels.create", {
+    ch = await c.request("channels.create", {
       name: "Team",
       memberIds: [alice.id, bob.id],
-    })) as Channel;
+    });
     expect(ch.ownerId).toBe(alice.id);
     expect(ch.memberIds).toEqual([alice.id, bob.id]);
-    expect(((await c.request("channels.list", {})) as Channel[]).map((x) => x.id)).toContain(ch.id);
+    expect((await c.request("channels.list", {})).map((x) => x.id)).toContain(ch.id);
   });
 
   test("user posts go to the owner and the reply lands in the channel", async () => {
@@ -90,9 +83,7 @@ describe("channels e2e", () => {
     const raw = JSON.stringify(prompts[prompts.length - 1]!.params);
     expect(raw).toContain("channel_context");
     expect(raw).toContain('role=\\"owner\\"');
-    const { messages } = (await c.request("channels.history", { channelId: ch.id })) as {
-      messages: ChannelMessage[];
-    };
+    const { messages } = await c.request("channels.history", { channelId: ch.id });
     expect(messages.map((m) => m.authorKind)).toEqual(["user", "agent"]);
   });
 
@@ -100,22 +91,14 @@ describe("channels e2e", () => {
     const delegated = messageFrom(alice.id, (m) => m.text.startsWith("@Bob"));
     const bobReply = messageFrom(bob.id);
     const ownerWrapUp = messageFrom(alice.id, (m) => m.text.startsWith("unhandled:"));
-    const forwarded = c.waitForEventWhere(
-      "turn.ended",
-      (d) => (d as Turn).agentId === alice.id,
-      20000,
-    );
+    const forwarded = c.waitForEventWhere("turn.ended", (d) => d.agentId === alice.id, 20000);
     const task = JSON.stringify({ channel: "team", to: "Bob", task: "echo:subtask done" });
     await c.request("channels.post", { channelId: ch.id, text: `mcp:delegate ${task}` });
     expect((await delegated).text).toBe("@Bob echo:subtask done");
     expect((await bobReply).text).toBe("subtask done");
     await forwarded; // Alice's own delegate turn
-    const second = await c.waitForEventWhere(
-      "turn.ended",
-      (d) => (d as Turn).agentId === alice.id,
-      20000,
-    );
-    expect((second as Turn).status).toBe("completed");
+    const second = await c.waitForEventWhere("turn.ended", (d) => d.agentId === alice.id, 20000);
+    expect(second.status).toBe("completed");
     const prompts = readLog(stateDir).filter((l) => l.method === "session/prompt");
     expect(JSON.stringify(prompts[prompts.length - 1]!.params)).toContain(
       "Bob replied in the channel",
@@ -144,18 +127,16 @@ describe("channels e2e", () => {
     expect(prompts().filter((p) => p.includes("addressed everyone")).length).toBe(2);
 
     const bobAgain = messageFrom(bob.id);
-    const { messageId } = (await c.request("channels.post", {
+    const { messageId } = await c.request("channels.post", {
       channelId: ch.id,
       text: "more detail please",
       replyTo: reply.id,
-    })) as { messageId: string };
+    });
     await bobAgain;
     const last = prompts().at(-1)!;
     expect(last).toContain("The user replied to your message");
     expect(last).toContain("in_reply_to");
-    const { messages } = (await c.request("channels.history", { channelId: ch.id })) as {
-      messages: ChannelMessage[];
-    };
+    const { messages } = await c.request("channels.history", { channelId: ch.id });
     expect(messages.find((m) => m.id === messageId)?.replyTo).toBe(reply.id);
   });
 
@@ -168,51 +149,40 @@ describe("channels e2e", () => {
   });
 
   test("stop cancels channel turns and blocks posts; resume reopens", async () => {
-    const started = c.waitForEventWhere(
-      "turn.started",
-      (d) => (d as Turn).agentId === alice.id,
-      20000,
-    );
+    const started = c.waitForEventWhere("turn.started", (d) => d.agentId === alice.id, 20000);
     await c.request("channels.post", { channelId: ch.id, text: "slow" });
     await started;
-    const ended = c.waitForEventWhere("turn.ended", (d) => (d as Turn).agentId === alice.id, 20000);
-    const stopped = (await c.request("channels.stop", { channelId: ch.id })) as Channel;
+    const ended = c.waitForEventWhere("turn.ended", (d) => d.agentId === alice.id, 20000);
+    const stopped = await c.request("channels.stop", { channelId: ch.id });
     expect(stopped.status).toBe("stopped");
-    expect(((await ended) as Turn).status).toBe("cancelled");
+    expect((await ended).status).toBe("cancelled");
     await expect(c.request("channels.post", { channelId: ch.id, text: "x" })).rejects.toMatchObject(
       {
         code: "bad_request",
       },
     );
     await c.request("queue.resume", { agentId: alice.id }).catch(() => {});
-    expect(((await c.request("channels.resume", { channelId: ch.id })) as Channel).status).toBe(
-      "active",
-    );
+    expect((await c.request("channels.resume", { channelId: ch.id })).status).toBe("active");
   });
 
   test("reassign, archive and restore", async () => {
-    const re = (await c.request("channels.reassign", {
+    const re = await c.request("channels.reassign", {
       channelId: ch.id,
       ownerId: bob.id,
-    })) as Channel;
+    });
     expect(re.ownerId).toBe(bob.id);
     const reply = messageFrom(bob.id);
     await c.request("channels.post", { channelId: ch.id, text: "echo:bob owns it" });
     expect((await reply).text).toBe("bob owns it");
     await c.request("channels.archive", { channelId: ch.id });
-    expect(((await c.request("channels.list", {})) as Channel[]).map((x) => x.id)).not.toContain(
-      ch.id,
-    );
+    expect((await c.request("channels.list", {})).map((x) => x.id)).not.toContain(ch.id);
     expect(
-      ((await c.request("channels.list", { includeArchived: true })) as Channel[]).find(
-        (x) => x.id === ch.id,
-      )?.status,
+      (await c.request("channels.list", { includeArchived: true })).find((x) => x.id === ch.id)
+        ?.status,
     ).toBe("archived");
     await expect(c.request("channels.resume", { channelId: ch.id })).rejects.toMatchObject({
       code: "bad_request",
     });
-    expect(((await c.request("channels.restore", { channelId: ch.id })) as Channel).status).toBe(
-      "active",
-    );
+    expect((await c.request("channels.restore", { channelId: ch.id })).status).toBe("active");
   });
 });

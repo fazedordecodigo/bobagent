@@ -1,0 +1,120 @@
+/* UpBot — tokens de design (v1)
+ * Fonte única de verdade para cor, tipo, espaço, raio, sombra e movimento.
+ * Tema claro em :root; tema escuro em [data-theme="dark"] no <html>.
+ * Regra: nenhum hex fora deste arquivo. Tons derivados usam color-mix(in oklch, …).
+ */
+
+@font-face {
+  font-family: 'Nunito';
+  src: url('../fonts/nunito-latin.woff2') format('woff2');
+  font-weight: 500 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light;
+
+  /* ── Marca (7) ───────────────────────────────────────── */
+  --bg:        #fbfcfd;  /* Papel — fundo do app */
+  --surface:   #ffffff;  /* Superfície — cartões, conversa, painéis */
+  --fg:        #0e1217;  /* Tinta — texto, seleção (inversão) */
+  --muted:     #5e646a;  /* Neblina — texto secundário, metadados */
+  --border:    #e2e5e8;  /* Linha — divisões de 1px */
+  --accent:    #2a67bd;  /* Azul UpBot — símbolo + 1 ação principal por tela */
+  --sky:       #e4f2ff;  /* Céu — SÓ peças de marca, nunca na UI do produto */
+  --on-accent: #ffffff;
+  --ink: #000000;
+  --preview-light-bg: #ffffff;
+  --preview-light-fg: #0e1217;
+  --preview-light-border: #e2e5e8;
+  --preview-dark-bg: #0e1624;
+  --preview-dark-surface: #171f2e;
+  --preview-dark-fg: #eff2f6;
+  --preview-dark-border: #2b3341;
+
+  /* ── Estado (cada cor presa a um estado, nunca decoração) ── */
+  --st-run:  #0094a2;  /* Em execução */
+  --st-wait: #ca7a00;  /* Aguardando você */
+  --st-ok:   #319751;  /* Concluído */
+  --st-err:  #d33a3c;  /* Erro */
+  --pill-mix: 14%;     /* fundo da pílula = estado a 14% */
+  --pill-ink: 70%;     /* texto da pílula = estado 70% + Tinta */
+
+  /* ── Papéis derivados ─────────────────────────────────── */
+  --logo-sym: var(--accent);
+  --focus:    var(--accent);
+  --fg-soft:  color-mix(in oklch, var(--fg) 5%, transparent);     /* véu de hover */
+  --side:     color-mix(in oklch, var(--fg) 2.5%, var(--bg));     /* lateral do app */
+  --foot-bg:  color-mix(in oklch, var(--fg) 2%, var(--surface));  /* rodapé de cartão/diálogo */
+  --scrim:    color-mix(in oklch, var(--fg) 22%, transparent);
+  --shadow-pop: 0 1px 2px color-mix(in oklch, var(--fg) 8%, transparent),
+                0 16px 40px -10px color-mix(in oklch, var(--fg) 22%, transparent);
+  --shadow-icon: 0 1px 2px color-mix(in oklch, var(--fg) 12%, transparent);
+
+  /* ── Tipografia ───────────────────────────────────────── */
+  --font-display: 'Nunito', ui-rounded, 'SF Pro Rounded', system-ui, sans-serif;
+  --font-body:    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  --font-mono:    ui-monospace, 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  --font-win:     'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif; /* só para imitar chrome do Windows */
+
+  /* produto (app desktop) */
+  --fs-page:   28px;  /* título de página — Nunito 800, -0.015em */
+  --fs-home:   34px;  /* título da tela inicial — Nunito 800, -0.02em, 1.1 */
+  --fs-dialog: 20px;  /* título de diálogo — Nunito 800 */
+  --fs-sec:    18px;  /* título de seção — Nunito 700 */
+  --fs-card:   16px;  /* título de cartão / barra — Nunito 700–800 */
+  --fs-body:   15px;  /* texto do app, line-height 1.47 */
+  --fs-ui:     14px;  /* listas, itens, campos secundários */
+  --fs-meta:   13px;
+  --fs-small:  12px;
+  --fs-label:  11px;  /* eyebrow mono CAIXA ALTA +0.08em */
+  /* marketing / documentação */
+  --fs-h1:   clamp(44px, 6vw, 72px);    /* 800 / 1.02 / -0.025em */
+  --fs-h2:   clamp(30px, 3.6vw, 44px);  /* 750 / 1.08 / -0.02em */
+  --fs-lead: 19px;                      /* Neblina, máx 56ch */
+
+  /* ── Espaço e forma ───────────────────────────────────── */
+  --gap-xs: 8px; --gap-sm: 12px; --gap-md: 20px; --gap-lg: 32px; --gap-xl: 56px; --gap-2xl: 96px;
+  --container: 1120px; --gutter: 32px; --col-chat: 720px;
+  --radius-xs: 6px;    /* tags de escopo, foco */
+  --radius-sm: 9px;    /* itens de lista, icon-buttons, botões de segmented */
+  --radius:    10px;   /* botões, campos, caixas pequenas, menu */
+  --radius-md: 14px;   /* popover da barra de menus */
+  --radius-lg: 16px;   /* cartões, diálogos, composer, paleta */
+  --radius-xl: 28px;   /* tile do símbolo no hero */
+  --radius-pill: 99px;
+  --border-w: 1px;
+
+  /* ── Movimento ────────────────────────────────────────── */
+  --ease: cubic-bezier(.2, 0, 0, 1);
+  --dur-fast: 150ms;   /* cor, fundo, borda */
+  --dur-theme: 200ms;  /* troca de tema */
+  --dur-layer: 180ms;  /* diálogo, paleta, painel lateral */
+  --dur-status: 1600ms;
+  --dur-spin: 1200ms;
+  --dur-preview: 7000ms;
+  --dur-progress: 400ms;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0e1624;       /* Noite */
+  --surface: #171f2e;  /* Superfície noturna */
+  --fg: #eff2f6;       /* Tinta clara */
+  --muted: #a5abb4;    /* Neblina clara */
+  --border: #2b3341;   /* Linha noturna */
+  --st-run: #00c8d8; --st-wait: #ffb831; --st-ok: #32ce69; --st-err: #ff5b58;
+  --pill-mix: 18%; --pill-ink: 82%;
+  --logo-sym: var(--fg);  /* símbolo vira branco; azul nunca é texto/símbolo sobre Noite */
+  --focus: var(--fg);
+  --side: color-mix(in oklch, black 18%, var(--bg));
+  --scrim: color-mix(in oklch, black 55%, transparent);
+  --shadow-pop: 0 1px 2px color-mix(in oklch, black 40%, transparent),
+                0 20px 48px -10px color-mix(in oklch, black 65%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-fast: 0ms; --dur-theme: 0ms; --dur-layer: 0ms; --dur-progress: 0ms; }
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

@@ -245,4 +245,18 @@ export const migrations: string[] = [
   )`,
   // 18: replies in group chats
   `ALTER TABLE channel_messages ADD COLUMN reply_to TEXT`,
+  `ALTER TABLE connected_apps ADD COLUMN permissions_json TEXT NOT NULL DEFAULT '{"read":"allow","write":"ask","send":"ask","pay":"ask","book":"ask","del":"ask"}'`,
+  // 20: turn-scoped item lookups (findToolCallItem, itemsForTurn) without a full table scan
+  `CREATE INDEX items_turn_seq ON items(turn_id, seq)`,
+  // 21: persistent audit trail for approval decisions and permission/rule changes
+  `CREATE TABLE approval_audit (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    event TEXT NOT NULL,
+    approval_id TEXT,
+    agent_id TEXT,
+    turn_id TEXT,
+    data_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX approval_audit_created ON approval_audit(created_at)`,
 ];

@@ -1,5 +1,14 @@
 import type { Database } from "bun:sqlite";
-import type { AgentUsage, ChatItem, Turn, TurnStatus } from "@upbot/protocol";
+import {
+  type AgentUsage,
+  ChatAttachment,
+  type ChatItem,
+  GatewayKind,
+  RoutineTrigger,
+  type Turn,
+  type TurnStatus,
+} from "@upbot/protocol";
+import { z } from "zod";
 
 type TurnRow = {
   id: string;
@@ -111,17 +120,26 @@ export class ChatStore {
     return r ? rowToItem(r) : null;
   }
 
-  updateItemData(id: string, data: object): ChatItem {
+  writeItemData(id: string, data: object): number {
+    const now = Date.now();
     this.db
       .query("UPDATE items SET data_json = ?, updated_at = ? WHERE id = ?")
-      .run(JSON.stringify(data), Date.now(), id);
+      .run(JSON.stringify(data), now, id);
+    return now;
+  }
+
+  updateItemData(id: string, data: object): ChatItem {
+    this.writeItemData(id, data);
     return this.getItem(id)!;
   }
 
-  appendItemText(id: string, chunk: string): ChatItem {
-    const item = this.getItem(id)!;
-    const text = ((item as { text?: string }).text ?? "") + chunk;
-    return this.updateItemData(id, { ...stripBase(item), text });
+  /** Overwrites the `text` field of an item's data_json without re-reading the row. */
+  setItemText(id: string, text: string): void {
+    this.db
+      .query(
+        "UPDATE items SET data_json = json_set(data_json, '$.text', ?), updated_at = ? WHERE id = ?",
+      )
+      .run(text, Date.now(), id);
   }
 
   findToolCallItem(turnId: string, toolCallId: string): ChatItem | null {
@@ -138,6 +156,22 @@ export class ChatStore {
       .query("SELECT * FROM items WHERE turn_id = ? ORDER BY seq ASC")
       .all(turnId) as ItemRow[];
     return rows.map(rowToItem);
+  }
+
+  /** A turn's final reply: its agent_message texts joined and trimmed ("" when none). */
+  finalReply(turnId: string): string {
+    return this.itemsForTurn(turnId)
+      .filter((i) => i.kind === "agent_message")
+      .map((i) => ("text" in i ? i.text : ""))
+      .join("\n\n")
+      .trim();
+  }
+
+  /** Reply text for an ended turn, with fallbacks for empty/failed/stopped turns. */
+  turnReplyText(turn: Turn): string {
+    if (turn.status === "completed") return this.finalReply(turn.id) || "(no reply)";
+    if (turn.status === "failed") return `The agent failed: ${turn.error ?? "unknown error"}`;
+    return "The agent stopped before replying.";
   }
 
   history(
@@ -256,14 +290,6 @@ export class ChatStore {
   }
 }
 
-function stripBase(item: ChatItem): Record<string, unknown> {
-  const data = { ...(item as unknown as Record<string, unknown>) };
-  for (const key of ["id", "seq", "agentId", "turnId", "createdAt", "updatedAt", "kind"]) {
-    delete data[key];
-  }
-  return data;
-}
-
 // ---- Queue ----
 
 export type QueueRow = {
@@ -298,6 +324,91 @@ export type QueueSource = {
   /** Extra fields stored on the user_message item (routine, attachments). */
   meta?: Record<string, unknown>;
 };
+
+const queueRoutineMeta = z.object({
+  id: z.string(),
+  name: z.string(),
+  trigger: RoutineTrigger,
+});
+const queueGatewayMeta = z
+  .object({
+    id: z.string(),
+    kind: GatewayKind,
+    name: z.string(),
+    chatId: z.string(),
+    userId: z.string(),
+    userName: z.string(),
+    replyTo: z.string().optional(),
+  })
+  .loose();
+const queueTeamMeta = z.object({
+  requestId: z.string(),
+  memberId: z.string(),
+  memberName: z.string(),
+  agentId: z.string().optional(),
+});
+
+export type QueueMeta = {
+  routine?: z.infer<typeof queueRoutineMeta>;
+  gateway?: z.infer<typeof queueGatewayMeta>;
+  team?: z.infer<typeof queueTeamMeta>;
+  attachments?: z.infer<typeof ChatAttachment>[];
+};
+
+/** Parses known queue metadata fields independently and drops malformed fields. */
+export function readQueueMeta(row: { meta_json: string | null } | null | undefined): {
+  meta: QueueMeta;
+  rejected: string[];
+} {
+  if (!row?.meta_json) return { meta: {}, rejected: [] };
+  let value: unknown;
+  try {
+    value = JSON.parse(row.meta_json);
+  } catch {
+    return { meta: {}, rejected: ["meta_json"] };
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return { meta: {}, rejected: ["meta_json"] };
+
+  const source = value as Record<string, unknown>;
+  const meta: QueueMeta = {};
+  const rejected: string[] = [];
+  if (source.routine !== undefined) {
+    const parsed = queueRoutineMeta.safeParse(source.routine);
+    if (parsed.success) meta.routine = parsed.data;
+    else rejected.push("routine");
+  }
+  if (source.gateway !== undefined) {
+    const parsed = queueGatewayMeta.safeParse(source.gateway);
+    if (parsed.success) meta.gateway = parsed.data;
+    else rejected.push("gateway");
+  }
+  if (source.team !== undefined) {
+    const parsed = queueTeamMeta.safeParse(source.team);
+    if (parsed.success) meta.team = parsed.data;
+    else rejected.push("team");
+  }
+  if (Object.hasOwn(source, "attachments")) {
+    if (!Array.isArray(source.attachments)) {
+      rejected.push("attachments");
+    } else {
+      const attachments: z.infer<typeof ChatAttachment>[] = [];
+      let invalid = false;
+      for (const attachment of source.attachments) {
+        const parsed = ChatAttachment.safeParse(attachment);
+        if (parsed.success) attachments.push(parsed.data);
+        else invalid = true;
+      }
+      if (attachments.length) meta.attachments = attachments;
+      if (invalid) rejected.push("attachments");
+    }
+  }
+  return { meta, rejected };
+}
+
+export function parseQueueMeta(row: { meta_json: string | null } | null | undefined): QueueMeta {
+  return readQueueMeta(row).meta;
+}
 
 function rowToQueueItem(r: QueueRow): QueueItemLite {
   return {

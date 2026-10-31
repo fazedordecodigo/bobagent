@@ -1,5 +1,6 @@
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
-import { Icon, type IconName } from "./icons";
+import { errorMessage } from "../lib/errors";
+import { Icon } from "./icons";
 
 export type OutgoingAttachment = { name: string; mime: string; dataBase64: string };
 
@@ -21,9 +22,6 @@ export function Composer({
   placeholder,
   hint,
   hintError,
-  toolCount,
-  contextIcon,
-  onTools,
   onSend,
   onStop,
   onTranscribe,
@@ -35,9 +33,6 @@ export function Composer({
   placeholder: string;
   hint: string;
   hintError?: string | null;
-  toolCount: number;
-  contextIcon: IconName;
-  onTools: () => void;
   onSend: (text: string, attachments: OutgoingAttachment[]) => Promise<void>;
   onStop: () => void;
   onTranscribe?: ((audioBase64: string, mime: string) => Promise<string>) | undefined;
@@ -104,14 +99,14 @@ export function Composer({
           if (transcript) onTextChange(text ? `${text} ${transcript}` : transcript);
           textRef.current?.focus();
         } catch (e) {
-          setError(e instanceof Error ? e.message : String(e));
+          setError(errorMessage(e));
         }
       };
       recorder.current = mediaRecorder;
       mediaRecorder.start();
       setRecording(true);
     } catch (e) {
-      if (!unmounted.current) setError(e instanceof Error ? e.message : String(e));
+      if (!unmounted.current) setError(errorMessage(e));
     } finally {
       micPendingRef.current = false;
       if (!unmounted.current) setMicPending(false);
@@ -137,7 +132,7 @@ export function Composer({
       onTextChange("");
       setFiles([]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   };
 
@@ -161,28 +156,7 @@ export function Composer({
         </div>
       )}
       <form className="composer" onSubmit={(event) => void submit(event)}>
-        <label className="sr" htmlFor="prompt">
-          Mensagem para o bot
-        </label>
-        <textarea
-          ref={textRef}
-          id="prompt"
-          rows={1}
-          placeholder={placeholder}
-          value={text}
-          onChange={(event) => {
-            onTextChange(event.target.value);
-            event.target.style.height = "auto";
-            event.target.style.height = `${Math.min(event.target.scrollHeight, 160)}px`;
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              event.currentTarget.form?.requestSubmit();
-            }
-          }}
-        />
-        <div className="composer-bar">
+        <div className="composer-row">
           <input
             ref={fileRef}
             type="file"
@@ -202,14 +176,27 @@ export function Composer({
           >
             <Icon name="clip" />
           </button>
-          <button
-            type="button"
-            className="icon-btn"
-            aria-label="Escolher ferramentas"
-            onClick={onTools}
-          >
-            <Icon name="plug" />
-          </button>
+          <label className="sr" htmlFor="prompt">
+            Mensagem para o bot
+          </label>
+          <textarea
+            ref={textRef}
+            id="prompt"
+            rows={1}
+            placeholder={placeholder}
+            value={text}
+            onChange={(event) => {
+              onTextChange(event.target.value);
+              event.target.style.height = "auto";
+              event.target.style.height = `${Math.min(event.target.scrollHeight, 160)}px`;
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
+          />
           {onTranscribe && (
             <button
               type="button"
@@ -224,13 +211,6 @@ export function Composer({
               <Icon name={recording ? "stop" : "mic"} />
             </button>
           )}
-          <span className="ctx" id="ctxChip">
-            <Icon name={contextIcon} size={14} />
-            {toolCount === 0
-              ? "Sem ferramentas"
-              : `${toolCount} ferramenta${toolCount > 1 ? "s" : ""}`}
-          </span>
-          <span className="grow" />
           {running && (
             <button type="button" className="btn btn-secondary btn-sm" onClick={onStop}>
               <Icon name="stop" />

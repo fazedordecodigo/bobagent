@@ -19,7 +19,7 @@ import {
   recordedFirecrackerPid,
   removeFirecrackerHostRoot,
 } from "./firecracker-ssh.fixtures";
-import { DaemonClient, type DaemonHandle, readPids, startDaemon, tmp } from "./helpers";
+import { DaemonClient, type DaemonHandle, startDaemon, stopTestChildren, tmp } from "./helpers";
 
 const enabled = process.env.UPBOT_REAL_FIRECRACKER === "1" && existsSync("/usr/sbin/sshd");
 const providersRequested =
@@ -359,17 +359,12 @@ describe.skipIf(!enabled)("real Firecracker SSH integration", () => {
     try {
       sshd?.kill("SIGTERM");
     } catch {}
-    if (stateDir) {
-      for (const pid of readPids(stateDir)) {
-        try {
-          process.kill(pid, "SIGKILL");
-        } catch {}
-      }
-    }
+    await stopTestChildren(stateDir);
     if (sshd) await sshd.exited;
     if (root) await removeFirecrackerHostRoot(root);
-    if (sshDir) rmSync(sshDir, { recursive: true, force: true });
-    for (const dir of daemonDirs) rmSync(dir, { recursive: true, force: true });
+    if (sshDir) rmSync(sshDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    for (const dir of daemonDirs)
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     await sshdLog?.catch(() => "");
   });
 

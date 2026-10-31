@@ -1,12 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import type { Agent, Turn } from "@upbot/protocol";
 import {
   DaemonClient,
   type DaemonHandle,
   FAKE_AGENT,
   readPids,
+  sendAndWait,
   startDaemon,
+  stopTestChildren,
   tmp,
   waitForPidDead,
 } from "./helpers";
@@ -35,21 +36,13 @@ describe("ACP prompt first-activity watchdog", () => {
     const currentClient = getClient();
     const currentStateDir = getStateDir();
     const previousPids = new Set(readPids(currentStateDir));
-    const agent = (await currentClient.request("agents.create", {
+    const agent = await currentClient.request("agents.create", {
       name: `${provider}-${crypto.randomUUID()}`,
       provider,
       instructions: "",
-    })) as Agent;
+    });
     const startedAt = Date.now();
-    const queue = (await currentClient.request("chat.send", {
-      agentId: agent.id,
-      text,
-    })) as { queueId: string };
-    const turn = (await currentClient.waitForEventWhere(
-      "turn.ended",
-      (event) => (event as Turn).agentId === agent.id && (event as Turn).queueId === queue.queueId,
-      10000,
-    )) as Turn;
+    const turn = await sendAndWait(currentClient, agent.id, text, 10000);
     return {
       agent,
       turn,
@@ -82,7 +75,7 @@ describe("ACP prompt first-activity watchdog", () => {
   afterAll(async () => {
     if (client) {
       try {
-        const agents = (await client.request("agents.list")) as Agent[];
+        const agents = await client.request("agents.list", {});
         for (const agent of agents) await client.request("agents.delete", { id: agent.id });
       } catch {}
       client.close();
@@ -93,9 +86,12 @@ describe("ACP prompt first-activity watchdog", () => {
         await daemon.proc.exited;
       } catch {}
     }
-    if (dataDir) rmSync(dataDir, { recursive: true, force: true });
-    if (agentsRoot) rmSync(agentsRoot, { recursive: true, force: true });
-    if (stateDir) rmSync(stateDir, { recursive: true, force: true });
+    await stopTestChildren(stateDir);
+    if (dataDir) rmSync(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    if (agentsRoot)
+      rmSync(agentsRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    if (stateDir)
+      rmSync(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   test("non-OpenCode prompts can exceed the OpenCode watchdog threshold", async () => {

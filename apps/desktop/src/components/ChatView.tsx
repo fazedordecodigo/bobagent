@@ -1,14 +1,17 @@
 import type { Agent } from "@upbot/protocol";
-import { useEffect, useMemo, useState } from "react";
-import { useChat } from "../hooks/useChat";
+import { useCallback, useEffect, useState } from "react";
+import { useChatApi } from "../hooks/useChat";
 import type { AgentOverview } from "../hooks/useOverview";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
+import { moveControlFocus } from "../lib/keyboard";
+import { errorFields, logWarn } from "../lib/log";
 import { MonoAv, Pill, role } from "../lib/ui";
 import { PermissionNotice } from "./AgentSettings";
 import { ApprovalCards } from "./ApprovalsView";
 import { Composer } from "./Composer";
 import { DraftCards } from "./EmailView";
-import { Icon, type IconName } from "./icons";
+import { Icon } from "./icons";
 import { MessageList } from "./MessageList";
 
 export function ChatView({
@@ -16,7 +19,6 @@ export function ChatView({
   agent,
   overview,
   onOpenSettings,
-  onOpenApps,
   notice,
   onNoticeDismiss,
   onPanelToggle,
@@ -25,7 +27,6 @@ export function ChatView({
   agent: Agent;
   overview: AgentOverview | undefined;
   onOpenSettings: () => void;
-  onOpenApps: () => void;
   notice: string | null;
   onNoticeDismiss: () => void;
   onPanelToggle: () => void;
@@ -36,11 +37,12 @@ export function ChatView({
     runningTurn,
     loaded,
     queue,
+    errors,
     loadEarlier,
     queuePause,
     queueResume,
     queueRemove,
-  } = useChat(client, agent.id);
+  } = useChatApi();
   const [sendBusy, setSendBusy] = useState(false);
   const [voice, setVoice] = useState({ tts: false, stt: false });
   const [composerText, setComposerText] = useState("");
@@ -51,7 +53,7 @@ export function ChatView({
     client
       .request("voice.status", {})
       .then(setVoice)
-      .catch(() => {});
+      .catch((e: unknown) => logWarn("voice.status_failed", errorFields(e)));
   }, [client]);
 
   const isClaude = agent.provider === "claude";
@@ -59,28 +61,6 @@ export function ChatView({
   const supportsModes = isClaude || isCodex;
   const mode = agent.config?.mode ?? (isClaude ? "default" : "auto");
   const safeMode = mode === "plan" || mode === "read-only";
-  const toolCount = useMemo(
-    () =>
-      overview
-        ? overview.apps.reduce((count, app) => count + app.tools.length, 0) +
-          (overview.emailAccounts.length ? 4 : 0)
-        : 0,
-    [overview],
-  );
-  const contextIcon = useMemo<IconName>(() => {
-    const name = overview?.apps[0]?.name.toLowerCase() ?? "";
-    if (name.includes("email") || name.includes("e-mail") || name.includes("gmail")) return "mail";
-    if (name.includes("github")) return "code";
-    if (name.includes("brave") || name.includes("web")) return "web";
-    if (name.includes("airtable") || name.includes("sheet") || name.includes("planilha"))
-      return "sheet";
-    if (name.includes("stripe") || name.includes("cartão")) return "card";
-    if (name.includes("agenda") || name.includes("calendar")) return "cal";
-    if (name.includes("notion")) return "doc";
-    if (name.includes("arquivo") || name.includes("file")) return "folder";
-    if (!name && overview?.emailAccounts.length) return "mail";
-    return "plug";
-  }, [overview]);
   const latestUser = [...items].reverse().find((item) => item.kind === "user_message");
   const isDirectMessage =
     latestUser?.kind === "user_message" &&
@@ -104,33 +84,54 @@ export function ChatView({
     try {
       await client.request("agents.setConfig", { agentId: agent.id, configId: "mode", value });
     } catch (e) {
-      setModeError(e instanceof Error ? e.message : String(e));
+      setModeError(errorMessage(e));
     }
   };
 
-  const send = async (
-    text: string,
-    attachments: { name: string; mime: string; dataBase64: string }[],
-  ) => {
-    setSendBusy(true);
-    setSendError(null);
-    try {
-      await client.request("chat.send", {
-        agentId: agent.id,
-        text,
-        ...(attachments.length ? { attachments } : {}),
+  const send = useCallback(
+    async (text: string, attachments: { name: string; mime: string; dataBase64: string }[]) => {
+      setSendBusy(true);
+      setSendError(null);
+      try {
+        await client.request("chat.send", {
+          agentId: agent.id,
+          text,
+          ...(attachments.length ? { attachments } : {}),
+        });
+      } catch (e) {
+        setSendError(errorMessage(e));
+        throw e;
+      } finally {
+        setSendBusy(false);
+      }
+    },
+    [client, agent.id],
+  );
+
+  const retry = useCallback(() => {
+    if (latestUser?.kind === "user_message") void send(latestUser.text, []).catch(() => {});
+  }, [latestUser, send]);
+
+  const respondPermission = useCallback(
+    (requestId: string, optionId: string | null) => {
+      void client.request("permissions.respond", { requestId, optionId }).catch((e) => {
+        setSendError(errorMessage(e));
       });
-    } catch (e) {
-      setSendError(e instanceof Error ? e.message : String(e));
-      throw e;
-    } finally {
-      setSendBusy(false);
-    }
-  };
+    },
+    [client],
+  );
 
-  const retry = () => {
-    if (latestUser?.kind === "user_message") void send(latestUser.text, []);
-  };
+  const speak = useCallback(
+    (text: string) =>
+      void client
+        .request("voice.speak", { text })
+        .catch((e: unknown) => logWarn("voice.speak_failed", errorFields(e))),
+    [client],
+  );
+
+  const loadEarlierItems = useCallback(() => {
+    void loadEarlier();
+  }, [loadEarlier]);
   const displayStatus = overview?.status ?? "idle";
   const isAsking = supportsModes && safeMode;
   const placeholder = isAsking
@@ -144,7 +145,7 @@ export function ChatView({
 
   return (
     <div className="main" style={{ flex: 1 }} data-od-id="chat-view">
-      <header className="main-head">
+      <header className="main-head" data-tauri-drag-region>
         <MonoAv agent={agent} status={displayStatus} lg />
         <div className="title">
           <h2>{agent.name}</h2>
@@ -154,10 +155,11 @@ export function ChatView({
         {supportsModes && (
           <>
             {/* biome-ignore lint/a11y/useSemanticElements: Required by the mockup's div role group. */}
-            <div className="seg" role="group" aria-label="Modo do bot">
+            <div className="seg" role="group" aria-label="Modo do bot" onKeyDown={moveControlFocus}>
               <button
                 type="button"
                 aria-pressed={isAsking}
+                tabIndex={isAsking ? 0 : -1}
                 onClick={() => void setMode(isClaude ? "plan" : "read-only")}
               >
                 Perguntar
@@ -165,6 +167,7 @@ export function ChatView({
               <button
                 type="button"
                 aria-pressed={!isAsking}
+                tabIndex={isAsking ? -1 : 0}
                 onClick={() => void setMode(isClaude ? "default" : "auto")}
               >
                 Agir
@@ -190,6 +193,13 @@ export function ChatView({
         </button>
       </header>
       {modeError && <div className="notice is-err">{modeError}</div>}
+      {(["history", "status", "queue", "earlier", "action"] as const).map((source) =>
+        errors[source] ? (
+          <div className="notice is-err" key={source} role="alert">
+            {errors[source]}
+          </div>
+        ) : null,
+      )}
       <MessageList
         agent={agent}
         status={displayStatus}
@@ -198,17 +208,9 @@ export function ChatView({
         loaded={loaded}
         emptyNotice={<PermissionNotice provider={agent.provider} />}
         running={runningTurn !== null || displayStatus === "run"}
-        onLoadEarlier={() => void loadEarlier().catch(() => {})}
-        onPermissionRespond={(requestId, optionId) => {
-          void client.request("permissions.respond", { requestId, optionId }).catch((e) => {
-            setSendError(e instanceof Error ? e.message : String(e));
-          });
-        }}
-        onSpeak={
-          voice.tts
-            ? (text) => void client.request("voice.speak", { text }).catch(() => {})
-            : undefined
-        }
+        onLoadEarlier={loadEarlierItems}
+        onPermissionRespond={respondPermission}
+        onSpeak={voice.tts ? speak : undefined}
         onRetry={retry}
         canRetry={canRetry}
         retryHasAttachments={retryHasAttachments}
@@ -221,11 +223,13 @@ export function ChatView({
         placeholder={placeholder}
         hint={hint}
         hintError={sendError}
-        toolCount={toolCount}
-        contextIcon={contextIcon}
-        onTools={onOpenApps}
         onSend={send}
-        onStop={() => void client.request("chat.cancel", { agentId: agent.id }).catch(() => {})}
+        onStop={() =>
+          void client.request("chat.cancel", { agentId: agent.id }).catch((e: unknown) => {
+            logWarn("chat.cancel_failed", { agentId: agent.id, ...errorFields(e) });
+            setSendError(`Não foi possível parar: ${errorMessage(e)}`);
+          })
+        }
         onTranscribe={
           voice.stt
             ? async (audioBase64, mime) =>
@@ -252,24 +256,32 @@ export function ChatView({
                 <button
                   type="button"
                   aria-label="Remover da fila"
-                  onClick={() => queueRemove(item.id)}
+                  onClick={() => void queueRemove(item.id)}
                 >
                   ×
                 </button>
               </span>
             ))}
             {queue.paused ? (
-              <button type="button" className="btn btn-ghost btn-sm" onClick={queueResume}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => void queueResume()}
+              >
                 Retomar fila
               </button>
             ) : (
-              <button type="button" className="btn btn-ghost btn-sm" onClick={queuePause}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => void queuePause()}
+              >
                 Pausar fila
               </button>
             )}
           </div>
         )}
-        <ApprovalCards client={client} agentId={agent.id} />
+        <ApprovalCards client={client} agentId={agent.id} botName={agent.name} />
         <DraftCards client={client} agentId={agent.id} />
       </Composer>
     </div>

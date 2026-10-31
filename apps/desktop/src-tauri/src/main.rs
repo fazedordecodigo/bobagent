@@ -1,5 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod menubar;
+mod notifications;
+
 use rand::RngCore;
 use serde::Serialize;
 use std::ffi::OsStr;
@@ -10,6 +13,16 @@ use tauri_plugin_shell::ShellExt;
 use tokio::sync::Notify;
 
 const READY_PREFIX: &str = "UPBOT_READY ";
+
+fn parse_ready_port(json: &str) -> Result<u16, &'static str> {
+    let value = serde_json::from_str::<serde_json::Value>(json)
+        .map_err(|_| "upbotd READY line is not valid JSON")?;
+    value["port"]
+        .as_u64()
+        .and_then(|port| u16::try_from(port).ok())
+        .filter(|port| *port != 0)
+        .ok_or("upbotd READY has no valid port")
+}
 
 #[derive(Serialize, Clone)]
 struct DaemonConnection {
@@ -85,20 +98,20 @@ fn spawn_daemon(app: &tauri::App) -> Result<(), String> {
                         let line = stdout_buf[..idx].trim_end().to_string();
                         stdout_buf = stdout_buf[idx + 1..].to_string();
                         if let Some(json) = line.strip_prefix(READY_PREFIX) {
-                            match serde_json::from_str::<serde_json::Value>(json) {
-                                Ok(v) => {
-                                    let port = v["port"].as_u64().unwrap_or(0) as u16;
-                                    {
-                                        let mut inner = state.inner.lock().unwrap();
-                                        inner.conn = Some(DaemonConnection {
-                                            port,
-                                            token: token.clone(),
-                                        });
-                                    }
-                                    state.ready.notify_waiters();
+                            match parse_ready_port(json) {
+                                Ok(port) => {
+                                    let mut inner = state.inner.lock().unwrap();
+                                    inner.conn = Some(DaemonConnection {
+                                        port,
+                                        token: token.clone(),
+                                    });
                                 }
-                                Err(e) => log::error!("bad READY line from upbotd: {e}"),
+                                Err(msg) => {
+                                    log::error!("{msg}");
+                                    state.inner.lock().unwrap().error = Some(msg.to_string());
+                                }
                             }
+                            state.ready.notify_waiters();
                         }
                     }
                 }
@@ -112,9 +125,9 @@ fn spawn_daemon(app: &tauri::App) -> Result<(), String> {
                     log::warn!("upbotd terminated: {status:?}");
                     {
                         let mut inner = state.inner.lock().unwrap();
-                        if inner.conn.is_none() && inner.error.is_none() {
-                            inner.error = Some(format!("upbotd exited: {status:?}"));
-                        }
+                        inner.conn = None;
+                        inner.child = None;
+                        inner.error = Some(format!("upbotd exited: {status:?}"));
                     }
                     state.ready.notify_waiters();
                 }
@@ -151,19 +164,44 @@ fn main() {
     });
 
     tauri::Builder::default()
+        .manage(notifications::NotificationState::from_args(
+            &std::env::args().collect::<Vec<_>>(),
+        ))
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            notifications::forward_launch(app, &args);
+            if let Err(e) = notifications::notifications_open(app.clone()) {
+                log::warn!("could not focus main window: {e}");
+            }
+        }))
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(shared)
         .setup(move |app| {
+            menubar::setup(app)?;
+            notifications::setup(app.handle()).map_err(std::io::Error::other)?;
             if let Err(e) = spawn_daemon(app) {
                 let state = app.state::<SharedState>();
                 state.inner.lock().unwrap().error = Some(e);
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![daemon_connection])
+        .invoke_handler(tauri::generate_handler![
+            daemon_connection,
+            menubar::set_tray_count,
+            menubar::menubar_hide,
+            menubar::open_main,
+            menubar::main_ready,
+            menubar::quit_app,
+            notifications::notifications_initialize,
+            notifications::notifications_post,
+            notifications::notifications_remove,
+            notifications::notifications_take_actions,
+            notifications::notifications_open
+        ])
         .build(tauri::generate_context!())
         .expect("error while building UpBot")
         .run(|app_handle, event| {
@@ -171,8 +209,54 @@ fn main() {
                 let state = app_handle.state::<SharedState>();
                 let mut inner = state.inner.lock().unwrap();
                 if let Some(child) = inner.child.take() {
-                    let _ = child.kill();
+                    if let Err(e) = child.kill() {
+                        log::warn!("could not kill upbotd: {e}");
+                    }
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_ready_port;
+
+    #[test]
+    fn parses_valid_ready_port() {
+        assert_eq!(parse_ready_port(r#"{"port":4321}"#), Ok(4321));
+    }
+
+    #[test]
+    fn rejects_invalid_ready_ports() {
+        for json in [
+            r#"{"port":0}"#,
+            r#"{"port":70000}"#,
+            "{}",
+            r#"{"port":"1"}"#,
+        ] {
+            assert_eq!(
+                parse_ready_port(json),
+                Err("upbotd READY has no valid port")
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_ready_json() {
+        assert_eq!(
+            parse_ready_port("not json"),
+            Err("upbotd READY line is not valid JSON")
+        );
+    }
+
+    #[test]
+    fn does_not_leak_ready_payloads_in_errors() {
+        for json in [
+            r#"{"port":0,"token":"sk-live-SECRET"}"#,
+            "sk-live-SECRET not json",
+        ] {
+            let error = parse_ready_port(json).unwrap_err();
+            assert!(!error.contains("SECRET"));
+        }
+    }
 }

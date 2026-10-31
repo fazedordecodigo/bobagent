@@ -9,9 +9,14 @@
 //   think:<t>      -> thought chunk then message chunk <t>
 //   tool           -> tool_call pending -> request_permission (4 options)
 //                     -> tool_call_update -> message "permission:<optionId|cancelled>"
+//   tools          -> tool_call tc-a + tc-b, interleaved tool_call_updates (incl. an
+//                     orphan update for tc-orphan) -> message "tools:done"
 //   slow           -> a chunk every 100ms; responds to session/cancel
+//   slowseq        -> sequenced chunks every 100ms; responds to session/cancel
 //   ignorecancel   -> streams forever, ignores session/cancel
 //   crash          -> one chunk then process.exit(1)
+//   fail-secret:<s>  -> prompt error containing <s>
+//   crash-secret:<s> -> stderr containing <s>, then process.exit(1) without a chunk
 
 import { spawn } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -29,6 +34,8 @@ writeFileSync(
   join(STATE_DIR, "env.json"),
   JSON.stringify({ keys: Object.keys(process.env), env: process.env }),
 );
+// optional startup stderr line so tests can assert the daemon sanitizes tails
+if (process.env.FAKE_ACP_STDERR) process.stderr.write(`${process.env.FAKE_ACP_STDERR}\n`);
 
 function logRequest(method: string, params: unknown) {
   try {
@@ -37,7 +44,10 @@ function logRequest(method: string, params: unknown) {
 }
 
 const MODE_VALUES = ["ask-all", "default", "bypass", "accept-edits"];
-const MODEL_VALUES = ["m1", "m2"];
+const MODEL_VALUES =
+  process.env.FAKE_ACP_EFFORT === "1" ? ["grok-4.7-fast", "grok-4.7"] : ["m1", "m2"];
+const MODEL_NAMES =
+  process.env.FAKE_ACP_EFFORT === "1" ? ["Grok 4.7 Fast", "Grok 4.7"] : MODEL_VALUES;
 
 function configOptions() {
   return [
@@ -49,19 +59,38 @@ function configOptions() {
       currentValue: state.config.mode ?? "default",
       options: MODE_VALUES.map((v) => ({ value: v, name: v })),
     },
+    ...(process.env.FAKE_ACP_EFFORT === "1"
+      ? [
+          {
+            id: "effort",
+            name: "Effort",
+            category: "thought_level",
+            type: "select",
+            currentValue: state.config.effort ?? "medium",
+            options: ["low", "medium", "high"].map((value) => ({ value, name: value })),
+          },
+        ]
+      : []),
     {
       id: "model",
       name: "Model",
       category: "model",
       type: "select",
-      currentValue: state.config.model ?? "m1",
-      options: MODEL_VALUES.map((v) => ({ value: v, name: v })),
+      currentValue: state.config.model ?? MODEL_VALUES[0],
+      options: MODEL_VALUES.map((value, index) => ({
+        value,
+        name: MODEL_NAMES[index] ?? value,
+      })),
     },
   ];
 }
 
 const state = {
-  config: { mode: undefined as string | undefined, model: undefined as string | undefined },
+  config: {
+    mode: undefined as string | undefined,
+    model: undefined as string | undefined,
+    effort: undefined as string | undefined,
+  },
 };
 try {
   Object.assign(state, JSON.parse(readFileSync(join(STATE_DIR, "state.json"), "utf8")));
@@ -90,7 +119,7 @@ type McpSpec = {
 };
 const sessionMcp = new Map<string, McpSpec[]>();
 
-/** Minimal MCP stdio client: initialize + one tools/call, returns the text content. */
+/** Minimal MCP stdio client: initialize + one tools/call (or tools/list), returns the text content. */
 async function callMcp(spec: McpSpec, tool: string, args: unknown): Promise<string> {
   const env = { ...process.env };
   for (const e of spec.env) env[e.name] = e.value;
@@ -121,6 +150,11 @@ async function callMcp(spec: McpSpec, tool: string, args: unknown): Promise<stri
     child.stdin.write(
       `${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`,
     );
+    if (tool === "tools/list") {
+      const l = await req(2, "tools/list", {});
+      if (l.error) return `mcp-error:${l.error.message}`;
+      return `tools:${(l.result as { tools: { name: string }[] }).tools.map((t) => t.name).join(",")}`;
+    }
     const r = await req(2, "tools/call", { name: tool, arguments: args });
     if (r.error) return `mcp-error:${r.error.message}`;
     const res = r.result as { content: { text: string }[]; isError?: boolean };
@@ -209,6 +243,22 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
     return { stopReason: "end_turn" };
   }
 
+  if (text.startsWith("mcp-sequence:")) {
+    const calls = JSON.parse(text.slice("mcp-sequence:".length)) as {
+      tool: string;
+      args: Record<string, unknown>;
+    }[];
+    const spec = sessionMcp.get(sessionId)?.find((x) => x.name === "upbot");
+    if (!spec) throw new Error("no-upbot-mcp");
+    for (const call of calls)
+      await say("agent_message_chunk", await callMcp(spec, call.tool, call.args));
+    return { stopReason: "end_turn" };
+  }
+  if (text === "mcp-list") {
+    const spec = sessionMcp.get(sessionId)?.find((x) => x.name === "upbot");
+    await say("agent_message_chunk", spec ? await callMcp(spec, "tools/list", {}) : "no-upbot-mcp");
+    return { stopReason: "end_turn" };
+  }
   if (text.startsWith("mcp:")) {
     const m = /^mcp:([A-Za-z0-9_-]+)\s*([\s\S]*)$/.exec(text);
     const spec = sessionMcp.get(sessionId)?.find((x) => x.name === "upbot");
@@ -221,6 +271,9 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
   }
 
   if (text.includes("<compaction_request>")) {
+    if (process.env.FAKE_ACP_COMPACT_ERROR) {
+      throw new acp.RequestError(-32603, process.env.FAKE_ACP_COMPACT_ERROR);
+    }
     await say(
       "agent_message_chunk",
       `SUMMARY: ${sessions[sessionId].prompts.length - 1} earlier prompts`,
@@ -301,9 +354,52 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
     return { stopReason: "end_turn" };
   }
 
+  if (text === "tools") {
+    const toolCall = (toolCallId: string, title: string) =>
+      ctx.client.notify("session/update", {
+        sessionId,
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId,
+          title,
+          kind: "execute",
+          status: "pending",
+        },
+      });
+    const toolUpdate = (toolCallId: string, status: string, title?: string) =>
+      ctx.client.notify("session/update", {
+        sessionId,
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId,
+          status,
+          ...(title === undefined ? {} : { title }),
+        },
+      });
+    await toolCall("tc-a", "Tool A");
+    await toolCall("tc-b", "Tool B");
+    await toolUpdate("tc-a", "in_progress");
+    await toolUpdate("tc-b", "completed");
+    // update for a toolCallId the daemon never saw: must be ignored
+    await toolUpdate("tc-orphan", "completed");
+    await toolUpdate("tc-a", "completed", "Tool A renamed");
+    await say("agent_message_chunk", "tools:done");
+    return { stopReason: "end_turn" };
+  }
+
   if (text === "slow") {
     while (!cancelledSessions.has(sessionId)) {
       await say("agent_message_chunk", ".");
+      await sleep(100);
+    }
+    return { stopReason: "cancelled" };
+  }
+
+  if (text === "slowseq") {
+    let i = 0;
+    while (!cancelledSessions.has(sessionId)) {
+      await say("agent_message_chunk", `${i}|`);
+      i += 1;
       await sleep(100);
     }
     return { stopReason: "cancelled" };
@@ -317,7 +413,7 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
   }
 
   if (text === "switchmodel") {
-    state.config.model = "m2";
+    state.config.model = MODEL_VALUES[1];
     saveState();
     await ctx.client.notify("session/update", {
       sessionId,
@@ -333,6 +429,17 @@ async function handlePrompt(ctx: Ctx): Promise<{ stopReason: string }> {
 
   if (text === "crash") {
     await say("agent_message_chunk", "before crash");
+    process.exit(1);
+  }
+
+  if (text.startsWith("fail-secret:")) {
+    const secret = text.slice("fail-secret:".length);
+    throw acp.RequestError.internalError({ detail: secret }, `provider failed with ${secret}`);
+  }
+
+  if (text.startsWith("crash-secret:")) {
+    const secret = text.slice("crash-secret:".length);
+    process.stderr.write(`token=${secret}\n`);
     process.exit(1);
   }
 
@@ -361,6 +468,9 @@ acp
   })
   .onRequest("session/new", async (ctx) => {
     logRequest("session/new", ctx.params);
+    if (process.env.FAKE_ACP_NEW_ERROR) {
+      throw new acp.RequestError(-32603, process.env.FAKE_ACP_NEW_ERROR);
+    }
     const delay = Number.parseInt(process.env.FAKE_ACP_NEW_DELAY_MS ?? "", 10) || 0;
     if (delay > 0) await sleep(delay);
     const sessions = loadSessions();
@@ -373,6 +483,9 @@ acp
   .onRequest("session/load", async (ctx) => {
     const params = ctx.params as { sessionId: string; cwd?: string; mcpServers?: McpSpec[] };
     logRequest("session/load", params);
+    if (process.env.FAKE_ACP_LOAD_BEHAVIOR === "close") process.exit(1);
+    if (process.env.FAKE_ACP_LOAD_BEHAVIOR === "error") throw new Error("session load failed");
+    if (process.env.FAKE_ACP_LOAD_BEHAVIOR === "auth") throw acp.RequestError.authRequired();
     sessionMcp.set(params.sessionId, params.mcpServers ?? []);
     const sessions = loadSessions();
     if (!sessions[params.sessionId]) {
@@ -388,7 +501,7 @@ acp
   .onRequest("session/set_config_option", async (ctx) => {
     const params = ctx.params as { configId: string; value: string };
     logRequest("session/set_config_option", params);
-    if (params.configId === "mode" || params.configId === "model") {
+    if (params.configId === "mode" || params.configId === "model" || params.configId === "effort") {
       state.config[params.configId] = params.value;
       saveState();
     }

@@ -3,22 +3,36 @@ name = "upbot-desktop"
 version = "0.3.0"
 license = "MIT"
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.90"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-opener = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-log = "2"
 tauri-plugin-updater = "2.14.0"
+tauri-plugin-positioner = { version = "2.4.0", features = ["tray-icon"] }
+tauri-plugin-global-shortcut = "2.4.1"
+tauri-plugin-single-instance = "=2.4.0"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["sync"] }
 rand = "0.9"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "=0.6.5"
+objc2-foundation = "=0.3.2"
+objc2-user-notifications = "=0.3.2"
+block2 = "=0.6.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "=0.62.2", features = ["Data_Xml_Dom", "UI_Notifications", "Win32_Foundation", "Win32_System_Com", "Win32_UI_Notifications", "Win32_UI_Shell"] }
+windows-registry = "=0.6.1"
+windows-core = "=0.62.2"
 
 [profile.dev]
 incremental = true

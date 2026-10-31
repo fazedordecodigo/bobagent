@@ -2,8 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { cpSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { Agent, MarketplaceItem, Skill } from "@upbot/protocol";
-import { DaemonClient, type DaemonHandle, startDaemon, tmp } from "./helpers";
+import { DaemonClient, type DaemonHandle, startDaemon, stopDaemon, tmp } from "./helpers";
 
 const TOKEN = `mk-test-${crypto.randomUUID()}`;
 const REPO_MARKET = join(import.meta.dir, "..", "..", "..", "marketplace");
@@ -51,22 +50,14 @@ describe("marketplace e2e", () => {
     c = await DaemonClient.connect(daemon.port, TOKEN);
   });
 
-  afterAll(() => {
-    c?.close();
+  afterAll(async () => {
     server?.stop(true);
-    try {
-      daemon.proc.kill("SIGKILL");
-    } catch {}
+    await stopDaemon(daemon, c);
     for (const d of [dataDir, agentsRoot, sharedRoot, market])
-      rmSync(d, { recursive: true, force: true });
+      rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
-  const list = () =>
-    c.request("marketplace.list", {}) as Promise<{
-      sources: string[];
-      items: MarketplaceItem[];
-      errors: { source: string; error: string }[];
-    }>;
+  const list = () => c.request("marketplace.list", {});
 
   test("lists the bundled registry", async () => {
     const r = await list();
@@ -84,26 +75,20 @@ describe("marketplace e2e", () => {
   });
 
   test("installs a skill and an agent template with its skills", async () => {
-    const s = (await c.request("marketplace.install", {
+    const s = await c.request("marketplace.install", {
       source: fileIndex,
       id: "write-tests",
-    })) as {
-      skills: string[];
-    };
+    });
     expect(s.skills).toEqual(["write-tests"]);
-    const skill = (await c.request("skills.get", { name: "write-tests" })) as Skill;
+    const skill = await c.request("skills.get", { name: "write-tests" });
     expect(skill.author).toBe("marketplace:UpBot");
     expect(skill.body).toContain("Detect the test runner");
-    const created = c.waitForEventWhere(
-      "agent.created",
-      (d) => (d as Agent).name === "Reviewer",
-      10000,
-    );
-    const r = (await c.request("marketplace.install", {
+    const created = c.waitForEventWhere("agent.created", (d) => d.name === "Reviewer", 10000);
+    const r = await c.request("marketplace.install", {
       source: fileIndex,
       id: "reviewer",
       provider: "codex",
-    })) as { skills: string[]; agent: Agent };
+    });
     expect(r.skills).toEqual(["code-review"]);
     expect(r.agent).toMatchObject({ name: "Reviewer", provider: "codex", avatar: { emoji: "🔍" } });
     await created;

@@ -1,21 +1,13 @@
+import type { ChildProcess } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import type { Subprocess } from "bun";
+import { delimiter, join } from "node:path";
+import { resolveCommandIn, spawnEnv } from "./env/login-path";
+import { spawnChild } from "./env/spawn";
+import { envOverride } from "./env/vars";
 
 // Voice: text-to-speech with macOS `say` (or UPBOT_TTS_COMMAND, text on stdin) and
 // speech-to-text with UPBOT_STT_COMMAND (JSON array, "{file}" = recorded audio path,
 // transcript on stdout) or the `whisper` CLI when it is on PATH.
-
-function jsonCommand(name: string): string[] | null {
-  const raw = process.env[name];
-  if (!raw) return null;
-  try {
-    const v = JSON.parse(raw);
-    return Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === "string") ? v : null;
-  } catch {
-    return null;
-  }
-}
 
 const EXT: Record<string, string> = {
   "audio/webm": "webm",
@@ -26,7 +18,7 @@ const EXT: Record<string, string> = {
 };
 
 export class Voice {
-  private speaking: Subprocess | null = null;
+  private speaking: ChildProcess | null = null;
 
   constructor(
     private dir: string,
@@ -34,34 +26,55 @@ export class Voice {
   ) {}
 
   private tts(): string[] | null {
-    return jsonCommand("UPBOT_TTS_COMMAND") ?? (process.platform === "darwin" ? ["say"] : null);
+    return envOverride("UPBOT_TTS_COMMAND") ?? (process.platform === "darwin" ? ["say"] : null);
+  }
+
+  private resolve(cmd: string): string | null {
+    return resolveCommandIn(cmd, this.pathEnv().split(delimiter), {
+      platform: process.platform,
+      ...(process.env.PATHEXT ? { pathext: process.env.PATHEXT } : {}),
+    });
   }
 
   private whisper(): string | null {
-    return Bun.which("whisper", { PATH: this.pathEnv() });
+    return this.resolve("whisper");
   }
 
   status() {
     return {
       tts: this.tts() !== null,
-      stt: jsonCommand("UPBOT_STT_COMMAND") !== null || this.whisper() !== null,
+      stt: envOverride("UPBOT_STT_COMMAND") !== null || this.whisper() !== null,
     };
   }
 
-  speak(text: string): void {
+  async speak(text: string): Promise<void> {
     const cmd = this.tts();
     if (!cmd) throw new Error("text-to-speech is not available");
     this.stop();
-    const p = Bun.spawn(cmd, { stdin: "pipe", stdout: "ignore", stderr: "ignore" });
-    p.stdin.write(text.slice(0, 20_000));
-    p.stdin.end();
+    const bin = this.resolve(cmd[0]!);
+    if (!bin) throw new Error(`text-to-speech command not found: ${cmd[0]}`);
+    const p = spawnChild(bin, cmd.slice(1), {
+      stdio: ["pipe", "ignore", "ignore"],
+      env: spawnEnv(undefined, process.platform, this.pathEnv()),
+    });
     this.speaking = p;
+    p.stdin?.on("error", () => {});
+    p.on("error", () => {
+      if (this.speaking === p) this.speaking = null;
+    });
+    p.once("close", () => {
+      if (this.speaking === p) this.speaking = null;
+    });
+    const spawned = new Promise<void>((resolve, reject) => {
+      p.once("spawn", resolve);
+      p.once("error", reject);
+    });
+    p.stdin?.end(text.slice(0, 20_000));
+    await spawned;
   }
 
   stop(): void {
-    try {
-      this.speaking?.kill();
-    } catch {}
+    this.speaking?.kill();
     this.speaking = null;
   }
 
@@ -72,7 +85,7 @@ export class Voice {
     const file = join(work, `audio.${EXT[mime.split(";")[0]!.trim()] ?? "webm"}`);
     writeFileSync(file, Buffer.from(audioBase64, "base64"));
     try {
-      const custom = jsonCommand("UPBOT_STT_COMMAND");
+      const custom = envOverride("UPBOT_STT_COMMAND");
       const whisper = custom ? null : this.whisper();
       if (!custom && !whisper)
         throw new Error(
@@ -81,22 +94,38 @@ export class Voice {
       const cmd = custom
         ? custom.map((a) => a.replaceAll("{file}", file))
         : [whisper!, file, "--model", "base", "--output_format", "txt", "--output_dir", work];
-      const p = Bun.spawn(cmd, {
-        stdout: "pipe",
-        stderr: "pipe",
-        stdin: "ignore",
-        env: { ...process.env, PATH: this.pathEnv() },
+      const bin = this.resolve(cmd[0]!);
+      if (!bin) throw new Error(`speech-to-text command not found: ${cmd[0]}`);
+      const p = spawnChild(bin, cmd.slice(1), {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: spawnEnv(undefined, process.platform, this.pathEnv()),
       });
       const timer = setTimeout(() => p.kill(), 120_000);
-      const [out, err, code] = await Promise.all([
-        new Response(p.stdout).text(),
-        new Response(p.stderr).text(),
-        p.exited,
-      ]);
-      clearTimeout(timer);
-      if (code !== 0) throw new Error(`transcription failed: ${err.trim().slice(0, 300)}`);
-      if (custom) return out.trim();
-      return (await Bun.file(join(work, "audio.txt")).text()).trim();
+      try {
+        const [out, err, code] = await Promise.all([
+          new Promise<string>((resolve) => {
+            const chunks: Buffer[] = [];
+            p.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
+            p.stdout?.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+            if (!p.stdout) resolve("");
+          }),
+          new Promise<string>((resolve) => {
+            const chunks: Buffer[] = [];
+            p.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk));
+            p.stderr?.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+            if (!p.stderr) resolve("");
+          }),
+          new Promise<number>((resolve, reject) => {
+            p.once("error", reject);
+            p.once("close", (exitCode) => resolve(exitCode ?? 1));
+          }),
+        ]);
+        if (code !== 0) throw new Error(`transcription failed: ${err.trim().slice(0, 300)}`);
+        if (custom) return out.trim();
+        return (await Bun.file(join(work, "audio.txt")).text()).trim();
+      } finally {
+        clearTimeout(timer);
+      }
     } finally {
       rmSync(work, { recursive: true, force: true });
     }

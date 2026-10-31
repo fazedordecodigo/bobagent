@@ -1,10 +1,18 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { rmSync } from "node:fs";
-import type { Agent, MobileStatus } from "@upbot/protocol";
-import { DaemonClient, type DaemonHandle, FAKE_AGENT, readPids, startDaemon, tmp } from "./helpers";
+import type { Agent } from "@upbot/protocol";
+import {
+  DaemonClient,
+  type DaemonHandle,
+  FAKE_AGENT,
+  startDaemon,
+  stopDaemon,
+  tmp,
+} from "./helpers";
 
 setDefaultTimeout(30000);
 const TOKEN = `mob-test-${crypto.randomUUID()}`;
+const DEVICE_NAME = "pair-name-secret-canary";
 
 describe("mobile companion e2e", () => {
   let dataDir: string;
@@ -15,6 +23,16 @@ describe("mobile companion e2e", () => {
   let a: Agent;
   let base: string;
   let device = "";
+  let stderrBuf = "";
+  let occupied: ReturnType<typeof Bun.serve>;
+
+  const waitForLog = async (needle: string, after = 0) => {
+    const deadline = Date.now() + 5000;
+    while (!stderrBuf.slice(after).includes(needle)) {
+      if (Date.now() > deadline) throw new Error(`log line not found: ${needle}`);
+      await Bun.sleep(50);
+    }
+  };
 
   const api = (
     path: string,
@@ -37,39 +55,54 @@ describe("mobile companion e2e", () => {
     dataDir = tmp("mob-data-");
     agentsRoot = tmp("mob-agents-");
     stateDir = tmp("mob-fake-");
+    occupied = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () => new Response("occupied"),
+    });
     daemon = await startDaemon(dataDir, agentsRoot, TOKEN, {
       UPBOT_ACP_COMMAND_DEVIN: JSON.stringify(["bun", FAKE_AGENT]),
       FAKE_ACP_STATE_DIR: stateDir,
       UPBOT_MOBILE_HOST: "127.0.0.1",
+      UPBOT_MOBILE_PORT: String(occupied.port),
     });
+    const stderrReader = (daemon.proc.stderr as ReadableStream<Uint8Array>).getReader();
+    const dec = new TextDecoder();
+    void (async () => {
+      for (;;) {
+        const { done, value } = await stderrReader.read();
+        if (done) return;
+        stderrBuf += dec.decode(value);
+      }
+    })();
     c = await DaemonClient.connect(daemon.port, TOKEN);
-    a = (await c.request("agents.create", {
+    a = await c.request("agents.create", {
       name: "Pocket",
       provider: "devin",
       instructions: "",
-    })) as Agent;
+    });
   });
 
-  afterAll(() => {
-    c?.close();
-    try {
-      daemon.proc.kill("SIGKILL");
-    } catch {}
-    for (const pid of readPids(stateDir)) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {}
-    }
-    for (const d of [dataDir, agentsRoot, stateDir]) rmSync(d, { recursive: true, force: true });
+  afterAll(async () => {
+    await stopDaemon(daemon, c, stateDir);
+    occupied?.stop(true);
+    for (const d of [dataDir, agentsRoot, stateDir])
+      rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
-  test("disabled by default; pairing needs it enabled", async () => {
+  test("disabled by default; enabling audits and serves after a real port collision", async () => {
     expect(await c.request("mobile.status", {})).toEqual({ enabled: false, urls: [], devices: [] });
     await expect(c.request("mobile.pair", {})).rejects.toMatchObject({ code: "bad_request" });
-    const s = (await c.request("mobile.enable", { enabled: true })) as MobileStatus;
+    const s = await c.request("mobile.enable", { enabled: true });
     expect(s.enabled).toBe(true);
     expect(s.urls).toHaveLength(1);
     base = s.urls[0]!.replace(/\/$/, "");
+    expect(Number(new URL(base).port)).not.toBe(occupied.port);
+    await waitForLog(
+      `mobile.port_fallback ${JSON.stringify({ port: occupied.port, error: "EADDRINUSE" })}`,
+    );
+    const blocker = await fetch(`http://127.0.0.1:${occupied.port}/`);
+    expect(await blocker.text()).toBe("occupied");
     const page = await fetch(`${base}/`);
     expect(page.headers.get("content-security-policy")).toContain("connect-src 'self'");
     expect(await page.text()).toContain("Pair with UpBot");
@@ -77,27 +110,79 @@ describe("mobile companion e2e", () => {
 
   test("pairing: wrong codes count toward a limit, the right code yields a device token once", async () => {
     expect((await api("/api/pair", { code: "000000" }, "")).status).toBe(401);
-    const { code } = (await c.request("mobile.pair", {})) as { code: string };
+    await waitForLog('mobile.pair_failed {"reason":"inactive","attempts":0');
+    const { code } = await c.request("mobile.pair", {});
     expect(code).toMatch(/^\d{6}$/);
     const wrong = code === "123456" ? "654321" : "123456";
     expect((await api("/api/pair", { code: wrong }, "")).status).toBe(401);
-    const ok = await api("/api/pair", { code, name: "iPhone" }, "");
+    await waitForLog('mobile.pair_failed {"reason":"wrong_code"');
+    const ok = await api("/api/pair", { code, name: DEVICE_NAME }, "");
     expect(ok.status).toBe(200);
+    await waitForLog('mobile.paired {"deviceId"');
     device = ((await ok.json()) as { token: string }).token;
     expect(device).toMatch(/^[0-9a-f]{64}$/);
+    expect(stderrBuf).not.toContain(DEVICE_NAME);
+    expect(stderrBuf).not.toContain(device);
+    const afterPair = stderrBuf.length;
     expect((await api("/api/pair", { code, name: "again" }, "")).status).toBe(401);
-    const { code: c2 } = (await c.request("mobile.pair", {})) as { code: string };
+    await waitForLog('mobile.pair_failed {"reason":"inactive","attempts":0', afterPair);
+    expect(stderrBuf).not.toContain('"reason":"expired"');
+    const { code: c2 } = await c.request("mobile.pair", {});
     for (let i = 0; i < 5; i++)
       await api("/api/pair", { code: c2 === "111111" ? "222222" : "111111" }, "");
     expect((await api("/api/pair", { code: c2 }, "")).status).toBe(401);
-    const st = (await c.request("mobile.status", {})) as MobileStatus;
-    expect(st.devices.map((d) => d.name)).toEqual(["iPhone"]);
+    await waitForLog('mobile.pair_failed {"reason":"exhausted"');
+    const st = await c.request("mobile.status", {});
+    expect(st.devices.map((d) => d.name)).toEqual([DEVICE_NAME]);
+  });
+
+  test("audit metadata never copies arbitrary request paths or RPC methods", async () => {
+    const pathSecret = "path-secret-canary";
+    const querySecret = "query-secret-canary";
+    const methodSecret = "method-secret-canary";
+    expect((await api(`/api/${pathSecret}?token=${querySecret}`, undefined, "")).status).toBe(401);
+    await waitForLog('mobile.unauthorized {"path":"unknown","method":"GET","reason":"bad_token"');
+    expect((await api(`/api/${pathSecret}`, undefined, "")).status).toBe(401);
+    await waitForLog('"reason":"missing_token"');
+    expect((await rpc(methodSecret, {})).status).toBe(403);
+    await waitForLog('"method":"unknown"');
+    for (const secret of [pathSecret, querySecret, methodSecret, DEVICE_NAME, device])
+      expect(stderrBuf).not.toContain(secret);
+  });
+
+  test("foreign origins are audited before pairing, authentication and static routing", async () => {
+    const originSecret = "origin-secret-canary";
+    const pathSecret = "origin-path-secret-canary";
+    for (const [path, body, token, route, method] of [
+      ["/api/rpc", { method: "agents.list" }, device, "/api/rpc", "POST"],
+      ["/api/pair", { code: "000000" }, "", "/api/pair", "POST"],
+      ["/api/events", undefined, "", "/api/events", "GET"],
+      ["/", undefined, "", "/", "GET"],
+      [`/api/${pathSecret}`, undefined, "", "unknown", "GET"],
+    ] as const) {
+      const after = stderrBuf.length;
+      expect(
+        (await api(path, body, token, { origin: `https://${originSecret}.example` })).status,
+      ).toBe(403);
+      await waitForLog(
+        `mobile.origin_denied ${JSON.stringify({ path: route, method, ip: "127.0.0.1" })}`,
+        after,
+      );
+    }
+    expect(stderrBuf).not.toContain(originSecret);
+    expect(stderrBuf).not.toContain(pathSecret);
+    expect(stderrBuf).not.toContain(device);
   });
 
   test("devices chat through an allowlist of methods and get live events", async () => {
     expect((await api("/api/rpc", { method: "agents.list", params: {} }, "nope")).status).toBe(401);
+    await waitForLog('mobile.unauthorized {"path":"/api/rpc"');
+    expect(stderrBuf).toContain('"reason":"bad_token"');
+    expect(stderrBuf).not.toContain("nope");
     expect((await rpc("vault.list", {})).status).toBe(403);
     expect((await rpc("agents.create", { name: "x", provider: "devin" })).status).toBe(403);
+    await waitForLog('mobile.method_denied {"deviceId"');
+    expect(stderrBuf).toContain('"method":"agents.create"');
     expect(
       (
         await api("/api/rpc", { method: "agents.list", params: {} }, device, {
@@ -142,10 +227,48 @@ describe("mobile companion e2e", () => {
   });
 
   test("revoke and disable cut access", async () => {
-    const st = (await c.request("mobile.status", {})) as MobileStatus;
+    const st = await c.request("mobile.status", {});
     await c.request("mobile.revoke", { id: st.devices[0]!.id });
     expect((await rpc("agents.list", {})).status).toBe(401);
     await c.request("mobile.enable", { enabled: false });
     await expect(fetch(`${base}/`)).rejects.toThrow();
+  });
+
+  test("a busy stored port falls back to a random port and is not overwritten", async () => {
+    // This daemon has no UPBOT_MOBILE_PORT override, so the stored settings port drives binds.
+    const d2 = tmp("mob-data2-");
+    const a2 = tmp("mob-agents2-");
+    const token2 = `mob-test2-${crypto.randomUUID()}`;
+    const daemon2 = await startDaemon(d2, a2, token2, { UPBOT_MOBILE_HOST: "127.0.0.1" });
+    const c2 = await DaemonClient.connect(daemon2.port, token2);
+    try {
+      let st = await c2.request("mobile.enable", { enabled: true });
+      const configured = new URL(st.urls[0]!).port;
+      await c2.request("mobile.enable", { enabled: false });
+
+      // Occupy the stored port so the daemon must fall back to a random one.
+      const squatter = Bun.serve({
+        hostname: "127.0.0.1",
+        port: Number(configured),
+        fetch: () => new Response("squat"),
+      });
+      st = await c2.request("mobile.enable", { enabled: true });
+      expect(new URL(st.urls[0]!).port).not.toBe(configured);
+
+      // The ephemeral fallback port must not replace the stored one.
+      await c2.request("mobile.enable", { enabled: false });
+      squatter.stop(true);
+      st = await c2.request("mobile.enable", { enabled: true });
+      expect(new URL(st.urls[0]!).port).toBe(configured);
+      await c2.request("mobile.enable", { enabled: false });
+    } finally {
+      c2.close();
+      try {
+        daemon2.proc.kill("SIGKILL");
+      } catch {}
+      await daemon2.proc.exited;
+      rmSync(d2, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      rmSync(a2, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
   });
 });

@@ -1,5 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { DaemonEventMap, MethodName, MethodParams, MethodResult } from "@upbot/protocol";
+import {
+  DAEMON_NOT_CONNECTED,
+  DAEMON_SOCKET_CLOSED,
+  DAEMON_SOCKET_ERROR,
+  errorFields,
+  logInfo,
+  logWarn,
+} from "./log";
 
 type DaemonConnection = { port: number; token: string };
 
@@ -18,8 +26,11 @@ export class DaemonClient {
   private connection: DaemonConnection | null = null;
   private everConnected = false;
   private reconnectCbs = new Set<() => void>();
+  private failureCbs = new Set<(error: Error) => void>();
   private connecting: Promise<void> | null = null;
   private closeTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempt = 0;
+  private disconnectedAt: number | null = null;
 
   connect(): Promise<void> {
     if (this.closeTimer) {
@@ -30,13 +41,7 @@ export class DaemonClient {
     if (this.ws?.readyState === WebSocket.OPEN) return Promise.resolve();
     if (this.connecting) return this.connecting;
     const opening = (async () => {
-      // Dev-only browser path: vite dev server outside Tauri has no invoke bridge.
-      if (!("__TAURI_INTERNALS__" in window) && import.meta.env.DEV) {
-        const p = new URLSearchParams(location.hash.slice(1));
-        this.connection = { port: Number(p.get("port")), token: p.get("token") ?? "" };
-      } else {
-        this.connection = await invoke<DaemonConnection>("daemon_connection");
-      }
+      await this.resolveConnection();
       await this.openSocket();
     })();
     const connection = opening.finally(() => {
@@ -46,26 +51,49 @@ export class DaemonClient {
     return connection;
   }
 
+  private async resolveConnection(): Promise<void> {
+    // Dev-only browser path: vite dev server outside Tauri has no invoke bridge.
+    if (!("__TAURI_INTERNALS__" in window) && import.meta.env.DEV) {
+      const p = new URLSearchParams(location.hash.split("?")[1] ?? location.hash.slice(1));
+      this.connection = { port: Number(p.get("port")), token: p.get("token") ?? "" };
+    } else {
+      this.connection = await invoke<DaemonConnection>("daemon_connection");
+    }
+  }
+
   onReconnect(cb: () => void): () => void {
     this.reconnectCbs.add(cb);
     return () => this.reconnectCbs.delete(cb);
   }
 
-  private openSocket(): Promise<void> {
+  onFailure(cb: (error: Error) => void): () => void {
+    this.failureCbs.add(cb);
+    return () => this.failureCbs.delete(cb);
+  }
+
+  private openSocket(retry = false): Promise<void> {
     const { port, token } = this.connection!;
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${encodeURIComponent(token)}`);
       this.ws = ws;
       ws.onopen = () => {
+        const wasReconnect = this.everConnected;
+        const attempt = this.reconnectAttempt;
+        const downMs = this.disconnectedAt === null ? undefined : Date.now() - this.disconnectedAt;
+        this.reconnectAttempt = 0;
+        this.disconnectedAt = null;
         this.reconnectDelay = 500;
-        if (this.everConnected) {
+        if (wasReconnect) {
+          logInfo("daemon.socket_reconnected", { attempt, downMs });
+        }
+        if (this.everConnected || retry) {
           for (const cb of this.reconnectCbs) cb();
         }
         this.everConnected = true;
         resolve();
       };
       ws.onerror = () => {
-        reject(new Error("daemon socket error"));
+        reject(new Error(DAEMON_SOCKET_ERROR));
       };
       ws.onmessage = (ev) => {
         const msg = JSON.parse(String(ev.data));
@@ -84,14 +112,38 @@ export class DaemonClient {
           }
         }
       };
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
         this.ws = null;
-        for (const [, p] of this.pending) p.reject(new Error("daemon socket closed"));
+        for (const [, p] of this.pending) p.reject(new Error(DAEMON_SOCKET_CLOSED));
         this.pending.clear();
         if (!this.closed) {
+          const attempt = ++this.reconnectAttempt;
+          const nextDelayMs = this.reconnectDelay;
+          this.disconnectedAt ??= Date.now();
+          logWarn("daemon.socket_closed", {
+            code: ev.code,
+            wasClean: ev.wasClean,
+            attempt,
+            nextDelayMs,
+          });
           setTimeout(() => {
-            if (!this.closed) this.openSocket().catch(() => {});
-          }, this.reconnectDelay);
+            if (this.closed) return;
+            void this.resolveConnection()
+              .then(
+                () => {
+                  if (!this.closed) return this.openSocket(true);
+                },
+                (e: unknown) => {
+                  if (this.closed) return;
+                  logWarn("daemon.reconnect_failed", { attempt, ...errorFields(e) });
+                  const err = e instanceof Error ? e : new Error(String(e));
+                  for (const cb of this.failureCbs) cb(err);
+                },
+              )
+              .catch((e: unknown) =>
+                logWarn("daemon.reconnect_failed", { attempt, ...errorFields(e) }),
+              );
+          }, nextDelayMs);
           this.reconnectDelay = Math.min(this.reconnectDelay * 2, 5000);
         }
       };
@@ -101,7 +153,7 @@ export class DaemonClient {
   request<M extends MethodName>(method: M, params: MethodParams<M>): Promise<MethodResult<M>> {
     const ws = this.ws;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      return Promise.reject(new Error("daemon not connected"));
+      return Promise.reject(new Error(DAEMON_NOT_CONNECTED));
     }
     const id = String(this.nextId++);
     return new Promise((resolve, reject) => {

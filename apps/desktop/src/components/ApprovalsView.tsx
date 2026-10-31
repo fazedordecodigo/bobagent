@@ -1,23 +1,34 @@
-import type { Agent, Approval, ApprovalRule } from "@upbot/protocol";
-import { useCallback, useEffect, useState } from "react";
+import {
+  type Agent,
+  type Approval,
+  type ApprovalDecision,
+  type ApprovalRule,
+  isSensitivePermission,
+} from "@upbot/protocol";
+import { useEffect, useState } from "react";
+import { useDaemonQuery } from "../hooks/useDaemonQuery";
+import { permissionActions, permissionLabels } from "../lib/app-permissions";
+import { approvalAction, decideApproval } from "../lib/approval-decisions";
+import {
+  describeApproval,
+  fullApprovalArguments,
+  requiresFullReview,
+} from "../lib/approval-description";
+import { nextApprovalRules } from "../lib/approval-rules";
 import type { DaemonClient } from "../lib/daemon";
+import { errorMessage } from "../lib/errors";
+import { errorFields, logWarn } from "../lib/log";
 import { btnCls, inputCls } from "./AgentSettings";
+import { useApprovalFeedback } from "./ApprovalFeedback";
+import s from "./Approvals.module.css";
+import { Button, Field, StatusPill } from "./ds/controls";
 
 function useApprovals(client: DaemonClient, agentId?: string) {
-  const [items, setItems] = useState<Approval[]>([]);
-  const load = useCallback(() => {
-    client
-      .request("approvals.list", agentId ? { agentId } : {})
-      .then(setItems)
-      .catch(() => {});
-  }, [client, agentId]);
-  useEffect(() => {
-    load();
-    return client.on("approval.updated", (a) => {
-      if (!agentId || a.agentId === agentId) load();
-    });
-  }, [client, agentId, load]);
-  return items;
+  const { data, error } = useDaemonQuery(client, "approvals.list", agentId ? { agentId } : {}, {
+    events: { "approval.updated": (a) => !agentId || a.agentId === agentId },
+    onError: (e) => logWarn("approvals.list_failed", { agentId, ...errorFields(e) }),
+  });
+  return { items: data ?? [], error: error ? "Não foi possível carregar aprovações" : null };
 }
 
 function Countdown({ until }: { until: number }) {
@@ -29,7 +40,7 @@ function Countdown({ until }: { until: number }) {
   const s = Math.max(0, Math.round((until - now) / 1000));
   return (
     <span>
-      expires in {Math.floor(s / 60)}:{String(s % 60).padStart(2, "0")}
+      Expira em {Math.floor(s / 60)}:{String(s % 60).padStart(2, "0")}
     </span>
   );
 }
@@ -38,107 +49,167 @@ export function ApprovalCard({
   client,
   approval: a,
   botName,
+  primary = true,
 }: {
   client: DaemonClient;
   approval: Approval;
   botName?: string;
+  primary?: boolean;
 }) {
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const respond = (decision: "approve" | "always" | "deny" | "done", v?: string) =>
-    client
-      .request("approvals.respond", { id: a.id, decision, ...(v ? { value: v } : {}) })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  const [busy, setBusy] = useState(false);
+  const feedback = useApprovalFeedback();
+  const respond = async (decision: ApprovalDecision, v?: string) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      feedback(await decideApproval(client, a, decision, v));
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
   const label =
     a.kind === "secret"
-      ? "Secret requested"
+      ? "Segredo solicitado"
       : a.kind === "takeover"
-        ? "Your turn"
-        : "Approval needed";
+        ? "Sua vez"
+        : "Aprovação necessária";
+  const appTool = Boolean(a.appId && a.permission);
+  const sensitive = a.permission && isSensitivePermission(a.permission);
+  const approveLabel = a.permission ? permissionActions[a.permission] : approvalAction(a.tool);
+  const copy = a.kind === "tool" ? describeApproval(a, botName) : null;
   return (
-    <div
-      className="space-y-2 rounded-lg border border-amber-700/60 bg-amber-950/20 p-3 text-sm"
-      data-testid="approval"
-    >
-      <div className="flex items-center gap-2 text-xs text-zinc-400">
-        <span className="font-semibold text-amber-300">{label}</span>
-        {botName && <span>{botName}</span>}
-        {a.background && <span className="rounded bg-zinc-800 px-1">background</span>}
-        <span className="ml-auto">
-          {a.status === "pending" ? <Countdown until={a.expiresAt} /> : a.status}
-        </span>
+    <div className={s.card} data-testid="approval">
+      <div className={s.head}>
+        <h3 className={s.title}>{label}</h3>
+        {a.status === "pending" ? (
+          <StatusPill status="wait" />
+        ) : (
+          <span className={s.meta}>
+            {
+              { approved: "Aprovado", denied: "Recusado", expired: "Expirado", done: "Concluído" }[
+                a.status
+              ]
+            }
+          </span>
+        )}
       </div>
-      <div className="font-medium">{a.title}</div>
-      {a.kind === "tool" ? (
-        <pre className="max-h-40 overflow-auto rounded bg-zinc-900 p-2 text-xs">{a.detail}</pre>
-      ) : (
-        a.detail && <div className="text-xs text-zinc-300">{a.detail}</div>
-      )}
-      {a.kind === "takeover" && a.status === "pending" && (
-        <div className="text-xs text-zinc-400">
-          Use the UpBot browser window to sign in, enter a 2FA code or solve the check, then click
-          Done. The bot does not see what you type.
+      <div className={s.body}>
+        <div className={s.meta}>
+          {a.appName}
+          {a.permission ? ` · ${permissionLabels[a.permission]} · ` : ""}
+          {botName}
+          {a.background ? " · Em segundo plano" : ""}
         </div>
-      )}
-      {error && <div className="text-xs text-red-400">{error}</div>}
+        {appTool && (
+          <time className={s.meta} dateTime={new Date(a.createdAt).toISOString()}>
+            {new Date(a.createdAt).toLocaleString("pt-BR")}
+          </time>
+        )}
+        {sensitive && (
+          <p className={s.meta}>
+            Este tipo de ação sempre pede aprovação. Não é possível permitir sempre.
+          </p>
+        )}
+        <div className={s.title}>{copy ? copy.description : a.title}</div>
+        {copy?.context && <div className={s.meta}>{copy.context}</div>}
+        {requiresFullReview(a) ? (
+          <textarea
+            className={s.detail}
+            rows={8}
+            readOnly
+            aria-label="Parâmetros completos"
+            value={fullApprovalArguments(a.detail)}
+          />
+        ) : (
+          copy?.arguments && <div className={s.arguments}>{copy.arguments}</div>
+        )}
+        {!copy && a.detail && <div>{a.detail}</div>}
+        {a.kind === "takeover" && a.status === "pending" && (
+          <div className={s.meta}>
+            Use a janela do navegador do UpBot para entrar na conta ou concluir a verificação.
+            Depois, selecione Concluir etapa. O bot não vê o que você digita.
+          </div>
+        )}
+        {a.status === "pending" && (
+          <span className={s.meta}>
+            <Countdown until={a.expiresAt} />
+          </span>
+        )}
+        {error && <div role="alert">{error}</div>}
+      </div>
       {a.status === "pending" && (
         <form
-          className="flex flex-wrap gap-2"
+          className={s.footer}
           onSubmit={(e) => {
             e.preventDefault();
             if (a.kind === "secret") void respond("approve", value);
           }}
         >
           {a.kind === "secret" && (
-            <input
-              className={`${inputCls} flex-1`}
+            <Field
+              label={`Valor de ${a.secretName}`}
               type="password"
               autoComplete="off"
-              placeholder={`Value for ${a.secretName}`}
-              aria-label="Secret value"
               value={value}
               onChange={(e) => setValue(e.target.value)}
             />
           )}
-          {a.kind === "tool" && (
+          {a.kind === "tool" && !appTool && (
             <>
-              <button
-                type="button"
-                className={`${btnCls} bg-sky-600 hover:bg-sky-500`}
-                onClick={() => respond("approve")}
-              >
-                Approve once
-              </button>
-              <button
-                type="button"
-                className={`${btnCls} bg-zinc-700 hover:bg-zinc-600`}
-                onClick={() => respond("always")}
-              >
-                Always allow
-              </button>
+              <Button disabled={busy} onClick={() => respond("always")}>
+                Permitir sempre
+              </Button>
             </>
           )}
           {a.kind === "secret" && (
-            <button type="submit" className={`${btnCls} bg-sky-600 hover:bg-sky-500`}>
-              Save to vault
-            </button>
+            <Button
+              type="submit"
+              variant={primary ? "primary" : "secondary"}
+              disabled={busy || !value}
+            >
+              Salvar no cofre
+            </Button>
           )}
           {a.kind === "takeover" && (
-            <button
-              type="button"
-              className={`${btnCls} bg-sky-600 hover:bg-sky-500`}
+            <Button
+              variant={primary ? "primary" : "secondary"}
+              disabled={busy}
               onClick={() => respond("done")}
             >
-              Done
-            </button>
+              Concluir etapa
+            </Button>
           )}
-          <button
-            type="button"
-            className={`${btnCls} ml-auto bg-zinc-800 hover:bg-red-900`}
-            onClick={() => respond("deny")}
-          >
-            {a.kind === "tool" ? "Deny" : "Cancel"}
-          </button>
+          <Button variant="ghost" disabled={busy} onClick={() => respond("deny")}>
+            {a.kind === "tool" ? "Recusar" : "Cancelar"}
+          </Button>
+          {appTool && !sensitive && (
+            <>
+              <Button disabled={busy} onClick={() => respond("task")}>
+                Só nesta tarefa
+              </Button>
+              <Button
+                variant={primary ? "primary" : "secondary"}
+                disabled={busy}
+                onClick={() => respond("always")}
+              >
+                Permitir
+              </Button>
+            </>
+          )}
+          {a.kind === "tool" && (!appTool || sensitive) && (
+            <Button
+              variant={primary ? "primary" : "secondary"}
+              disabled={busy}
+              onClick={() => respond("approve")}
+            >
+              {approveLabel}
+            </Button>
+          )}
         </form>
       )}
     </div>
@@ -146,47 +217,116 @@ export function ApprovalCard({
 }
 
 /** Pending approvals of one bot, shown above the composer. */
-export function ApprovalCards({ client, agentId }: { client: DaemonClient; agentId: string }) {
-  const pending = useApprovals(client, agentId).filter((a) => a.status === "pending");
+export function ApprovalCards({
+  client,
+  agentId,
+  botName,
+}: {
+  client: DaemonClient;
+  agentId: string;
+  botName: string;
+}) {
+  const { items, error } = useApprovals(client, agentId);
+  const pending = items.filter((a) => a.status === "pending");
+  if (error && !pending.length)
+    return (
+      <div className={s.cards}>
+        <p className="px-4 py-1 text-xs text-red-400">{error}</p>
+      </div>
+    );
   if (!pending.length) return null;
   return (
-    <div className="max-h-[50vh] space-y-2 overflow-y-auto border-t border-zinc-800 px-4 py-2">
-      {pending.map((a) => (
-        <ApprovalCard key={a.id} client={client} approval={a} />
+    <div className={s.cards}>
+      {error && <p className="px-4 py-1 text-xs text-red-400">{error}</p>}
+      {pending.map((a, index) => (
+        <ApprovalCard
+          key={a.id}
+          client={client}
+          approval={a}
+          botName={botName}
+          primary={index === 0}
+        />
       ))}
     </div>
   );
 }
 
+export function AppApprovalCards({
+  client,
+  agents,
+  primary = true,
+}: {
+  client: DaemonClient;
+  agents: Agent[];
+  primary?: boolean;
+}) {
+  const { items, error } = useApprovals(client);
+  const pending = items.filter(
+    (a) => a.status === "pending" && a.kind === "tool" && Boolean(a.appId),
+  );
+  if (error && !pending.length)
+    return (
+      <section aria-label="Pedidos de apps conectados" className={s.cards}>
+        <p className="px-4 py-1 text-xs text-red-400">{error}</p>
+      </section>
+    );
+  if (!pending.length) return null;
+  return (
+    <section aria-label="Pedidos de apps conectados" className={s.cards}>
+      {error && <p className="px-4 py-1 text-xs text-red-400">{error}</p>}
+      <h3>Pedidos pendentes</h3>
+      {pending.map((a, index) => (
+        <ApprovalCard
+          key={a.id}
+          client={client}
+          approval={a}
+          primary={primary && index === 0}
+          botName={agents.find((bot) => bot.id === a.agentId)?.name ?? "Bot removido"}
+        />
+      ))}
+    </section>
+  );
+}
+
 export function ApprovalsView({ client, agents }: { client: DaemonClient; agents: Agent[] }) {
-  const items = useApprovals(client);
-  const [rules, setRules] = useState<ApprovalRule[]>([]);
+  const { items, error: listError } = useApprovals(client);
+  const {
+    data: rules = [],
+    error: rulesLoadError,
+    loaded: rulesLoaded,
+    reload: reloadRules,
+  } = useDaemonQuery(
+    client,
+    "approvals.rules",
+    {},
+    {
+      events: { "approvals.rulesChanged": true },
+      onError: (e) => logWarn("approvals.rules_failed", errorFields(e)),
+    },
+  );
+  // Mutations write the whole list via approvals.setRules, so they stay closed
+  // until the current list is known — a failed or pending load must not send a
+  // partial list that would wipe unseen rules.
+  const rulesReady = rulesLoaded && !rulesLoadError;
+  const knownRules = rulesReady ? rules : null;
   const [form, setForm] = useState({ pattern: "", action: "ask" as "ask" | "allow", agentId: "" });
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => {
-    client
-      .request("approvals.rules", {})
-      .then(setRules)
-      .catch(() => {});
-  }, [client]);
-  useEffect(() => {
-    load();
-    return client.on("approvals.rulesChanged", load);
-  }, [client, load]);
-  const save = (next: ApprovalRule[]) =>
-    client
-      .request("approvals.setRules", { rules: next })
-      .then(setRules)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  const save = (next: ApprovalRule[] | null) => {
+    if (next === null) return Promise.resolve();
+    return client.request("approvals.setRules", { rules: next }).catch((e) => {
+      logWarn("approvals.setRules_failed", errorFields(e));
+      setError(errorMessage(e));
+    });
+  };
   const nameOf = (id: string | null) =>
-    id ? (agents.find((a) => a.id === id)?.name ?? "deleted bot") : "every bot";
+    id ? (agents.find((a) => a.id === id)?.name ?? "Bot removido") : "Todos os bots";
   return (
     <div className="mx-auto max-w-2xl space-y-4 p-6">
-      <h2 className="text-lg font-semibold">Approvals</h2>
+      <h2 className="text-lg font-semibold">Aprovações</h2>
       <p className="text-xs text-zinc-500">
-        Rules match tool names (use * as a wildcard, e.g. github-* or notion-create_*). "Ask first"
-        always wins over "Allow automatically". Without a rule, connected-app actions that change
-        data ask first. Requests from background work expire after 10 minutes.
+        As regras usam nomes de ferramentas e o curinga *. Perguntar antes tem prioridade sobre
+        permitir. Sem regra, o nome da ferramenta determina se uma ação de app conectado pede
+        aprovação. Cada pedido mostra seu prazo.
       </p>
       <ul className="space-y-1">
         {rules.map((r) => (
@@ -195,82 +335,107 @@ export function ApprovalsView({ client, agents }: { client: DaemonClient; agents
             className="flex items-center gap-2 rounded border border-zinc-800 px-3 py-2 text-sm"
           >
             <span className={r.action === "ask" ? "text-amber-300" : "text-emerald-300"}>
-              {r.action === "ask" ? "Ask first" : "Allow automatically"}
+              {r.action === "ask" ? "Perguntar antes" : "Permitir"}
             </span>
             <code className="text-xs">{r.pattern}</code>
             <span className="text-xs text-zinc-500">{nameOf(r.agentId)}</span>
             <button
               type="button"
-              className="ml-auto text-xs text-zinc-500 hover:text-red-400"
-              onClick={() => save(rules.filter((x) => x.id !== r.id))}
+              className="ml-auto text-xs text-zinc-500 hover:text-red-400 disabled:opacity-40"
+              disabled={!rulesReady}
+              onClick={() =>
+                save(nextApprovalRules(knownRules, (all) => all.filter((x) => x.id !== r.id)))
+              }
             >
-              Remove
+              Remover
             </button>
           </li>
         ))}
-        {rules.length === 0 && <li className="text-sm text-zinc-500">No rules yet.</li>}
+        {rulesReady && rules.length === 0 && (
+          <li className="text-sm text-zinc-500">Nenhuma regra ainda.</li>
+        )}
+        {!rulesLoaded && !rulesLoadError && (
+          <li className="text-sm text-zinc-500">Carregando regras…</li>
+        )}
       </ul>
       <form
-        className="flex gap-2"
+        className="flex flex-wrap gap-2"
         onSubmit={(e) => {
           e.preventDefault();
           setError(null);
-          void save([
-            ...rules,
-            {
-              id: crypto.randomUUID(),
-              pattern: form.pattern.trim(),
-              action: form.action,
-              agentId: form.agentId || null,
-            },
-          ]).then(() => setForm({ ...form, pattern: "" }));
+          void save(
+            nextApprovalRules(knownRules, (all) => [
+              ...all,
+              {
+                id: crypto.randomUUID(),
+                pattern: form.pattern.trim(),
+                action: form.action,
+                agentId: form.agentId || null,
+              },
+            ]),
+          ).then(() => setForm({ ...form, pattern: "" }));
         }}
       >
         <select
           className={inputCls}
           value={form.action}
-          aria-label="Rule action"
+          aria-label="Ação da regra"
           onChange={(e) => setForm({ ...form, action: e.target.value as "ask" | "allow" })}
         >
-          <option value="ask">Ask first</option>
-          <option value="allow">Allow automatically</option>
+          <option value="ask">Perguntar antes</option>
+          <option value="allow">Permitir</option>
         </select>
         <input
           className={`${inputCls} font-mono`}
           required
-          placeholder="tool name or pattern"
+          placeholder="Nome ou padrão da ferramenta"
+          aria-label="Padrão da regra"
           value={form.pattern}
           onChange={(e) => setForm({ ...form, pattern: e.target.value })}
         />
         <select
           className={inputCls}
           value={form.agentId}
-          aria-label="Rule bot"
+          aria-label="Bot da regra"
           onChange={(e) => setForm({ ...form, agentId: e.target.value })}
         >
-          <option value="">Every bot</option>
+          <option value="">Todos os bots</option>
           {agents.map((a) => (
             <option key={a.id} value={a.id}>
               {a.name}
             </option>
           ))}
         </select>
-        <button type="submit" className={`${btnCls} bg-zinc-700 hover:bg-zinc-600`}>
-          Add
+        <button
+          type="submit"
+          className={`${btnCls} bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40`}
+          disabled={!rulesReady}
+        >
+          Adicionar
         </button>
       </form>
+      {rulesLoadError && (
+        <div className="text-xs text-red-400">
+          Não foi possível carregar as regras.{" "}
+          <button type="button" className="underline" onClick={reloadRules}>
+            Tentar novamente
+          </button>
+        </div>
+      )}
       {error && <div className="text-xs text-red-400">{error}</div>}
-      <h3 className="text-sm font-semibold text-zinc-300">Requests</h3>
+      <h3 className="text-sm font-semibold text-zinc-300">Pedidos</h3>
+      {listError && <p className="text-xs text-red-400">{listError}</p>}
       <div className="space-y-2">
         {items.map((a) => (
           <ApprovalCard
             key={`${a.id}:${a.status}`}
             client={client}
             approval={a}
+            primary={a.id === items.find((item) => item.status === "pending")?.id}
             botName={nameOf(a.agentId)}
           />
         ))}
-        {items.length === 0 && <p className="text-sm text-zinc-500">No requests yet.</p>}
+        {items.length === 0 && <p className="text-sm text-zinc-500">Nenhum pedido ainda.</p>}
       </div>
     </div>
   );

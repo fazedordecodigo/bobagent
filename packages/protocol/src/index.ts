@@ -23,10 +23,15 @@ export const ProviderId = z.enum([
 ]);
 export type ProviderId = z.infer<typeof ProviderId>;
 
-export const AgentAvatar = z.object({
-  emoji: z.string().min(1).max(16),
-  color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-});
+export const AgentIconId = z.enum(["sym", "mail", "receipt", "plane", "chart", "cal", "sheet"]);
+export type AgentIconId = z.infer<typeof AgentIconId>;
+export const AgentAvatar = z.union([
+  z.object({
+    emoji: z.string().min(1).max(16),
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  }),
+  z.object({ icon: AgentIconId }).strict(),
+]);
 export type AgentAvatar = z.infer<typeof AgentAvatar>;
 
 export const GatewayKind = z.enum(["telegram", "slack", "discord"]);
@@ -54,39 +59,6 @@ export const Agent = z.object({
   updatedAt: z.number(),
 });
 export type Agent = z.infer<typeof Agent>;
-
-// ---- Wire envelopes ----
-
-export const RequestEnvelope = z.object({
-  id: z.string(),
-  method: z.string(),
-  params: z.unknown().optional(),
-});
-export type RequestEnvelope = z.infer<typeof RequestEnvelope>;
-
-export const ErrorCode = z.enum([
-  "bad_request",
-  "not_found",
-  "internal",
-  "busy",
-  "provider_unavailable",
-]);
-export type ErrorCode = z.infer<typeof ErrorCode>;
-
-export const ResponseEnvelope = z.union([
-  z.object({ id: z.string(), result: z.unknown() }),
-  z.object({
-    id: z.string(),
-    error: z.object({ code: ErrorCode, message: z.string() }),
-  }),
-]);
-export type ResponseEnvelope = z.infer<typeof ResponseEnvelope>;
-
-export const EventEnvelope = z.object({
-  event: z.string(),
-  data: z.unknown(),
-});
-export type EventEnvelope = z.infer<typeof EventEnvelope>;
 
 // ---- Method params/results ----
 
@@ -117,8 +89,9 @@ export type AgentsUpdateParams = z.infer<typeof AgentsUpdateParams>;
 export const AgentsUpdateResult = Agent;
 
 export const AgentsDeleteParams = z.object({ id: z.string() }).strict();
-export type AgentsDeleteParams = z.infer<typeof AgentsDeleteParams>;
 export const AgentsDeleteResult = z.object({ ok: z.literal(true) });
+export const AgentsRestoreParams = z.object({ id: z.string() }).strict();
+export const AgentsRestoreResult = Agent;
 
 // ---- Chat types ----
 
@@ -152,8 +125,6 @@ export const PermissionOptionKind = z.enum([
   "reject_once",
   "reject_always",
 ]);
-export type PermissionOptionKind = z.infer<typeof PermissionOptionKind>;
-
 export const PermissionOption = z.object({
   optionId: z.string(),
   name: z.string(),
@@ -248,7 +219,6 @@ export const ChatHistoryParams = z
     limit: z.number().int().min(1).max(500).optional(),
   })
   .strict();
-export type ChatHistoryParams = z.infer<typeof ChatHistoryParams>;
 export const ChatHistoryResult = z.object({
   items: z.array(ChatItem),
   turns: z.array(Turn),
@@ -271,7 +241,6 @@ export const ChatSendParams = z
       .optional(),
   })
   .strict();
-export type ChatSendParams = z.infer<typeof ChatSendParams>;
 export const ChatSendResult = z.object({ queueId: z.string() });
 
 // ---- Queue + config types ----
@@ -294,8 +263,6 @@ export const QueueItem = z.object({
   createdAt: z.number(),
   fromAgentId: z.string().nullable().optional(),
 });
-export type QueueItem = z.infer<typeof QueueItem>;
-
 export const QueueState = z.object({
   agentId: z.string(),
   paused: z.boolean(),
@@ -316,9 +283,8 @@ export const AgentsConfigOptionsResult = z.object({
   configOptions: z.array(ConfigOption),
 });
 export const AgentsSetConfigParams = z
-  .object({ agentId: z.string(), configId: z.string(), value: z.string() })
+  .object({ agentId: z.string(), configId: z.string(), value: z.string().nullable() })
   .strict();
-export type AgentsSetConfigParams = z.infer<typeof AgentsSetConfigParams>;
 export const AgentsSetConfigResult = z.object({
   configOptions: z.array(ConfigOption),
 });
@@ -335,7 +301,6 @@ export const PermissionsListResult = z.array(PendingPermission);
 export const PermissionsRespondParams = z
   .object({ requestId: z.string(), optionId: z.string().nullable() })
   .strict();
-export type PermissionsRespondParams = z.infer<typeof PermissionsRespondParams>;
 export const PermissionsRespondResult = z.object({ ok: z.literal(true) });
 
 // ---- Memories + skills ----
@@ -400,6 +365,32 @@ export const TeamMessage = z.object({
   createdAt: z.number(),
 });
 export type TeamMessage = z.infer<typeof TeamMessage>;
+
+// Frames the team relay (packages/relay) sends to a connected daemon member.
+const RelayMemberRef = z.object({ memberId: z.string(), name: z.string() });
+export const RelayFrame = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("welcome"),
+    member: z.object({ id: z.string(), name: z.string() }),
+  }),
+  z.object({ type: z.literal("roster"), members: z.array(TeamMember) }),
+  z.object({
+    type: z.literal("incoming"),
+    requestId: z.string(),
+    from: RelayMemberRef,
+    agentId: z.string(),
+    text: z.string(),
+  }),
+  z.object({
+    type: z.literal("reply"),
+    requestId: z.string(),
+    status: z.enum(["completed", "failed"]),
+    text: z.string().default(""),
+    from: RelayMemberRef.optional(),
+  }),
+]);
+export type RelayFrame = z.infer<typeof RelayFrame>;
+export type RelayIncomingFrame = Extract<RelayFrame, { type: "incoming" }>;
 
 // ---- Remote hosts, microVM isolation, subagents ----
 
@@ -572,7 +563,91 @@ export const ApprovalRule = z.object({
   agentId: z.string().nullable(),
 });
 export type ApprovalRule = z.infer<typeof ApprovalRule>;
-export const ApprovalDecision = z.enum(["approve", "always", "deny", "done"]);
+export const AppPermissionKind = z.enum(["read", "write", "send", "pay", "book", "del"]);
+export type AppPermissionKind = z.infer<typeof AppPermissionKind>;
+export const AppPermissionLevel = z.enum(["off", "ask", "allow"]);
+export type AppPermissionLevel = z.infer<typeof AppPermissionLevel>;
+const SensitiveAppPermissionLevel = z.enum(["off", "ask"], {
+  error: "Permissões sensíveis aceitam apenas off ou ask; allow não é permitido.",
+});
+export const AppPermissions = z
+  .object({
+    read: AppPermissionLevel,
+    write: AppPermissionLevel,
+    send: SensitiveAppPermissionLevel,
+    pay: SensitiveAppPermissionLevel,
+    book: SensitiveAppPermissionLevel,
+    del: SensitiveAppPermissionLevel,
+  })
+  .strict();
+export type AppPermissions = z.infer<typeof AppPermissions>;
+export const defaultAppPermissions: AppPermissions = {
+  read: "allow",
+  write: "ask",
+  send: "ask",
+  pay: "ask",
+  book: "ask",
+  del: "ask",
+};
+export function isSensitivePermission(kind: AppPermissionKind): boolean {
+  return kind !== "read" && kind !== "write";
+}
+
+const appToolOperations: [AppPermissionKind, RegExp][] = [
+  ["del", /^(delete|remove|destroy|trash)$/],
+  ["pay", /^(pay|charge|refund|transfer|payout|purchase)$/],
+  ["book", /^(book|reserve)$/],
+  [
+    "send",
+    /^(send|post|publish|invite|reply|forward|mail|email|message|dispatch|deliver|notify|broadcast|sms|text|chat|push|share|comment|dm|tweet)$/,
+  ],
+  [
+    "write",
+    /^(create|update|merge|write|edit|archive|cancel|move|rename|upload|patch|put|set|add|insert|close)$/,
+  ],
+  [
+    "read",
+    /^(get|list|search|read|query|fetch|retrieve|find|describe|lookup|view|show|count|check|status)$/,
+  ],
+];
+
+/** Operation tokens of an app tool name (`<slug>-<operation>`): underscores, hyphens and camelCase. */
+export function toolOperationTokens(tool: string): string[] {
+  return tool
+    .slice(tool.indexOf("-") + 1)
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1_$2")
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+    .split(/[_-]+/)
+    .filter(Boolean);
+}
+
+/** Kind of a single operation verb; null when it is not a known verb. */
+export function classifyToolVerb(verb: string): AppPermissionKind | null {
+  return appToolOperations.find(([, pattern]) => pattern.test(verb))?.[0] ?? null;
+}
+
+/**
+ * Kind of an app tool's operation (`<slug>-<operation>`): the leading verb
+ * decides, and verbs after and/or/then can escalate it
+ * (del > pay > book > send > write > read). A naming heuristic, not argument
+ * or semantic inspection. Null when no known verb appears.
+ */
+export function classifyToolOperation(tool: string): AppPermissionKind | null {
+  const tokens = toolOperationTokens(tool);
+  const verbs = classifyToolVerb(tokens[0] ?? "")
+    ? tokens.filter((_, index) => index === 0 || /^(and|or|then)$/.test(tokens[index - 1] ?? ""))
+    : tokens;
+  return (
+    appToolOperations.find(([, pattern]) => verbs.some((verb) => pattern.test(verb)))?.[0] ?? null
+  );
+}
+
+/** Permission kind of an app tool, failing closed to "write" on unknown verbs. */
+export function classifyAppTool(tool: string): AppPermissionKind {
+  return classifyToolOperation(tool) ?? "write";
+}
+export const ApprovalDecision = z.enum(["approve", "always", "task", "deny", "done"]);
 export type ApprovalDecision = z.infer<typeof ApprovalDecision>;
 export const Approval = z.object({
   id: z.string(),
@@ -583,6 +658,10 @@ export const Approval = z.object({
   detail: z.string(),
   tool: z.string().nullable(),
   secretName: z.string().nullable(),
+  appId: z.string().optional(),
+  appName: z.string().optional(),
+  permission: AppPermissionKind.optional(),
+  previousLevel: AppPermissionLevel.optional(),
   background: z.boolean(),
   status: z.enum(["pending", "approved", "denied", "expired", "done"]),
   createdAt: z.number(),
@@ -609,6 +688,7 @@ export const AppCatalogEntry = z.object({
 });
 export type AppCatalogEntry = z.infer<typeof AppCatalogEntry>;
 export const ConnectedApp = z.object({
+  permissions: AppPermissions,
   id: z.string(),
   catalogId: z.string(),
   name: z.string(),
@@ -719,7 +799,6 @@ export const AgentsCompactParams = z.object({ agentId: z.string() }).strict();
 // ---- Channels ----
 
 export const ChannelStatus = z.enum(["active", "stopped", "archived"]);
-export type ChannelStatus = z.infer<typeof ChannelStatus>;
 export const Channel = z.object({
   id: z.string(),
   name: z.string(),
@@ -768,19 +847,6 @@ export const ChannelsPostParams = z
 export const ChannelsReassignParams = z
   .object({ channelId: z.string(), ownerId: z.string() })
   .strict();
-export const ChannelsSetMembersParams = z
-  .object({ channelId: z.string(), memberIds: z.array(z.string()).min(1).max(20) })
-  .strict();
-
-// ---- Events ----
-
-export const AgentCreatedEvent = z.object({ event: z.literal("agent.created"), data: Agent });
-export const AgentUpdatedEvent = z.object({ event: z.literal("agent.updated"), data: Agent });
-export const AgentDeletedEvent = z.object({
-  event: z.literal("agent.deleted"),
-  data: z.object({ id: z.string() }),
-});
-
 // ---- Typed method map ----
 
 export const methodMap = {
@@ -788,6 +854,7 @@ export const methodMap = {
   "agents.create": { params: AgentsCreateParams, result: AgentsCreateResult },
   "agents.update": { params: AgentsUpdateParams, result: AgentsUpdateResult },
   "agents.delete": { params: AgentsDeleteParams, result: AgentsDeleteResult },
+  "agents.restore": { params: AgentsRestoreParams, result: AgentsRestoreResult },
   "chat.history": { params: ChatHistoryParams, result: ChatHistoryResult },
   "chat.send": { params: ChatSendParams, result: ChatSendResult },
   "chat.cancel": { params: ChatCancelParams, result: ChatCancelResult },
@@ -824,18 +891,6 @@ export const methodMap = {
       .object({
         name: z.string().trim().min(1).max(80),
         target: SshTarget,
-        port: z.number().int().min(1).max(65535).optional(),
-        identityFile: IdentityFile.optional(),
-      })
-      .strict(),
-    result: RemoteHost,
-  },
-  "hosts.update": {
-    params: z
-      .object({
-        id: z.string(),
-        name: z.string().trim().min(1).max(80).optional(),
-        target: SshTarget.optional(),
         port: z.number().int().min(1).max(65535).optional(),
         identityFile: IdentityFile.optional(),
       })
@@ -977,6 +1032,7 @@ export const methodMap = {
     params: z
       .object({
         catalogId: z.string(),
+        permissions: AppPermissions.partial().optional(),
         name: z.string().trim().min(1).max(40).optional(),
         secrets: AppSecrets,
         command: z.array(z.string().max(1000)).min(1).max(50).optional(),
@@ -991,6 +1047,7 @@ export const methodMap = {
     params: z
       .object({
         id: z.string(),
+        permissions: AppPermissions.partial().optional(),
         enabled: z.boolean().optional(),
         agentIds: z.array(z.string()).max(200).optional(),
         secrets: AppSecrets.optional(),
@@ -1080,7 +1137,6 @@ export const methodMap = {
     result: z.object({ tts: z.boolean(), stt: z.boolean() }),
   },
   "voice.speak": { params: z.object({ text: z.string().min(1).max(20_000) }).strict(), result: Ok },
-  "voice.stop": { params: z.object({}).strict(), result: Ok },
   "voice.transcribe": {
     params: z
       .object({ audioBase64: z.string().min(1).max(36_000_000), mime: z.string().max(100) })
@@ -1163,11 +1219,12 @@ export const methodMap = {
   "channels.archive": { params: ChannelIdParams, result: Channel },
   "channels.restore": { params: ChannelIdParams, result: Channel },
   "channels.reassign": { params: ChannelsReassignParams, result: Channel },
-  "channels.setMembers": { params: ChannelsSetMembersParams, result: Channel },
 } as const;
 
 export type MethodName = keyof typeof methodMap;
 export type MethodParams<M extends MethodName> = z.input<(typeof methodMap)[M]["params"]>;
+/** Params after schema validation (defaults applied) — what a daemon handler receives. */
+export type MethodParsedParams<M extends MethodName> = z.infer<(typeof methodMap)[M]["params"]>;
 export type MethodResult<M extends MethodName> = z.infer<(typeof methodMap)[M]["result"]>;
 
 export type DaemonEventMap = {
@@ -1209,4 +1266,3 @@ export type DaemonEventMap = {
   "channel.updated": Channel;
   "channel.message": ChannelMessage;
 };
-export type DaemonEventName = keyof DaemonEventMap;

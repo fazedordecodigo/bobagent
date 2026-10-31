@@ -2,12 +2,16 @@ import type { ConfigOption, PermissionOption } from "@upbot/protocol";
 import {
   AUTH_RE,
   authMessage,
+  classifyStartupError,
+  closeProviderProcess,
   isVmCredentialRejection,
+  logResumeFailed,
   type ProviderProcess,
   providerCommand,
   readJsonLines,
   redactCredential,
   spawnProvider,
+  str,
   truncate,
   vmCredentialRejectedMessage,
   withTimeout,
@@ -57,10 +61,6 @@ const TOOL_KINDS: Record<string, string> = {
   ExitPlanMode: "switch_mode",
   EnterPlanMode: "switch_mode",
 };
-
-function str(v: unknown): string | null {
-  return typeof v === "string" && v ? v : null;
-}
 
 export function claudeToolTitle(name: string, input: unknown): string {
   const i = (input ?? {}) as Json;
@@ -306,7 +306,12 @@ class ClaudeSession implements ProviderSession {
           ),
         );
       } else if (active.assistantError === "authentication_failed" || AUTH_RE.test(detail)) {
-        active.reject(new ProviderError("auth_required", authMessage("claude", detail)));
+        active.reject(
+          new ProviderError(
+            "auth_required",
+            authMessage("claude", redactCredential(detail, this.vmCredential)),
+          ),
+        );
       } else {
         active.reject(
           new Error(
@@ -393,11 +398,7 @@ class ClaudeSession implements ProviderSession {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    this.proc.markClosed();
-    try {
-      this.proc.child.stdin?.end();
-    } catch {}
-    this.proc.kill();
+    closeProviderProcess(this.proc);
   }
 }
 
@@ -420,14 +421,22 @@ function modelOptions(models: unknown): ConfigOption | null {
   };
 }
 
+function claudeCredential(remote?: RemoteLaunch): string | null {
+  return (
+    remote?.credentials.ANTHROPIC_API_KEY ?? remote?.credentials.CLAUDE_CODE_OAUTH_TOKEN ?? null
+  );
+}
+
 export class ClaudeDriver implements ProviderDriver {
   async start(opts: StartOpts): Promise<ProviderSession> {
     const mcp = opts.mcpServers ?? [];
-    if (opts.resumeSessionId) {
+    const resumeSessionId = opts.resumeSessionId;
+    let resumeFailed = false;
+    if (resumeSessionId) {
       try {
         return await this.launch(
           opts.cwd,
-          opts.resumeSessionId,
+          resumeSessionId,
           opts.hooks,
           mcp,
           opts.remote,
@@ -436,9 +445,13 @@ export class ClaudeDriver implements ProviderDriver {
       } catch (e) {
         if (e instanceof ProviderError && e.code !== "internal") throw e;
         // stale/unknown session: fall back to a fresh one
+        logResumeFailed("claude", resumeSessionId, e, claudeCredential(opts.remote));
+        resumeFailed = true;
       }
     }
-    return this.launch(opts.cwd, null, opts.hooks, mcp, opts.remote, opts.extraDirs);
+    const session = await this.launch(opts.cwd, null, opts.hooks, mcp, opts.remote, opts.extraDirs);
+    if (resumeFailed) opts.hooks.onResumeFailed?.();
+    return session;
   }
 
   private async launch(
@@ -465,8 +478,7 @@ export class ClaudeDriver implements ProviderDriver {
         : [];
     const { bin, args } = providerCommand("claude", remote);
     const sessionId = resumeSessionId ?? crypto.randomUUID();
-    const vmCredential =
-      remote?.credentials.ANTHROPIC_API_KEY ?? remote?.credentials.CLAUDE_CODE_OAUTH_TOKEN ?? null;
+    const vmCredential = claudeCredential(remote);
     const proc = spawnProvider(
       bin,
       [
@@ -498,6 +510,7 @@ export class ClaudeDriver implements ProviderDriver {
     );
     let init: Json;
     try {
+      await proc.waitForSpawn();
       init = await withTimeout(
         session.request("initialize", { hooks: null }),
         INIT_TIMEOUT_MS,
@@ -505,18 +518,14 @@ export class ClaudeDriver implements ProviderDriver {
       );
     } catch (e) {
       proc.kill();
-      const tail = proc.stderrTail();
-      const detail = tail || (e as Error).message;
-      if (vmCredential && isVmCredentialRejection(detail))
-        throw new ProviderError(
-          "auth_required",
-          vmCredentialRejectedMessage("claude", detail, vmCredential),
-        );
-      if (AUTH_RE.test(tail)) throw new ProviderError("auth_required", authMessage("claude", tail));
-      const safeTail = redactCredential(tail, vmCredential);
-      const safeError = redactCredential((e as Error).message, vmCredential);
-      const msg = `claude failed to start${safeTail ? `: ${safeTail}` : `: ${safeError}`}`;
-      throw new ProviderError(resumeSessionId ? "internal" : "provider_unavailable", msg);
+      if (e instanceof ProviderError) throw e;
+      throw classifyStartupError(
+        "claude",
+        (e as Error).message,
+        proc.stderrTail(),
+        vmCredential,
+        resumeSessionId ? "internal" : "provider_unavailable",
+      );
     }
     const mode = str(init.current_permission_mode) ?? "default";
     const options: ConfigOption[] = [

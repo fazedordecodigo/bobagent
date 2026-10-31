@@ -1,0 +1,12 @@
+.card { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); overflow: hidden; font-size: var(--fs-ui); }
+.head { padding: 14px 16px; display: flex; gap: 12px; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.title { font-family: var(--font-display); font-size: var(--fs-card); font-weight: 800; margin: 0; overflow-wrap: anywhere; }
+.body { padding: 14px 16px; display: grid; gap: 12px; }
+.detail { margin: 0; max-height: 160px; overflow: auto; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); white-space: pre-wrap; overflow-wrap: anywhere; font: var(--fs-small)/1.6 var(--font-mono); font-variant-numeric: tabular-nums; }
+.meta { color: var(--muted); font: var(--fs-small)/1.6 var(--font-mono); font-variant-numeric: tabular-nums; }
+.arguments { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font: var(--fs-small)/1.6 var(--font-mono); }
+.footer { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; padding: 12px 16px; border-top: 1px solid var(--border); background: var(--foot-bg); }
+.cards { width: 100%; max-width: var(--col-chat); display: grid; gap: 12px; max-height: 50vh; overflow-y: auto; margin: 12px auto; }
+.toast { position: fixed; z-index: 60; bottom: 24px; left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100vw - 32px); display: flex; align-items: center; gap: 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px 16px; background: var(--surface); color: var(--fg); box-shadow: var(--shadow-pop); font-size: var(--fs-ui); }
+.toast span { max-width: 50ch; }
+@media (max-width: 759px) { .toast { bottom: 72px; flex-wrap: wrap; } }

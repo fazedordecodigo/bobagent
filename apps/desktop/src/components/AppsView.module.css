@@ -1,0 +1,6 @@
+.page { max-width: 880px; width: 100%; margin: 0 auto; padding: 32px 28px 48px; display: flex; flex-direction: column; gap: 20px; font-family: var(--font-body); }
+.title { font: 800 var(--fs-page)/1.15 var(--font-display); letter-spacing: -.015em; }
+.scopes { display: flex; flex-wrap: wrap; gap: 6px; }
+.page input[type="checkbox"] { accent-color: var(--fg); }
+.page > h3 { font: 700 var(--fs-sec)/1.3 var(--font-display); }
+@media (max-width: 759px) { .page { padding: 64px 16px 32px; } }

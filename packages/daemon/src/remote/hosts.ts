@@ -3,13 +3,20 @@
 // Firecracker microVM per agent. The MCP bridge reaches back over an `ssh -R` unix socket.
 
 import type { Database } from "bun:sqlite";
-import { type ChildProcess, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
-import type { AgentPlacement, HostPreflight, Isolation, RemoteHost } from "@upbot/protocol";
+import {
+  type AgentPlacement,
+  HostPreflight,
+  type Isolation,
+  type RemoteHost,
+} from "@upbot/protocol";
 // @ts-expect-error -- Bun text import of the helper source (uploaded verbatim to hosts)
 import helperSource from "../../../host/src/main.ts" with { type: "text" };
 import { spawnEnv } from "../env/login-path";
+import { spawnChild } from "../env/spawn";
+import { envOverride } from "../env/vars";
 import type { McpServerSpec, RemoteLaunch } from "../providers/types";
 import { ProviderError } from "../providers/types";
 
@@ -33,12 +40,7 @@ export const shq = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
 const expandHome = (p: string) => (p.startsWith("~/") ? `${homedir()}${p.slice(1)}` : p);
 
 export function sshArgs(host: RemoteHost, extra: string[], remoteCmd: string): [string, string[]] {
-  let base = ["ssh"];
-  const override = process.env.UPBOT_SSH_COMMAND;
-  if (override) {
-    const parsed = JSON.parse(override);
-    if (Array.isArray(parsed) && parsed.length) base = parsed.map(String);
-  }
+  const base = envOverride("UPBOT_SSH_COMMAND") ?? ["ssh"];
   const [bin, ...pre] = base as [string, ...string[]];
   return [
     bin,
@@ -75,20 +77,36 @@ async function sshExec(
   timeoutMs = 60_000,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   const [bin, args] = sshArgs(host, [], remoteCmd);
-  const proc = Bun.spawn([bin, ...args], {
+  const proc = spawnChild(bin, args, {
+    cwd: homedir(),
     env: spawnEnv(),
-    stdin: input !== undefined ? new Blob([input]) : "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
+    stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+  });
+  if (input !== undefined) proc.stdin?.on("error", () => {});
+  const stdoutPromise = new Promise<string>((resolve) => {
+    const chunks: Buffer[] = [];
+    proc.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
+    proc.stdout?.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    if (!proc.stdout) resolve("");
+  });
+  const stderrPromise = new Promise<string>((resolve) => {
+    const chunks: Buffer[] = [];
+    proc.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk));
+    proc.stderr?.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    if (!proc.stderr) resolve("");
+  });
+  const codePromise = new Promise<number>((resolve, reject) => {
+    proc.once("error", reject);
+    proc.once("close", (exitCode) => resolve(exitCode ?? 1));
   });
   const timer = setTimeout(() => proc.kill("SIGKILL"), timeoutMs);
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  clearTimeout(timer);
-  return { code, stdout, stderr };
+  try {
+    if (input !== undefined) proc.stdin?.end(input);
+    const [stdout, stderr, code] = await Promise.all([stdoutPromise, stderrPromise, codePromise]);
+    return { code, stdout, stderr };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export class HostStore {
@@ -105,7 +123,7 @@ export class HostStore {
       port: r.port,
       identityFile: r.identity_file,
       root: r.root,
-      preflight: r.preflight_json ? (JSON.parse(r.preflight_json) as HostPreflight) : null,
+      preflight: r.preflight_json ? parsePreflight(r.preflight_json) : null,
       createdAt: r.created_at,
     };
   }
@@ -121,7 +139,12 @@ export class HostStore {
     return r ? this.toHost(r) : null;
   }
 
-  create(p: { name: string; target: string; port?: number; identityFile?: string | null }) {
+  create(p: {
+    name: string;
+    target: string;
+    port?: number | undefined;
+    identityFile?: string | null | undefined;
+  }) {
     const id = crypto.randomUUID();
     this.db
       .query(
@@ -129,32 +152,6 @@ export class HostStore {
       )
       .run(id, p.name, p.target, p.port ?? 22, p.identityFile ?? null, Date.now());
     return this.get(id)!;
-  }
-
-  update(p: {
-    id: string;
-    name?: string;
-    target?: string;
-    port?: number;
-    identityFile?: string | null;
-  }): RemoteHost | null {
-    const h = this.get(p.id);
-    if (!h) return null;
-    const changedConn = p.target !== undefined || p.port !== undefined;
-    this.db
-      .query(
-        "UPDATE hosts SET name = ?, target = ?, port = ?, identity_file = ?, root = ?, preflight_json = ? WHERE id = ?",
-      )
-      .run(
-        p.name ?? h.name,
-        p.target ?? h.target,
-        p.port ?? h.port,
-        p.identityFile !== undefined ? p.identityFile : h.identityFile,
-        changedConn ? null : h.root,
-        changedConn ? null : h.preflight ? JSON.stringify(h.preflight) : null,
-        p.id,
-      );
-    return this.get(p.id);
   }
 
   delete(id: string): boolean {
@@ -187,7 +184,7 @@ export class HostStore {
     const line = r.stdout.trim().split("\n").pop() ?? "";
     let pre: HostPreflight;
     try {
-      pre = JSON.parse(line);
+      pre = HostPreflight.parse(JSON.parse(line));
     } catch {
       throw new Error(`unexpected preflight output: ${line.slice(0, 200)}`);
     }
@@ -234,8 +231,8 @@ export class HostStore {
     agentId: string;
     hostId: string | null;
     isolation: Isolation;
-    vcpus?: number;
-    memMib?: number;
+    vcpus?: number | undefined;
+    memMib?: number | undefined;
   }): AgentPlacement {
     if (p.hostId) {
       const h = this.mustGet(p.hostId);
@@ -289,6 +286,16 @@ export class HostStore {
   }
 }
 
+/** Stored preflight JSON, or null when it no longer matches the current schema. */
+function parsePreflight(json: string): HostPreflight | null {
+  try {
+    const parsed = HostPreflight.safeParse(JSON.parse(json));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
 function sshError(r: { code: number; stderr: string; stdout: string }): string {
   const msg = (r.stderr || r.stdout).trim().split("\n").slice(-5).join("\n");
   return msg || `ssh exited with code ${r.code}`;
@@ -328,11 +335,12 @@ export function remoteLaunch(
     spawn(cmd: string[], env: Record<string, string>): ChildProcess {
       const forward = bridgePort ? ["-R", `${socket}:127.0.0.1:${bridgePort}`] : [];
       const [bin, args] = sshArgs(host, forward, `${BUN_PATH} exec bun ${shq(helper)} run`);
-      const child = spawn(bin, args, {
+      const child = spawnChild(bin, args, {
         cwd: homedir(),
         stdio: ["pipe", "pipe", "pipe"],
         env: spawnEnv(),
       });
+      child.on("error", () => {});
       child.stdin?.on("error", () => {});
       child.stdin?.write(
         `${JSON.stringify({

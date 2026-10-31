@@ -58,7 +58,7 @@ export function makeFirecrackerHostRoot(
       injectGuestFile(rootfs, file.source, file.destination, file.mode);
     return root;
   } catch (e) {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     throw e;
   }
 }
@@ -95,7 +95,7 @@ export async function removeFirecrackerHostRoot(root: string): Promise<void> {
   }
   const deadline = Date.now() + 3000;
   while (pids.some(pidAlive) && Date.now() < deadline) await Bun.sleep(50);
-  rmSync(root, { recursive: true, force: true });
+  rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 
 export function firecrackerRunDirs(root: string, agentId: string): string[] {

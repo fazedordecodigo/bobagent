@@ -1,5 +1,6 @@
 import type { Agent } from "@upbot/protocol";
 import type { DaemonClient } from "../lib/daemon";
+import { moveControlFocus } from "../lib/keyboard";
 import { ApprovalsView } from "./ApprovalsView";
 import { AppsView } from "./AppsView";
 import { EmailView } from "./EmailView";
@@ -28,17 +29,17 @@ export type ToolTab =
   | "hosts";
 
 export const TABS: { id: ToolTab; label: string; hint: string }[] = [
-  { id: "apps", label: "Apps", hint: "Conecte apps para todos os agentes" },
+  { id: "apps", label: "Apps", hint: "Conecte apps para todos os bots" },
   { id: "approvals", label: "Aprovações", hint: "Regras de aprovação e pedidos pendentes" },
   { id: "email", label: "E-mail", hint: "Contas de e-mail e rascunhos" },
   { id: "skills", label: "Habilidades", hint: "Biblioteca de habilidades compartilhadas" },
-  { id: "marketplace", label: "Marketplace", hint: "Instale habilidades e modelos de agente" },
-  { id: "browser", label: "Navegador", hint: "Abas controladas pelos agentes" },
+  { id: "marketplace", label: "Marketplace", hint: "Instale habilidades e modelos de bot" },
+  { id: "browser", label: "Navegador", hint: "Abas controladas pelos bots" },
   { id: "vault", label: "Cofre", hint: "Segredos criptografados e conectores" },
   { id: "gateways", label: "Gateways", hint: "Telegram, Slack e Discord" },
   { id: "mobile", label: "Celular", hint: "Emparelhe seu celular nesta rede" },
-  { id: "team", label: "Equipe", hint: "Compartilhe agentes por um relay" },
-  { id: "hosts", label: "Servidores", hint: "Execute agentes em VPS ou microVMs" },
+  { id: "team", label: "Equipe", hint: "Compartilhe bots por um relay" },
+  { id: "hosts", label: "Servidores", hint: "Execute bots em VPS ou microVMs" },
 ];
 
 export function ToolBody({
@@ -83,6 +84,8 @@ export function ToolsView({
       <div
         className="flex shrink-0 gap-1 overflow-x-auto border-b border-zinc-800 px-4 pt-3"
         role="tablist"
+        aria-label="Ferramentas"
+        onKeyDown={moveControlFocus}
       >
         {TABS.map((t) => (
           <button
@@ -90,6 +93,7 @@ export function ToolsView({
             type="button"
             role="tab"
             aria-selected={tab === t.id}
+            tabIndex={tab === t.id ? 0 : -1}
             title={t.hint}
             onClick={() => onTab(t.id)}
             className={`rounded-t-md px-3 py-2 text-sm whitespace-nowrap transition-colors ${

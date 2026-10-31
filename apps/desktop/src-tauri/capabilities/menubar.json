@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "menubar",
+  "description": "Menu-bar event listeners. Window, tray, positioning, shortcuts and daemon access are handled by native commands; no plugin guest permissions are needed.",
+  "windows": ["main", "menubar"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+}
