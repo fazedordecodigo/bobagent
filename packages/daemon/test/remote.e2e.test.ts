@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Agent, RemoteHost } from "@boto/protocol";
 import {
@@ -84,8 +84,14 @@ describe.skipIf(process.platform === "win32")("remote hosts + subagents e2e", ()
     await expect(
       c.request("placements.set", { agentId: boss.id, hostId: host.id, isolation: "none" }),
     ).rejects.toThrow(/not installed/);
+    mkdirSync(join(sshHome, ".upbot", "agents"), { recursive: true });
+    writeFileSync(join(sshHome, ".upbot", "agents", "preserved"), "existing workspace");
     host = await c.request("hosts.install", { id: host.id });
     expect(existsSync(join(sshHome, ".boto/bin/boto-host.ts"))).toBe(true);
+    expect(existsSync(join(sshHome, ".upbot"))).toBe(false);
+    expect(readFileSync(join(sshHome, ".boto", "agents", "preserved"), "utf8")).toBe(
+      "existing workspace",
+    );
     expect(host.root).toBe(join(sshHome, ".boto"));
     const pre = host.preflight;
     expect(pre?.firecrackerReady).toBe(
@@ -100,6 +106,17 @@ describe.skipIf(process.platform === "win32")("remote hosts + subagents e2e", ()
     expect(call.target).toBe("bob@vps.example.com");
     expect(call.opts).toContain("BatchMode=yes");
     expect(call.opts.join(" ")).toContain("-p 2222");
+  });
+
+  test("reinstall never merges a legacy root into an existing Boto root", async () => {
+    mkdirSync(join(sshHome, ".upbot"));
+    writeFileSync(join(sshHome, ".upbot", "preserved"), "other workspace");
+    host = await c.request("hosts.install", { id: host.id });
+    expect(readFileSync(join(sshHome, ".upbot", "preserved"), "utf8")).toBe("other workspace");
+    expect(readFileSync(join(sshHome, ".boto", "agents", "preserved"), "utf8")).toBe(
+      "existing workspace",
+    );
+    expect(existsSync(join(sshHome, ".boto", "preserved"))).toBe(false);
   });
 
   test("firecracker placement is refused when preflight is not ready", async () => {

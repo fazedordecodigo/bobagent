@@ -131,6 +131,20 @@ describe("browser candidates", () => {
 });
 
 describe("spawnEnv on Windows", () => {
+  test("strips both current and legacy internal product variables", () => {
+    const keys = ["BOTO_TEST_INTERNAL", "UPBOT_TEST_INTERNAL"];
+    const previous = keys.map((key) => process.env[key]);
+    try {
+      for (const key of keys) process.env[key] = "not-for-providers";
+      const env = spawnEnv({}, "win32", "C:\\tools");
+      for (const key of keys) expect(env[key]).toBeUndefined();
+    } finally {
+      keys.forEach((key, index) => {
+        if (previous[index] === undefined) delete process.env[key];
+        else process.env[key] = previous[index];
+      });
+    }
+  });
   const originalPath = process.env.PATH;
   const originalAltPath = process.env.Path;
   afterEach(() => {

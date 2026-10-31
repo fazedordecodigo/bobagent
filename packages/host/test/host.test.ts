@@ -68,6 +68,7 @@ describe("boto-host", () => {
         BOTO_GUEST_PROXY: "http://127.0.0.1:3128",
         BOTO_GUEST_BRIDGE_SOCKET: "/run/boto/bridge.sock",
         BOTO_SENTINEL_TEST: "leak",
+        UPBOT_SENTINEL_TEST: "legacy-leak",
         HOME: "/root",
         PATH: "/usr/bin",
       },
@@ -75,6 +76,7 @@ describe("boto-host", () => {
       "http://127.0.0.1:3128",
     );
     expect(env.BOTO_GUEST_PROXY).toBeUndefined();
+    expect(env.UPBOT_SENTINEL_TEST).toBeUndefined();
     expect(env.BOTO_GUEST_BRIDGE_SOCKET).toBeUndefined();
     expect(env.BOTO_SENTINEL_TEST).toBeUndefined();
     expect(env.BOTO_BRIDGE_TOKEN).toBe("mcp-token");
