@@ -89,8 +89,10 @@ function secretServiceKey(dataDir: string): Buffer | null {
     return null;
   }
 
+  let lookupUnavailable = false;
   const lookup = (service = "Boto") => {
     const result = runSecretTool(tool, ["lookup", "service", service, "account", "vault-key"]);
+    lookupUnavailable ||= !!(result.error || result.signal);
     return result.status === 0 ? keyFromHex(result.stdout.trim()) : null;
   };
   const existing = lookup();
@@ -98,7 +100,7 @@ function secretServiceKey(dataDir: string): Buffer | null {
     writeFileSync(marker, "secret-service\n", { mode: 0o600 });
     return existing;
   }
-  const legacy = lookup("UpBot");
+  const legacy = lookupUnavailable ? null : lookup("UpBot");
   if (legacy) {
     writeFileSync(marker, "secret-service\n", { mode: 0o600 });
     return legacy;
@@ -108,6 +110,7 @@ function secretServiceKey(dataDir: string): Buffer | null {
       "The Boto vault key could not be read from Secret Service. Unlock or restore the keyring before starting Boto.",
     );
   }
+  if (lookupUnavailable) return null;
 
   const hex = randomBytes(32).toString("hex");
   const stored = runSecretTool(

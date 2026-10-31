@@ -115,7 +115,7 @@ describe("Linux Secret Service vault key", () => {
     },
   );
 
-  test.skipIf(process.platform !== "linux")(
+  test.skipIf(process.platform === "win32")(
     "does not replace a marked key when lookup times out",
     () => {
       const directory = testRoot();
