@@ -319,6 +319,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "boto-desktop"
+version = "0.3.0"
+dependencies = [
+ "block2",
+ "log",
+ "objc2",
+ "objc2-foundation",
+ "objc2-user-notifications",
+ "rand",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-log",
+ "tauri-plugin-opener",
+ "tauri-plugin-positioner",
+ "tauri-plugin-shell",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-updater",
+ "tokio",
+ "windows",
+ "windows-core",
+ "windows-registry",
+]
+
+[[package]]
 name = "brotli"
 version = "9.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4633,33 +4660,6 @@ name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
-
-[[package]]
-name = "boto-desktop"
-version = "0.3.0"
-dependencies = [
- "block2",
- "log",
- "objc2",
- "objc2-foundation",
- "objc2-user-notifications",
- "rand",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-log",
- "tauri-plugin-opener",
- "tauri-plugin-positioner",
- "tauri-plugin-shell",
- "tauri-plugin-single-instance",
- "tauri-plugin-updater",
- "tokio",
- "windows",
- "windows-core",
- "windows-registry",
-]
 
 [[package]]
 name = "url"

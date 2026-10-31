@@ -1,6 +1,14 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDatabase } from "../src/db";
@@ -20,7 +28,8 @@ function database(directory = temp()) {
 }
 afterEach(() => {
   for (const db of databases.splice(0)) db.close();
-  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  for (const directory of directories.splice(0))
+    rmSync(directory, { recursive: true, force: true });
 });
 
 describe("legacy home migration", () => {
@@ -73,9 +82,13 @@ describe("legacy home migration", () => {
     mkdirSync(join(home, "Boto"));
     const db = database();
     const workspace = join(home, "UpBot", "agents", "a1");
-    db.query("INSERT INTO agents (id,name,instructions,provider,workspace_path,created_at,updated_at) VALUES ('a1','A','','devin',?,0,0)").run(workspace);
+    db.query(
+      "INSERT INTO agents (id,name,instructions,provider,workspace_path,created_at,updated_at) VALUES ('a1','A','','devin',?,0,0)",
+    ).run(workspace);
     migrateLegacyHome(db, join(home, "Boto", "agents"), () => {}, home);
-    expect(db.query("SELECT workspace_path FROM agents").get()).toEqual({workspace_path: join(home,"Boto","agents","a1")});
+    expect(db.query("SELECT workspace_path FROM agents").get()).toEqual({
+      workspace_path: join(home, "Boto", "agents", "a1"),
+    });
   });
 });
 
@@ -85,30 +98,43 @@ describe("legacy database migration", () => {
     const initial = openDatabase(directory);
     initial.query("INSERT INTO settings (key,value) VALUES ('migration.test','preserved')").run();
     initial.close();
-    renameSync(join(directory,"boto.db"), join(directory,"upbot.db"));
-    expect(database(directory).query("SELECT value FROM settings WHERE key='migration.test'").get()).toEqual({value:"preserved"});
-    expect(existsSync(join(directory,"upbot.db"))).toBe(false);
-    expect(database(directory).query("SELECT value FROM settings WHERE key='migration.test'").get()).toEqual({value:"preserved"});
+    renameSync(join(directory, "boto.db"), join(directory, "upbot.db"));
+    expect(
+      database(directory).query("SELECT value FROM settings WHERE key='migration.test'").get(),
+    ).toEqual({ value: "preserved" });
+    expect(existsSync(join(directory, "upbot.db"))).toBe(false);
+    expect(
+      database(directory).query("SELECT value FROM settings WHERE key='migration.test'").get(),
+    ).toEqual({ value: "preserved" });
   });
 
   test("checkpoints committed WAL records before moving the database", () => {
     const directory = temp();
-    const file = join(directory,"upbot.db");
-    const result = Bun.spawnSync([process.execPath,"-e",`const {Database}=require('bun:sqlite'); const db=new Database(${JSON.stringify(file)}); db.exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE preserved(value TEXT); INSERT INTO preserved VALUES ('from-wal')"); process.kill(process.pid,'SIGKILL');`]);
+    const file = join(directory, "upbot.db");
+    const result = Bun.spawnSync([
+      process.execPath,
+      "-e",
+      `const {Database}=require('bun:sqlite'); const db=new Database(${JSON.stringify(file)}); db.exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE preserved(value TEXT); INSERT INTO preserved VALUES ('from-wal')"); process.kill(process.pid,'SIGKILL');`,
+    ]);
     expect(result.exitCode).not.toBe(0);
     expect(existsSync(`${file}-wal`)).toBe(true);
-    expect(database(directory).query("SELECT * FROM preserved").get()).toEqual({value:"from-wal"});
+    expect(database(directory).query("SELECT * FROM preserved").get()).toEqual({
+      value: "from-wal",
+    });
   });
 
   test("does not replace an existing Boto database", () => {
     const directory = temp();
     database(directory);
-    const legacy = new Database(join(directory,"upbot.db"));
+    const legacy = new Database(join(directory, "upbot.db"));
     legacy.exec("CREATE TABLE preserved(value TEXT); INSERT INTO preserved VALUES ('old')");
     legacy.close();
     database(directory);
-    const old = new Database(join(directory,"upbot.db"));
-    try { expect(old.query("SELECT * FROM preserved").get()).toEqual({value:"old"}); }
-    finally { old.close(); }
+    const old = new Database(join(directory, "upbot.db"));
+    try {
+      expect(old.query("SELECT * FROM preserved").get()).toEqual({ value: "old" });
+    } finally {
+      old.close();
+    }
   });
 });

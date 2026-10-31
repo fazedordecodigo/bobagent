@@ -75,7 +75,11 @@ describe("Linux Secret Service vault key", () => {
     mkdirSync(binDir);
     fakeSecretTool(binDir, join(directory, "unused"));
     const key = "a".repeat(64);
-    writeFileSync(join(binDir, "secret-tool"), `#!/bin/sh\nif [ "$1" = lookup ] && [ "$3" = UpBot ]; then printf '%s' '${key}'; exit 0; fi\nexit 1\n`, { mode: 0o700 });
+    writeFileSync(
+      join(binDir, "secret-tool"),
+      `#!/bin/sh\nif [ "$1" = lookup ] && [ "$3" = UpBot ]; then printf '%s' '${key}'; exit 0; fi\nexit 1\n`,
+      { mode: 0o700 },
+    );
     writeFileSync(join(dataDir, "vault.key.location"), "secret-service\n");
     expect(loadVaultKey(dataDir, "linux").toString("hex")).toBe(key);
     expect(existsSync(join(dataDir, "vault.key"))).toBe(false);
@@ -180,12 +184,28 @@ describe("Linux Secret Service vault key", () => {
 test.skipIf(process.platform !== "darwin")("copies the UpBot Keychain key into Boto", () => {
   const directory = testRoot();
   const key = "b".repeat(64);
-  const log = join(directory,"services");
-  writeFileSync(join(directory,"security"), `#!/bin/sh\nif [ "$1" = find-generic-password ] && [ "$3" = UpBot ]; then printf '%s' '${key}'; exit 0; fi\nif [ "$1" = add-generic-password ] && [ "$3" = Boto ]; then printf '%s' "$3" > '${log}'; exit 0; fi\nexit 44\n`, {mode:0o700});
-  setEnv("PATH",directory);
-  setEnv("BOTO_VAULT_KEY",undefined);
-  expect(loadVaultKey(directory,"darwin").toString("hex")).toBe(key);
-  expect(readFileSync(log,"utf8")).toBe("Boto");
+  setEnv("BOTO_VAULT_KEY", undefined);
+  const commands: string[][] = [];
+  const spawn = spyOn(Bun, "spawnSync").mockImplementation((command) => {
+    const args = command as string[];
+    commands.push(args);
+    const found = args[1] === "find-generic-password" && args[3] === "UpBot";
+    const added = args[1] === "add-generic-password" && args[3] === "Boto";
+    return {
+      stdout: Buffer.from(found ? key : ""),
+      exitCode: found || added ? 0 : 44,
+    } as ReturnType<typeof Bun.spawnSync>;
+  });
+  try {
+    expect(loadVaultKey(directory, "darwin").toString("hex")).toBe(key);
+    expect(commands.map((args) => [args[1], args[3]])).toEqual([
+      ["find-generic-password", "Boto"],
+      ["find-generic-password", "UpBot"],
+      ["add-generic-password", "Boto"],
+    ]);
+  } finally {
+    spawn.mockRestore();
+  }
 });
 
 test.skipIf(process.platform !== "win32")(

@@ -27,6 +27,16 @@ research and browse the web, read and edit files, draft emails and documents, an
 
 /** Creates the default Boto bot once, on a fresh install. */
 export function seedDefaultBot(db: Database, store: AgentStore): void {
+  if (hasSetting(db, "default_bot_seeded")) {
+    db.query(
+      "UPDATE agents SET name = ?, instructions = ? WHERE name = ? AND instructions = ?",
+    ).run(
+      DEFAULT_BOT_NAME,
+      DEFAULT_BOT_INSTRUCTIONS,
+      "UpBot",
+      DEFAULT_BOT_INSTRUCTIONS.replace("You are Boto", "You are UpBot"),
+    );
+  }
   if (process.env.BOTO_DEFAULT_BOT === "off") return;
   if (hasSetting(db, "default_bot_seeded")) return;
   const any = db.query("SELECT 1 FROM agents LIMIT 1").get();

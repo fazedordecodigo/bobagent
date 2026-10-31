@@ -98,9 +98,7 @@ const safeId = (id: string) => {
 
 export function firecrackerBin(): string | null {
   const local = join(ROOT, "firecracker", "firecracker");
-  return (
-    process.env.BOTO_FIRECRACKER_BIN || (existsSync(local) ? local : Bun.which("firecracker"))
-  );
+  return process.env.BOTO_FIRECRACKER_BIN || (existsSync(local) ? local : Bun.which("firecracker"));
 }
 
 export function buildGuestProviderEnv(

@@ -8,6 +8,7 @@ import { mod } from "../lib/platform";
 import { useThemePref } from "../lib/theme";
 import { fmtTime } from "../lib/ui";
 import {
+  BotoSimboloCurrentcolorIcon,
   ClockIcon,
   HomeIcon,
   MoonIcon,
@@ -15,7 +16,6 @@ import {
   PlusIcon,
   SearchIcon,
   SunIcon,
-  BotoSimboloCurrentcolorIcon,
 } from "./ds/icons";
 import { Icon } from "./icons";
 

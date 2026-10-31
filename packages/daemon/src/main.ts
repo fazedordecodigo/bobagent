@@ -22,7 +22,7 @@ import { runMcpBridge } from "./mcp-bridge";
 import { MemoryStore } from "./memories";
 import { MobileServer } from "./mobile";
 import { PageLibrary } from "./pages";
-import { seedDefaultBot, botoContext } from "./persona";
+import { botoContext, seedDefaultBot } from "./persona";
 import { readyLine } from "./ready";
 import { VmCredentials } from "./remote/credentials";
 import { HostStore } from "./remote/hosts";

@@ -19,6 +19,7 @@ import { useThemePref } from "../lib/theme";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Button, IconButton, KeyboardShortcut, StatusDot } from "./ds/controls";
 import {
+  BotoSimboloCurrentcolorIcon,
   CardIcon,
   FileIcon,
   LockIcon,
@@ -26,7 +27,6 @@ import {
   PlaneIcon,
   PlugIcon,
   SideIcon,
-  BotoSimboloCurrentcolorIcon,
   UpIcon,
 } from "./ds/icons";
 import { Menu } from "./ds/Menu";

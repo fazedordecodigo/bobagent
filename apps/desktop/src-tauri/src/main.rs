@@ -233,18 +233,25 @@ mod tests {
     #[test]
     fn migrates_legacy_data_without_overwriting_boto() {
         for identifier in ["com.upbot.desktop", "com.bobagent.desktop"] {
-            let parent = std::env::temp_dir().join(format!("boto-migration-{}", rand::random::<u64>()));
+            let parent =
+                std::env::temp_dir().join(format!("boto-migration-{}", rand::random::<u64>()));
             let legacy = parent.join(identifier);
             let current = parent.join("com.boto.desktop");
             std::fs::create_dir_all(&legacy).unwrap();
             std::fs::write(legacy.join("upbot.db"), b"preserved").unwrap();
             migrate_data_dir(&current).unwrap();
             assert!(!legacy.exists());
-            assert_eq!(std::fs::read(current.join("upbot.db")).unwrap(), b"preserved");
+            assert_eq!(
+                std::fs::read(current.join("upbot.db")).unwrap(),
+                b"preserved"
+            );
             std::fs::create_dir(&legacy).unwrap();
             std::fs::write(legacy.join("upbot.db"), b"other").unwrap();
             migrate_data_dir(&current).unwrap();
-            assert_eq!(std::fs::read(current.join("upbot.db")).unwrap(), b"preserved");
+            assert_eq!(
+                std::fs::read(current.join("upbot.db")).unwrap(),
+                b"preserved"
+            );
             assert_eq!(std::fs::read(legacy.join("upbot.db")).unwrap(), b"other");
             std::fs::remove_dir_all(parent).unwrap();
         }
@@ -263,10 +270,7 @@ mod tests {
             "{}",
             r#"{"port":"1"}"#,
         ] {
-            assert_eq!(
-                parse_ready_port(json),
-                Err("botod READY has no valid port")
-            );
+            assert_eq!(parse_ready_port(json), Err("botod READY has no valid port"));
         }
     }
 

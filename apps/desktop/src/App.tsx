@@ -1,5 +1,5 @@
-import { listen } from "@tauri-apps/api/event";
 import type { Agent, ApprovalRule } from "@boto/protocol";
+import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AgentConfigScreen } from "./components/AgentConfigScreen";
 import agentConfigStyles from "./components/AgentConfigScreen.module.css";

@@ -83,8 +83,8 @@ export function AppsView({ client, agents }: { client: DaemonClient; agents: Age
     <div className={s.page}>
       <h2 className={s.title}>Apps conectados</h2>
       <p className="text-xs text-zinc-500">
-        Conecte um app para seus bots usarem suas ferramentas. O Boto executa o servidor MCP de
-        cada app. Os tokens ficam criptografados no cofre e não são mostrados aos bots.
+        Conecte um app para seus bots usarem suas ferramentas. O Boto executa o servidor MCP de cada
+        app. Os tokens ficam criptografados no cofre e não são mostrados aos bots.
       </p>
       <AppApprovalCards client={client} agents={agents} primary={!picked} />
       <h3>Seus apps</h3>

@@ -31,6 +31,7 @@ import s from "./AgentConfigScreen.module.css";
 import { PermissionNotice } from "./AgentSettings";
 import { Button, Field, SegmentedControl, Switch } from "./ds/controls";
 import {
+  BotoSimboloCurrentcolorIcon,
   CalIcon,
   ChartIcon,
   ChevIcon,
@@ -45,7 +46,6 @@ import {
   PlusIcon,
   ReceiptIcon,
   SheetIcon,
-  BotoSimboloCurrentcolorIcon,
 } from "./ds/icons";
 
 const PROVIDERS: ProviderId[] = [

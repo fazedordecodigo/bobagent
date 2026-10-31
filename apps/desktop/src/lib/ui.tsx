@@ -1,13 +1,13 @@
 import type { Agent, AgentStatusInfo, ProviderId, Turn } from "@boto/protocol";
 import { StatusPill } from "../components/ds/controls";
 import {
+  BotoSimboloCurrentcolorIcon,
   CalIcon,
   ChartIcon,
   MailIcon,
   PlaneIcon,
   ReceiptIcon,
   SheetIcon,
-  BotoSimboloCurrentcolorIcon,
 } from "../components/ds/icons";
 
 export const PROVIDER_NAMES: Record<ProviderId, string> = {

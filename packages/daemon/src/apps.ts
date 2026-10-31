@@ -1,12 +1,5 @@
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import {
-  getDefaultEnvironment,
-  StdioClientTransport,
-} from "@modelcontextprotocol/sdk/client/stdio.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type {
   AppCatalogEntry,
   AppPermissionKind,
@@ -14,6 +7,13 @@ import type {
   ConnectedApp,
 } from "@boto/protocol";
 import { AppPermissions, defaultAppPermissions } from "@boto/protocol";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import {
+  getDefaultEnvironment,
+  StdioClientTransport,
+} from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { envPositiveNumber } from "./env/vars";
 import { RpcError } from "./runtime/agent-runtime";
 import { APP_PREFIX, type Vault } from "./vault";
